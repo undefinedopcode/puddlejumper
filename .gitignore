@@ -1,0 +1,16 @@
+# Build
+build/
+*.o
+moc_*
+*.moc
+Makefile
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json
+*.qmlc
+*.jsc
+# Llamington / agent
+.llamington/
+# Qt
+*.pro.user
