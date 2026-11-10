@@ -63,8 +63,17 @@ int main(int argc, char *argv[])
         }
     }
 
+    // Every monospace family, for the font picker in Settings.
+    QStringList monoFamilies;
+    for (const QString &family : families) {
+        if (QFontDatabase::isFixedPitch(family))
+            monoFamilies.append(family);
+    }
+    monoFamilies.sort(Qt::CaseInsensitive);
+
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("defaultMonoFont"), mono);
+    engine.rootContext()->setContextProperty(QStringLiteral("monoFontFamilies"), monoFamilies);
 
     // Optional shell override, useful for testing:
     //   SUPERTERM_SHELL=/bin/fish SUPERTERM_SHELL_ARGS="-l" superterm

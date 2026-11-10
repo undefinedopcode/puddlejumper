@@ -13,6 +13,8 @@ Rectangle {
     id: root
 
     property string colorScheme: "Solarized"
+    property string fontFamily: ""
+    property var    fontFamilies: []
     property real   fontSize: Theme.monoFontSize
     property real   opacityValue: 1.0
     property bool   blinkCursor: true
@@ -21,6 +23,7 @@ Rectangle {
 
     signal closeRequested()
     signal colorSchemeEdited(string value)
+    signal fontFamilyEdited(string value)
     signal fontSizeEdited(real value)
     signal opacityEdited(real value)
     signal blinkCursorEdited(bool value)
@@ -77,6 +80,21 @@ Rectangle {
             currentIndex: Math.max(0, root.schemes.indexOf(root.colorScheme))
             font.pixelSize: Theme.uiFontSize
             onActivated: root.colorSchemeEdited(currentText)
+        }
+
+        Label {
+            text: qsTr("FONT")
+            color: Theme.textDim
+            font.pixelSize: 10
+            font.letterSpacing: 0.8
+        }
+        ComboBox {
+            id: fontBox
+            Layout.fillWidth: true
+            model: root.fontFamilies
+            currentIndex: Math.max(0, root.fontFamilies.indexOf(root.fontFamily))
+            font.pixelSize: Theme.uiFontSize
+            onActivated: root.fontFamilyEdited(currentText)
         }
 
         Label {

@@ -18,6 +18,7 @@ ApplicationWindow {
     flags: Qt.Window
 
     property alias colorScheme: themeState.colorScheme
+    property alias monoFont: themeState.monoFont
     property alias monoFontSize: themeState.monoFontSize
     property alias termOpacity: themeState.termOpacity
     property alias blinking: themeState.blinking
@@ -31,6 +32,7 @@ ApplicationWindow {
     QtObject {
         id: themeState
         property string colorScheme: "Solarized"
+        property string monoFont: defaultMonoFont
         property real   monoFontSize: Theme.monoFontSize
         property real   termOpacity: 1.0
         property bool   blinking: true
@@ -113,6 +115,7 @@ ApplicationWindow {
         t.push({ title: qsTr("Terminal"), cwd: "" })
         tabModel = t
         tabs.currentIndex = t.length - 1
+        Qt.callLater(win.focusCurrentTab)
         return tabs.currentIndex
     }
 
@@ -132,6 +135,15 @@ ApplicationWindow {
         return paneRepeater.itemAt(tabs.currentIndex)
     }
 
+    // Keystrokes go to whichever item holds active focus. Switching tabs
+    // removes the previous item from the focus chain, so focus must be handed
+    // to the newly-current terminal explicitly, after the layout has settled.
+    function focusCurrentTab() {
+        const p = activePane()
+        if (p && p.focusTerminal)
+            p.focusTerminal()
+    }
+
     Component.onCompleted: {
         newTab()
         Qt.callLater(function() {
@@ -139,6 +151,7 @@ ApplicationWindow {
             if (p && p.focusTerminal) p.focusTerminal()
         })
     }
+
 
     ColumnLayout {
         anchors.fill: parent
@@ -172,6 +185,7 @@ ApplicationWindow {
                     clip: true
                     model: win.tabModel
                     currentIndex: 0
+                    onCurrentIndexChanged: Qt.callLater(win.focusCurrentTab)
 
                     delegate: TabButton {
                         required property int index
@@ -237,7 +251,7 @@ ApplicationWindow {
 
                     TerminalPane {
                         id: tabPane
-                        monoFont: defaultMonoFont
+                        monoFont: win.monoFont
                         colorScheme: win.colorScheme
                         fontSize: win.monoFontSize
                         blinking: win.blinking
@@ -339,6 +353,8 @@ ApplicationWindow {
         opacity: win.settingsOpen ? 1 : 0
 
         colorScheme: win.colorScheme
+        fontFamily: win.monoFont
+        fontFamilies: monoFontFamilies
         fontSize: win.monoFontSize
         opacityValue: win.termOpacity
         blinkCursor: win.blinking
@@ -346,6 +362,7 @@ ApplicationWindow {
         schemes: Theme.colorSchemes
 
         onColorSchemeEdited: (value) => win.colorScheme = value
+        onFontFamilyEdited: (value) => win.monoFont = value
         onFontSizeEdited: (value) => win.monoFontSize = value
         onOpacityEdited: (value) => win.termOpacity = value
         onBlinkCursorEdited: (value) => win.blinking = value

@@ -32,6 +32,7 @@ Item {
     function pasteClipboard() { term.pasteClipboard() }
     function sendText(t) { session.sendText(t) }
     function focusTerminal() { term.forceActiveFocus() }
+
     function searchFor(text) {
         if (text.length > 0)
             session.search(text)

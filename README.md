@@ -2,7 +2,8 @@
 
 A modern terminal built on **Qt Quick** and **[QMLTermWidget](https://github.com/Swordfish90/qmltermwidget)**.
 
-Tabs, live colour-scheme switching, font zoom, opacity, an inline search bar,
+Tabs, live colour-scheme switching, a monospace font picker, font zoom,
+opacity, an inline search bar,
 and a keyboard-driven UI — with the terminal emulation itself (VT102/xterm,
 Unicode, 256-colour, key bindings) handled by QMLTermWidget's Konsole-derived
 engine.
@@ -136,6 +137,12 @@ A few things that cost time and are worth knowing if you extend this:
 - **Start the shell after the display has a size.** Launching from
   `Component.onCompleted` races layout; the pane can end up showing a bare
   background. `TerminalPane.qml` waits for non-zero width/height.
+- **Re-focus the terminal on every tab change.** Keystrokes go to the item
+  holding active focus. Changing the current tab takes the old item out of the
+  focus chain and leaves focus on the root item, so typing stops working in
+  *every* tab. `Main.qml` calls `focusCurrentTab()` whenever the tab index
+  changes. The same bug silences the cursor blink, because QMLTermWidget only
+  starts its blink timer when the display has focus.
 - **Reassign `var` array models instead of mutating them.** `tabModel.push()`
   emits no change signal, so the tab strip and pane `Repeater` never update.
 - **`history` is scrollback, not the visible screen** — it stays empty until
