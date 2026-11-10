@@ -1,0 +1,149 @@
+# SuperTerm
+
+A modern terminal built on **Qt Quick** and **[QMLTermWidget](https://github.com/Swordfish90/qmltermwidget)**.
+
+Tabs, live colour-scheme switching, font zoom, opacity, an inline search bar,
+and a keyboard-driven UI — with the terminal emulation itself (VT102/xterm,
+Unicode, 256-colour, key bindings) handled by QMLTermWidget's Konsole-derived
+engine.
+
+## Screenshots
+
+The window chrome, tab strip, status bar, and a live zsh prompt:
+
+```
+┌──────────────────────────────────────────────────────────┐
+│  Terminal  ✕                                    ＋   ⚙   │
+├──────────────────────────────────────────────────────────┤
+│  ~/projects/superterm  on  main ?5        at 02:19:38 PM │
+│  ❯                                                       │
+│                                                          │
+├──────────────────────────────────────────────────────────┤
+│ /home/april/projects/superterm        Solarized    13pt  │
+└──────────────────────────────────────────────────────────┘
+```
+
+## Requirements
+
+| Component | Version |
+| --- | --- |
+| Qt | 6.5+ (developed against 6.12) |
+| CMake | 3.21+ |
+| Compiler | C++17 |
+| QMLTermWidget | 2.0 (`import QMLTermWidget 2.0`) |
+
+Install QMLTermWidget:
+
+```sh
+# Arch
+pacman -S qmltermwidget
+
+# Debian / Ubuntu
+apt install qmltermwidget-qt6-dev
+
+# Fedora
+dnf install qmltermwidget-qt6
+```
+
+If your distro doesn't package it, build it from
+[Swordfish90/qmltermwidget](https://github.com/Swordfish90/qmltermwidget)
+(`qmake6 && make install`) and point CMake at the module directory:
+
+```sh
+cmake -S . -B build -DQMLTERMWIDGET_IMPORT_DIR=/usr/lib/qt6/qml
+```
+
+## Build and run
+
+```sh
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+./build/superterm
+```
+
+Environment overrides, handy for testing:
+
+```sh
+SUPERTERM_SHELL=/bin/fish SUPERTERM_SHELL_ARGS="-l" ./build/superterm
+```
+
+## Keyboard shortcuts
+
+| Shortcut | Action |
+| --- | --- |
+| `Ctrl+Shift+T` | New tab |
+| `Ctrl+Shift+W` | Close tab |
+| `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
+| `Ctrl+Shift+F` | Find in terminal |
+| `Ctrl+=` / `Ctrl+-` | Zoom in / out |
+| `Ctrl+0` | Reset zoom |
+| `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste |
+| `Ctrl` + mouse wheel | Zoom |
+| `Escape` | Close search or settings |
+
+## Project layout
+
+```
+CMakeLists.txt          build definition
+src/main.cpp            QGuiApplication + QQmlApplicationEngine bootstrap
+qml/Main.qml            window chrome, tab strip, status bar, shortcuts
+qml/TerminalPane.qml    wraps one QMLTermWidget + QMLTermSession
+qml/SearchBar.qml       inline find overlay
+qml/SettingsPanel.qml   colour scheme / font / opacity / cursor settings
+qml/Theme.qml           singleton: palette, metrics, colour-scheme list
+```
+
+## Platform support
+
+**Linux, macOS and the BSDs work.** Windows does not, yet — see below.
+
+| Platform | Status |
+| --- | --- |
+| Linux / X11 / Wayland | ✅ tested |
+| macOS | ✅ expected (QMLTermWidget supports it) |
+| FreeBSD et al. | ✅ expected |
+| Windows | ❌ no pty backend |
+
+### Why not Windows
+
+Both QMLTermWidget and its upstream [lxqt/qtermwidget](https://github.com/lxqt/qtermwidget)
+are **POSIX-pty only**. Their terminal session is built on a vendored KDE KPty,
+which calls `openpty()`, `posix_openpt()` and `termios` directly. There is no
+ConPTY or winpty code path in either project, so the emulator cannot attach to
+a Windows pseudo-console.
+
+Supporting Windows means supplying a different session backend behind the same
+QML surface: a ConPTY-backed session object exposing the `QMLTermSession` API
+(`shellProgram`, `initialWorkingDirectory`, `startShellProgram()`,
+`sendText()`, the `finished`/`titleChanged` signals, and `history`/`currentDir`).
+`TerminalPane.qml` is the only file that would need to change. That is real
+work, and it is not implemented here.
+
+## Implementation notes
+
+A few things that cost time and are worth knowing if you extend this:
+
+- **The QML type names are not the C++ names.** The display is `QMLTermWidget`
+  (C++ class `Konsole::TerminalDisplay`) and the session is `QMLTermSession`
+  (C++ class `KSession`). `TerminalDisplay` / `TerminalSession` do not exist as
+  QML types.
+- **Do not link `qtermwidget6`** (the Qt Widgets library) alongside the QML
+  plugin. The plugin vendors its own copy of the Konsole/KPty sources, so
+  linking the Widgets library pulls in a second copy of the same symbols. The
+  symptom is ugly: the pane paints its background and cursor but **no text**,
+  and the app aborts on exit with `corrupted double-linked list`. Only put the
+  plugin's module directory on the import path.
+- **Start the shell after the display has a size.** Launching from
+  `Component.onCompleted` races layout; the pane can end up showing a bare
+  background. `TerminalPane.qml` waits for non-zero width/height.
+- **Reassign `var` array models instead of mutating them.** `tabModel.push()`
+  emits no change signal, so the tab strip and pane `Repeater` never update.
+- **`history` is scrollback, not the visible screen** — it stays empty until
+  lines scroll off the top.
+- `currentDir` and `hasActiveProcess` have no `NOTIFY` signal, so the status bar
+  polls them once a second.
+
+## Licence
+
+GPL-2.0-or-later, to match QMLTermWidget (which is GPL-2.0-or-later, inherited
+from QTermWidget).

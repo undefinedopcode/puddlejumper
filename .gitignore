@@ -14,3 +14,7 @@ compile_commands.json
 .llamington/
 # Qt
 *.pro.user
+
+# Qt debug builds
+build-dbg/
+build-rel/
