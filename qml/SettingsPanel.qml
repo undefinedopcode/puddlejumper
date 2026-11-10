@@ -210,15 +210,25 @@ Dialog {
                             Layout.fillWidth: true
                             from: 8
                             to: 32
-                            stepSize: 1
+                            // Half-point steps: QFont accepts fractional point
+                            // sizes and the cell grid genuinely differs between
+                            // e.g. 13, 13.5 and 14pt, which matters when hunting
+                            // for a size where the glyphs sit right.
+                            stepSize: 0.5
+                            snapMode: Slider.SnapAlways
                             value: dialog.fontSize
                             onMoved: dialog.fontSizeEdited(value)
                         }
                         Label {
-                            text: Math.round(sizeSlider.value) + "pt"
+                            // Show one decimal only when it is not a whole point.
+                            text: {
+                                const v = Math.round(sizeSlider.value * 2) / 2
+                                return (v % 1 === 0 ? v.toFixed(0) : v.toFixed(1))
+                                       + "pt"
+                            }
                             color: Theme.text
                             font.pixelSize: Theme.uiFontSize
-                            Layout.preferredWidth: 40
+                            Layout.preferredWidth: 46
                             horizontalAlignment: Text.AlignRight
                         }
                     }

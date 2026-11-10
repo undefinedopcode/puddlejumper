@@ -61,7 +61,8 @@ ApplicationWindow {
                             || monoFontFamilies.indexOf(font) !== -1))
             win.monoFont = font
 
-        win.monoFontSize = settingsStore.doubleValue(kFontSize, win.monoFontSize)
+        win.monoFontSize = quantizeFontSize(
+            settingsStore.doubleValue(kFontSize, win.monoFontSize))
         win.termOpacity = settingsStore.doubleValue(kOpacity, win.termOpacity)
         win.blinking = settingsStore.boolValue(kBlink, win.blinking)
         win.boldIntense = settingsStore.boolValue(kBold, win.boldIntense)
@@ -71,6 +72,19 @@ ApplicationWindow {
         win.scrollback = settingsStore.intValue(kScrollback, win.scrollback)
 
         restoreGeometry()
+    }
+
+    // Font size is offered in half-point steps. Snap programmatically-set
+    // values too: Slider.SnapAlways only constrains user interaction, so a
+    // value restored from config (or set via a shortcut) could otherwise be
+    // 13.7 while the UI displays 13.5.
+    function quantizeFontSize(pt) {
+        return Math.round(pt * 2) / 2
+    }
+
+    function formatPt(pt) {
+        const v = quantizeFontSize(pt)
+        return (v % 1 === 0 ? v.toFixed(0) : v.toFixed(1)) + "pt"
     }
 
     function saveSetting(key, value) {
@@ -434,7 +448,7 @@ ApplicationWindow {
                     font.pixelSize: 11
                 }
                 Label {
-                    text: Math.round(win.monoFontSize) + "pt"
+                    text: win.formatPt(win.monoFontSize)
                     color: Theme.textDim
                     font.pixelSize: 11
                 }
@@ -445,15 +459,17 @@ ApplicationWindow {
                 acceptedButtons: Qt.NoButton
                 onWheel: (wheel) => {
                     if (wheel.modifiers & Qt.ControlModifier) {
-                        win.monoFontSize = Math.max(8, Math.min(28,
-                            win.monoFontSize + (wheel.angleDelta.y > 0 ? 1 : -1)))
+                        // Ctrl+wheel zooms in half-point steps, matching the
+                        // slider and the keyboard shortcuts.
+                        win.monoFontSize = Math.max(8, Math.min(32,
+                            win.monoFontSize + (wheel.angleDelta.y > 0 ? 0.5 : -0.5)))
                     }
                 }
             }
         }
     }
 
-    // ---- Settings drawer ------------------------------------------------
+    // ---- Settings ------------------------------------------------------
     SettingsPanel {
         id: settings
 
@@ -479,8 +495,9 @@ ApplicationWindow {
             win.saveSetting(win.kFont, value)
         }
         onFontSizeEdited: (value) => {
-            win.monoFontSize = value
-            win.saveSetting(win.kFontSize, value)
+            const pt = win.quantizeFontSize(value)
+            win.monoFontSize = pt
+            win.saveSetting(win.kFontSize, pt)
         }
         onOpacityEdited: (value) => {
             win.termOpacity = value
@@ -538,11 +555,11 @@ ApplicationWindow {
     }
     Shortcut {
         sequence: "Ctrl+="
-        onActivated: win.monoFontSize = Math.min(28, win.monoFontSize + 1)
+        onActivated: win.monoFontSize = Math.min(32, win.monoFontSize + 0.5)
     }
     Shortcut {
         sequence: "Ctrl+Minus"
-        onActivated: win.monoFontSize = Math.max(8, win.monoFontSize - 1)
+        onActivated: win.monoFontSize = Math.max(8, win.monoFontSize - 0.5)
     }
     Shortcut {
         sequence: "Ctrl+0"

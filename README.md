@@ -87,7 +87,7 @@ sections:
 | Section | Options |
 | --- | --- |
 | Appearance | colour scheme, opacity |
-| Text | font family, size, line spacing, bold/italic/antialias |
+| Text | font family, size (8–32pt in 0.5pt steps), line spacing, bold/italic/antialias |
 | Cursor | blinking |
 | Scrolling | scrollback depth, line-drawing (read-only) |
 
@@ -153,7 +153,7 @@ spacing** or picking a different point size is the lever available.
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
 | `Ctrl+Shift+F` | Find in terminal |
 | `Ctrl+,` | Open settings |
-| `Ctrl+=` / `Ctrl+-` | Zoom in / out |
+| `Ctrl+=` / `Ctrl+-` | Zoom in / out (0.5pt steps) |
 | `Ctrl+0` | Reset zoom |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste |
 | `Ctrl` + mouse wheel | Zoom |
