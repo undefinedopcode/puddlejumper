@@ -27,6 +27,8 @@ ApplicationWindow {
     property alias antialiasText: themeState.antialiasText
     property alias lineSpacing: themeState.lineSpacing
     property alias scrollback: themeState.scrollback
+    // "standard" = top tab strip, "thumbnails" = left preview sidebar.
+    property alias tabLayout: themeState.tabLayout
 
     property string activeSessionTitle: ""
     property string activeDirectory: ""
@@ -45,6 +47,7 @@ ApplicationWindow {
     readonly property string kAntialias:   "appearance/antialias"
     readonly property string kLineSpacing: "appearance/lineSpacing"
     readonly property string kScrollback:  "scrolling/scrollback"
+    readonly property string kTabLayout:   "appearance/tabLayout"
 
     function loadSettings() {
         // Guard: context properties are absent when running under a bare
@@ -70,6 +73,10 @@ ApplicationWindow {
         win.antialiasText = settingsStore.boolValue(kAntialias, win.antialiasText)
         win.lineSpacing = settingsStore.intValue(kLineSpacing, win.lineSpacing)
         win.scrollback = settingsStore.intValue(kScrollback, win.scrollback)
+
+        const layout = settingsStore.stringValue(kTabLayout, win.tabLayout)
+        if (layout === "standard" || layout === "thumbnails")
+            win.tabLayout = layout
 
         restoreGeometry()
     }
@@ -144,6 +151,7 @@ ApplicationWindow {
         property bool   antialiasText: true
         property int    lineSpacing: 0
         property int    scrollback: 5000
+        property string tabLayout: "standard"
     }
 
     component TabButton: Rectangle {
@@ -215,14 +223,15 @@ ApplicationWindow {
     }
 
     // ---- Tab model -----------------------------------------------------
-    // Each entry: { title, cwd }. Panes live in the StackLayout by index.
+    // Each entry: { title, cwd, id }. Panes live in the StackLayout by index.
     property var tabModel: []
+    property int nextTabId: 1
 
     function newTab() {
         // Always reassign: in-place push() emits no change signal for var
         // arrays, so the Repeater/ListView would never see the new entry.
         const t = tabModel.slice()
-        t.push({ title: qsTr("Terminal"), cwd: "" })
+        t.push({ title: qsTr("Terminal"), cwd: "", id: win.nextTabId++ })
         tabModel = t
         tabs.currentIndex = t.length - 1
         Qt.callLater(win.focusCurrentTab)
@@ -235,6 +244,8 @@ ApplicationWindow {
         const t = tabModel.slice()
         t.splice(index, 1)
         tabModel = t
+        // Keep previews aligned with the shifted indices.
+        sidebar.shiftPreviews(index)
         if (tabModel.length === 0)
             newTab()
         else
@@ -254,13 +265,44 @@ ApplicationWindow {
             p.focusTerminal()
     }
 
+    // Thumbnails can only be grabbed from a visible terminal, so only the
+    // current tab is refreshed; the sidebar keeps the last good image for the
+    // others. Refreshing on tab change keeps previews reasonably current
+    // without grabbing a hidden item.
+    // Capture the current pane's preview. Grabbing a hidden item yields an
+    // empty image, so only the visible tab can be sampled; every other card
+    // keeps whatever was captured the last time it was on screen.
+    function refreshThumbnail() {
+        if (tabLayout !== "thumbnails")
+            return
+        const p = activePane()
+        if (p && p.requestThumbnail)
+            p.requestThumbnail()
+    }
+
+    onTabLayoutChanged: {
+        win.saveSetting(win.kTabLayout, tabLayout)
+        Qt.callLater(win.refreshThumbnail)
+    }
+
     Component.onCompleted: {
         loadSettings()
         newTab()
         Qt.callLater(function() {
             const p = activePane()
             if (p && p.focusTerminal) p.focusTerminal()
+            win.refreshThumbnail()
         })
+    }
+
+    // Refresh the current tab's preview periodically so the sidebar tracks
+    // live output. Deliberately slow: each grab renders the terminal, and the
+    // preview is a thumbnail, not a mirror.
+    Timer {
+        interval: 3000
+        repeat: true
+        running: win.tabLayout === "thumbnails"
+        onTriggered: win.refreshThumbnail()
     }
 
     // Save geometry on the way out; the appearance settings are already
@@ -272,10 +314,40 @@ ApplicationWindow {
         anchors.fill: parent
         spacing: 0
 
+        // Sidebar or top tabs, then the terminal. Wrapping the two halves in a
+        // RowLayout lets the sidebar sit to the left without disturbing the
+        // status bar below.
+        RowLayout {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            spacing: 0
+
+            // Thumbnail sidebar (only in "thumbnails" layout).
+            ThumbnailSidebar {
+                id: sidebar
+                visible: win.tabLayout === "thumbnails"
+                Layout.fillHeight: true
+                tabModel: win.tabModel
+                currentIndex: tabs.currentIndex
+                colorScheme: win.colorScheme
+
+                onTabActivated: (index) => tabs.currentIndex = index
+                onTabClosed: (index) => win.closeTab(index)
+                onAddTabRequested: win.newTab()
+                onLayoutToggleRequested: win.tabLayout = "standard"
+                onSettingsRequested: settings.open()
+            }
+
+            ColumnLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 0
+
         // ---- Tab strip --------------------------------------------------
         Rectangle {
             Layout.fillWidth: true
             height: Theme.titleBarH
+            visible: win.tabLayout === "standard"
             color: Theme.chromeBg
 
             Rectangle {
@@ -300,7 +372,10 @@ ApplicationWindow {
                     clip: true
                     model: win.tabModel
                     currentIndex: 0
-                    onCurrentIndexChanged: Qt.callLater(win.focusCurrentTab)
+                    onCurrentIndexChanged: {
+                        Qt.callLater(win.focusCurrentTab)
+                        Qt.callLater(win.refreshThumbnail)
+                    }
 
                     delegate: TabButton {
                         required property int index
@@ -322,6 +397,29 @@ ApplicationWindow {
                         text: parent.text
                         color: Theme.textDim
                         font.pixelSize: 16
+                        horizontalAlignment: Text.AlignHCenter
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                    background: Rectangle {
+                        radius: 4
+                        color: parent.hovered ? Theme.chromeBgAlt : "transparent"
+                    }
+                }
+
+                ToolButton {
+                    focusPolicy: Qt.NoFocus
+                    text: win.tabLayout === "thumbnails" ? "▤" : "▥"
+                    font.pixelSize: 14
+                    onClicked: win.tabLayout = win.tabLayout === "thumbnails"
+                                             ? "standard" : "thumbnails"
+                    ToolTip.visible: hovered
+                    ToolTip.text: win.tabLayout === "thumbnails"
+                        ? qsTr("Use top tabs") : qsTr("Use thumbnail sidebar")
+
+                    contentItem: Text {
+                        text: parent.text
+                        color: Theme.textDim
+                        font.pixelSize: 14
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
                     }
@@ -390,6 +488,11 @@ ApplicationWindow {
                         // Captured explicitly: `model`/`modelData` are not
                         // reliably in scope inside signal handlers.
                         property int tabIndex: index
+                        // Stable id for the preview file, so it survives
+                        // reordering when a tab is closed.
+                        property int tabIdSeed: modelData.id !== undefined
+                                               ? modelData.id : index
+                        tabId: tabPane.tabIdSeed
 
                         onTitleChanged: {
                             if (tabPane.tabIndex === tabs.currentIndex)
@@ -400,6 +503,8 @@ ApplicationWindow {
                                 win.activeDirectory = currentDir
                         }
                         onSessionFinished: win.closeTab(tabPane.tabIndex)
+                        onThumbnailReady: (filePath, version) =>
+                            sidebar.setPreview(tabPane.tabIndex, filePath)
                     }
                 }
             }
@@ -415,6 +520,8 @@ ApplicationWindow {
                 width: Math.min(420, parent.width - 32)
             }
         }
+            }   // inner ColumnLayout
+        }       // RowLayout
 
         // ---- Status bar --------------------------------------------------
         Rectangle {
@@ -485,6 +592,9 @@ ApplicationWindow {
         lineSpacing: win.lineSpacing
         scrollback: win.scrollback
         schemes: Theme.colorSchemes
+        tabLayout: win.tabLayout
+
+        onTabLayoutEdited: (layout) => win.tabLayout = layout
 
         onColorSchemeEdited: (value) => {
             win.colorScheme = value

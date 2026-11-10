@@ -29,6 +29,7 @@ Dialog {
     // read-only so the behaviour is discoverable rather than mysterious.
     property bool   drawsOwnLineChars: true
     property var    schemes: []
+    property string tabLayout: "standard"
 
     // ---- edits out ------------------------------------------------------
     signal colorSchemeEdited(string value)
@@ -41,6 +42,7 @@ Dialog {
     signal antialiasEdited(bool value)
     signal lineSpacingEdited(int value)
     signal scrollbackEdited(int lineCount)
+    signal tabLayoutEdited(string layout)
 
     modal: true
     focus: true
@@ -174,6 +176,22 @@ Dialog {
                             Layout.preferredWidth: 44
                             horizontalAlignment: Text.AlignRight
                         }
+                    }
+
+                    SectionTitle { text: qsTr("Tab layout"); Layout.topMargin: 8 }
+                    ComboBox {
+                        Layout.fillWidth: true
+                        model: [qsTr("Tabs along the top"), qsTr("Thumbnail sidebar")]
+                        currentIndex: dialog.tabLayout === "thumbnails" ? 1 : 0
+                        font.pixelSize: Theme.uiFontSize
+                        onActivated: dialog.tabLayoutEdited(
+                            currentIndex === 1 ? "thumbnails" : "standard")
+                    }
+                    Hint {
+                        text: qsTr("The thumbnail sidebar shows a live preview of "
+                                 + "each terminal. Previews are captured from the "
+                                 + "visible tab only, so inactive tabs keep their "
+                                 + "last image.")
                     }
 
                     Item { Layout.fillHeight: true }

@@ -16,6 +16,7 @@
 #include <QLibraryInfo>
 
 #include "settings_store.h"
+#include "thumbnail_store.h"
 
 // Qt Quick Controls resolves a style by import name, so "installed" simply
 // means a matching qmldir exists somewhere on the QML import path.
@@ -151,6 +152,9 @@ int main(int argc, char *argv[])
 
     SettingsStore settingsStore;
     engine.rootContext()->setContextProperty(QStringLiteral("settingsStore"), &settingsStore);
+
+    ThumbnailStore thumbnailStore;
+    engine.rootContext()->setContextProperty(QStringLiteral("thumbnailStore"), &thumbnailStore);
 
     // Optional shell override, useful for testing:
     //   SUPERTERM_SHELL=/bin/fish SUPERTERM_SHELL_ARGS="-l" superterm

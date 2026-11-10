@@ -47,6 +47,8 @@ qt_add_executable(superterm
     src/main.cpp
     src/settings_store.h
     src/settings_store.cpp
+    src/thumbnail_store.h
+    src/thumbnail_store.cpp
 )
 
 # Must be set BEFORE qt_add_qml_module so the generated qmldir marks Theme
@@ -63,6 +65,7 @@ qt_add_qml_module(superterm
         qml/TerminalPane.qml
         qml/SearchBar.qml
         qml/SettingsPanel.qml
+        qml/ThumbnailSidebar.qml
         qml/Theme.qml
     RESOURCES
         icons/superterm.svg

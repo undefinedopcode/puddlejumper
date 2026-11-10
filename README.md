@@ -86,7 +86,7 @@ sections:
 
 | Section | Options |
 | --- | --- |
-| Appearance | colour scheme, opacity |
+| Appearance | colour scheme, opacity, tab layout |
 | Text | font family, size (8–32pt in 0.5pt steps), line spacing, bold/italic/antialias |
 | Cursor | blinking |
 | Scrolling | scrollback depth, line-drawing (read-only) |
@@ -114,6 +114,7 @@ boldIntense=true
 italic=true
 antialias=true
 lineSpacing=0
+tabLayout=standard
 
 [scrolling]
 scrollback=5000
@@ -128,6 +129,29 @@ maximized=false
 
 Appearance changes are written as they happen; window geometry is saved when
 the window closes. Delete the file to return to defaults.
+
+### Tab layouts
+
+Two tab presentations, switchable from the button beside the settings gear, the
+settings dialog, or by setting `appearance/tabLayout`:
+
+- **standard** — tabs along the top (the default).
+- **thumbnails** — a left sidebar of cards, each with a live preview of that
+  terminal.
+
+Previews come from `QQuickItem::grabToImage()` on the terminal itself, so they
+show real content. Two constraints worth knowing:
+
+- **Only the visible tab can be grabbed.** A hidden terminal has nothing
+  painted, so its card keeps the last image captured while it was on screen.
+  The current tab is re-captured every few seconds while the sidebar is open.
+- **The grab must go through a file.** `grabToImage()` returns a
+  `QQuickItemGrabResult` whose `.url` is an internal `itemgrabber:#N` value that
+  `Image` cannot load, and assigning the result object to `Image.source`
+  silently does nothing. Each refresh therefore writes a versioned PNG under
+  the cache directory (`~/.cache/superterm/superterm/thumbs/<pid>/`) and the
+  card loads that. Versioned names are required because `Image` caches by URL
+  and `file:` URLs ignore query strings.
 
 ### Box-drawing characters
 
@@ -169,6 +193,7 @@ qml/Main.qml            window chrome, tab strip, status bar, shortcuts
 qml/TerminalPane.qml    wraps one QMLTermWidget + QMLTermSession
 qml/SearchBar.qml       inline find overlay
 qml/SettingsPanel.qml   centered modal settings, sectioned
+qml/ThumbnailSidebar.qml  alternative tab UI: left sidebar with live previews
 qml/Theme.qml           singleton: palette, metrics, colour-scheme list
 data/superterm.desktop  launcher entry
 icons/superterm.svg     app icon
