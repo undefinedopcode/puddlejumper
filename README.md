@@ -167,6 +167,14 @@ show real content. Two constraints worth knowing:
   the cache directory (`~/.cache/superterm/superterm/thumbs/<pid>/`) and the
   card loads that. Versioned names are required because `Image` caches by URL
   and `file:` URLs ignore query strings.
+- **The terminal must not render to a framebuffer.** `grabToImage()` corrupts a
+  `QQuickPaintedItem` that renders to an FBO: after a grab the terminal stops
+  drawing and shows a blank pane. Full-screen programs suffer worst — `nano`
+  drew nothing at all in the thumbnail layout while working fine in the tab
+  layout, because its UI relies on cursor positioning and scroll regions rather
+  than rewriting lines, so nothing forced a repaint. `TerminalPane.qml` sets
+  `useFBORendering: false` for this reason; the cost is a little rendering
+  performance in exchange for grabs being safe.
 
 ### Box-drawing characters
 

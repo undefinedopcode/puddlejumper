@@ -108,6 +108,18 @@ Item {
         blinkingCursor: pane.blinking
         antialiasText: pane.antialiasText
         lineSpacing: pane.lineSpacing
+        // Render into an Image rather than an FBO.
+        //
+        // grabToImage() (used for the thumbnail sidebar) corrupts a
+        // QQuickPaintedItem that renders to a framebuffer: after a grab, the
+        // terminal stops drawing and shows a blank pane until it is forced to
+        // repaint. Full-screen programs hit this immediately -- `nano` renders
+        // its UI with cursor positioning and scroll regions rather than
+        // rewriting lines, and the damage is visible, whereas a plain shell
+        // prompt re-draws often enough to hide it.
+        //
+        // Image rendering costs a little performance but makes grabbing safe.
+        useFBORendering: false
 
         session: QMLTermSession {
             id: session
