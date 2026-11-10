@@ -145,6 +145,14 @@ name themselves. Titles are not persisted; a tab reverts to `Terminal` on
 restart until its shell sets one again. An empty title is ignored rather than
 blanking the label.
 
+Titles are held in a `ListModel`, not a plain array, and that is load-bearing:
+the terminal panes live in a `Repeater` keyed on the tab model, so replacing
+the model destroys and rebuilds every pane — killing the running shells.
+Because most prompts set a title on every prompt, an array-based model tore
+down the terminal as soon as you ran any command. `setTabTitle()` uses
+`ListModel.setProperty()`, which emits `dataChanged` and leaves the panes
+alone.
+
 ### Tab layouts
 
 Two tab presentations, switchable from the button beside the settings gear, the

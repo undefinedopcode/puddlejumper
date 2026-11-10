@@ -155,7 +155,7 @@ Rectangle {
             delegate: Item {
                 id: cell
                 required property int index
-                required property var modelData
+                required property string title
 
                 width: list.width
                 height: card.height + spacing
@@ -201,8 +201,8 @@ Rectangle {
                         Text {
                             anchors.centerIn: parent
                             visible: thumb.status !== Image.Ready
-                            text: cell.modelData.title !== ""
-                                  ? cell.modelData.title : qsTr("Terminal")
+                            text: cell.title !== ""
+                                  ? cell.title : qsTr("Terminal")
                             color: Theme.textDim
                             font.pixelSize: 9
                             elide: Text.ElideRight
@@ -224,8 +224,8 @@ Rectangle {
 
                         Text {
                             Layout.fillWidth: true
-                            text: cell.modelData.title !== ""
-                                  ? cell.modelData.title : qsTr("Terminal")
+                            text: cell.title !== ""
+                                  ? cell.title : qsTr("Terminal")
                             color: Theme.text
                             font.pixelSize: 10
                             elide: Text.ElideRight

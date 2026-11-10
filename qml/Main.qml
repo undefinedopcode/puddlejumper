@@ -223,49 +223,44 @@ ApplicationWindow {
     }
 
     // ---- Tab model -----------------------------------------------------
-    // Each entry: { title, cwd, id }. Panes live in the StackLayout by index.
-    property var tabModel: []
+    // A ListModel, not a var array. The panes live in a Repeater keyed on this
+    // model, so any wholesale replacement of the model destroys and rebuilds
+    // every pane -- which kills the running shells. A ListModel lets a title
+    // update be a property change instead of a model reset.
+    ListModel { id: tabModel }
+
     property int nextTabId: 1
 
     function newTab() {
-        // Always reassign: in-place push() emits no change signal for var
-        // arrays, so the Repeater/ListView would never see the new entry.
-        const t = tabModel.slice()
-        t.push({ title: qsTr("Terminal"), cwd: "", id: win.nextTabId++ })
-        tabModel = t
-        tabs.currentIndex = t.length - 1
+        tabModel.append({ title: qsTr("Terminal"), cwd: "", tabId: win.nextTabId++ })
+        tabs.currentIndex = tabModel.count - 1
         Qt.callLater(win.focusCurrentTab)
         return tabs.currentIndex
     }
 
     function closeTab(index) {
-        if (index < 0 || index >= tabModel.length)
+        if (index < 0 || index >= tabModel.count)
             return
-        const t = tabModel.slice()
-        t.splice(index, 1)
-        tabModel = t
+        tabModel.remove(index)
         // Keep previews aligned with the shifted indices.
         sidebar.shiftPreviews(index)
-        if (tabModel.length === 0)
+        if (tabModel.count === 0)
             newTab()
         else
-            tabs.currentIndex = Math.min(index, tabModel.length - 1)
+            tabs.currentIndex = Math.min(index, tabModel.count - 1)
     }
 
-    // Update one tab's label. The model is a var array of plain objects, so it
-    // is rebuilt rather than mutated: in-place changes emit no change signal
-    // and the tab strip / sidebar would not repaint.
+    // Update one tab's label. A ListModel emits dataChanged for setProperty,
+    // so the label updates without disturbing the pane Repeater.
     function setTabTitle(index, newTitle) {
-        if (index < 0 || index >= tabModel.length)
+        if (index < 0 || index >= tabModel.count)
             return
         // A program can clear its title with an empty OSC string; keep the
         // existing label rather than blanking the tab.
         const label = (newTitle || "").trim()
-        if (label === "" || tabModel[index].title === label)
+        if (label === "" || tabModel.get(index).title === label)
             return
-        const t = tabModel.slice()
-        t[index] = Object.assign({}, t[index], { title: label })
-        tabModel = t
+        tabModel.setProperty(index, "title", label)
     }
 
     // Window title follows the active tab's session title. Kept separate from
@@ -352,7 +347,7 @@ ApplicationWindow {
                 id: sidebar
                 visible: win.tabLayout === "thumbnails"
                 Layout.fillHeight: true
-                tabModel: win.tabModel
+                tabModel: tabModel
                 currentIndex: tabs.currentIndex
                 colorScheme: win.colorScheme
 
@@ -395,7 +390,7 @@ ApplicationWindow {
                     orientation: ListView.Horizontal
                     spacing: 4
                     clip: true
-                    model: win.tabModel
+                    model: tabModel
                     currentIndex: 0
                     onCurrentIndexChanged: {
                         win.currentTabIndex = currentIndex
@@ -405,9 +400,9 @@ ApplicationWindow {
 
                     delegate: TabButton {
                         required property int index
-                        required property var modelData
+                        required property string title
                         tabIndex: index
-                        label: modelData.title
+                        label: title
                     }
                 }
 
@@ -494,7 +489,7 @@ ApplicationWindow {
 
                 Repeater {
                     id: paneRepeater
-                    model: win.tabModel
+                    model: tabModel
 
                     TerminalPane {
                         id: tabPane
@@ -508,17 +503,15 @@ ApplicationWindow {
                         lineSpacing: win.lineSpacing
                         scrollback: win.scrollback
                         opacity: win.termOpacity
-                        workingDirectory: modelData.cwd !== undefined ? modelData.cwd : ""
+                        workingDirectory: cwd !== undefined ? cwd : ""
                         shellProgram: envShell
                         shellProgramArgs: envShellArgs
-                        // Captured explicitly: `model`/`modelData` are not
-                        // reliably in scope inside signal handlers.
+                        // Captured explicitly: `index` is not reliably in
+                        // scope inside signal handlers.
                         property int tabIndex: index
                         // Stable id for the preview file, so it survives
                         // reordering when a tab is closed.
-                        property int tabIdSeed: modelData.id !== undefined
-                                               ? modelData.id : index
-                        tabId: tabPane.tabIdSeed
+                        tabId: tabId
 
                         // Signal handlers in a Repeater delegate do not see the
                         // window id reliably, so capture what we need as
@@ -687,11 +680,11 @@ ApplicationWindow {
     }
     Shortcut {
         sequence: "Ctrl+Tab"
-        onActivated: tabs.currentIndex = (tabs.currentIndex + 1) % Math.max(1, win.tabModel.length)
+        onActivated: tabs.currentIndex = (tabs.currentIndex + 1) % Math.max(1, tabModel.count)
     }
     Shortcut {
         sequence: "Ctrl+Shift+Tab"
-        onActivated: tabs.currentIndex = (tabs.currentIndex - 1 + win.tabModel.length) % Math.max(1, win.tabModel.length)
+        onActivated: tabs.currentIndex = (tabs.currentIndex - 1 + tabModel.count) % Math.max(1, tabModel.count)
     }
     Shortcut {
         sequence: "Ctrl+Shift+F"
