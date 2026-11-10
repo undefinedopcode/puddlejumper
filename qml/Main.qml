@@ -335,6 +335,12 @@ ApplicationWindow {
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            // Backstop behind the terminal: visible only for the instant before
+            // the terminal paints, or if a pane has no session.
+            Rectangle {
+                anchors.fill: parent
+                color: Theme.terminalWell
+            }
 
             StackLayout {
                 id: paneStack

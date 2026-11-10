@@ -12,8 +12,33 @@
 #include <QIcon>
 #include <QDir>
 #include <QDebug>
+#include <QFileInfo>
+#include <QLibraryInfo>
 
 #include "settings_store.h"
+
+// The KDE Qt Quick Controls style ships with qqc2-desktop-style. Probe for it
+// before asking Qt to use it, so a KDE session without that package falls back
+// to Fusion rather than failing to construct controls at startup.
+static bool kdeQuickStyleAvailable()
+{
+    static const QString kRelative = QStringLiteral("/org/kde/desktop/qmldir");
+
+    QStringList roots;
+    const QByteArray envPaths = qgetenv("QML2_IMPORT_PATH");
+    if (!envPaths.isEmpty())
+        roots << QString::fromLocal8Bit(envPaths).split(QDir::listSeparator());
+    roots << QLibraryInfo::path(QLibraryInfo::QmlImportsPath);
+    roots << QStringLiteral("/usr/lib/qt6/qml")
+          << QStringLiteral("/usr/lib64/qt6/qml")
+          << QStringLiteral("/usr/local/lib/qt6/qml");
+
+    for (const QString &root : roots) {
+        if (!root.isEmpty() && QFileInfo::exists(root + kRelative))
+            return true;
+    }
+    return false;
+}
 
 int main(int argc, char *argv[])
 {
@@ -25,9 +50,19 @@ int main(int argc, char *argv[])
     app.setOrganizationName(QStringLiteral("superterm"));
     app.setDesktopFileName(QStringLiteral("superterm"));
 
-    // A custom QML style would need to ship its own controls; Fusion is the
-    // most unobtrusive built-in and looks the same everywhere.
-    QQuickStyle::setStyle(QStringLiteral("Fusion"));
+    // Under KDE, prefer the native QML style (org.kde.desktop, from
+    // qqc2-desktop-style). It draws controls with the user's Plasma widget
+    // style and exposes their colour scheme through the QML palette, so the
+    // chrome matches the rest of the desktop. Elsewhere Fusion is the most
+    // unobtrusive built-in and looks the same everywhere.
+    const bool isKdeSession =
+        qgetenv("XDG_CURRENT_DESKTOP").toUpper().contains("KDE")
+        || !qgetenv("KDE_FULL_SESSION").isEmpty();
+    const bool useNativeStyle = isKdeSession && kdeQuickStyleAvailable();
+    if (useNativeStyle)
+        QQuickStyle::setStyle(QStringLiteral("org.kde.desktop"));
+    else
+        QQuickStyle::setStyle(QStringLiteral("Fusion"));
 
     // QMLTermWidget is installed as a system QML module. Put its directory on
     // the import path so the engine can find it when run from a build tree.
@@ -76,6 +111,9 @@ int main(int argc, char *argv[])
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("defaultMonoFont"), mono);
     engine.rootContext()->setContextProperty(QStringLiteral("monoFontFamilies"), monoFamilies);
+    // Tells Theme.qml whether the chrome should follow the desktop palette.
+    engine.rootContext()->setContextProperty(QStringLiteral("chromeFollowsSystem"),
+                                             useNativeStyle);
 
     SettingsStore settingsStore;
     engine.rootContext()->setContextProperty(QStringLiteral("settingsStore"), &settingsStore);

@@ -139,6 +139,20 @@ data/superterm.desktop  launcher entry
 icons/superterm.svg     app icon
 ```
 
+## Desktop integration
+
+Under KDE the app detects the session and switches to Qt's native
+`org.kde.desktop` QML style (from `qqc2-desktop-style`). The chrome then takes
+the user's actual Plasma widget colours and follows live changes — switching
+Plasma between light and dark restyles the tab bar and status bar immediately.
+Requires `qqc2-desktop-style`; without it the app falls back to Fusion.
+
+Everywhere else it uses Fusion with a fixed dark palette tuned to sit next to
+common terminal colour schemes.
+
+The terminal itself always paints its own colour scheme (Solarized by
+default), so chrome and terminal stay visually distinct.
+
 ## Platform support
 
 **Linux, macOS and the BSDs work.** Windows does not, yet — see below.
@@ -206,3 +220,14 @@ A few things that cost time and are worth knowing if you extend this:
 
 GPL-2.0-or-later, to match QMLTermWidget (which is GPL-2.0-or-later, inherited
 from QTermWidget).
+
+## Qt gotchas worth knowing
+
+- `QtObject` has no default property, so a `SystemPalette` cannot be declared
+  inside a plain `QtObject` singleton. `Theme.qml` is an invisible
+  `Item` for that reason.
+- `QQuickStyle` exposes no import-path query API, so detecting whether
+  `org.kde.desktop` is installed means probing `QML2_IMPORT_PATH` plus
+  `QLibraryInfo::QmlImportsPath` for `org/kde/desktop/qmldir`.
+- `QLibraryInfo` enumerates `QmlImportsPath`, not `QmlImports`.
+- Window position is set by assigning `x`/`y`; there is no `setPosition()`.
