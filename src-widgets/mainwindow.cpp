@@ -130,6 +130,13 @@ void MainWindow::buildLayout()
     connect(m_tabs, &QTabWidget::tabCloseRequested, this, &MainWindow::closeTab);
     connect(m_tabs, &QTabWidget::currentChanged, this, [this](int index) {
         m_sidebar->setCurrentIndex(index);
+        // Selecting a tab counts as having seen it, so clear its "new output"
+        // marker (and the underlying dirty flag) straight away rather than
+        // waiting for the next preview capture.
+        if (auto *term = terminalAt(index)) {
+            term->clearNewOutput();
+            m_sidebar->setBusy(index, false);
+        }
         updateStatus();
         captureNextPreview();
     });
