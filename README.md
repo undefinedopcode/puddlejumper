@@ -231,3 +231,9 @@ from QTermWidget).
   `QLibraryInfo::QmlImportsPath` for `org/kde/desktop/qmldir`.
 - `QLibraryInfo` enumerates `QmlImportsPath`, not `QmlImports`.
 - Window position is set by assigning `x`/`y`; there is no `setPosition()`.
+- **Do not use `ComboBox` under the KDE QML style.** `qqc2-desktop-style`
+  6.31.0 segfaults as soon as a `ComboBox` is instantiated — reproduced in a
+  bare probe app with `QQuickStyle::setStyle("org.kde.desktop")` and a single
+  `ComboBox` in a `ColumnLayout`. `Fusion` and `Basic` are unaffected. The
+  settings drawer therefore uses an inline `ListView`-based `Chooser` rather
+  than popup controls.

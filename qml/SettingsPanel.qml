@@ -34,6 +34,80 @@ Rectangle {
     border.color: Theme.border
     border.width: 1
 
+    /*
+     * An inline single-select list.
+     *
+     * Deliberately not a ComboBox: KDE's org.kde.desktop QML style segfaults
+     * when a ComboBox is instantiated (qqc2-desktop-style 6.31.0, seen with
+     * ComboBox in an ordinary layout). A plain ListView of buttons avoids the
+     * popup machinery entirely and reads better in a narrow drawer anyway.
+     */
+    component Chooser: Rectangle {
+        id: chooser
+
+        property var    options: []
+        property string current: ""
+        signal chosen(string value)
+
+        // Show a handful of rows and scroll for the rest (font lists are long).
+        height: Math.min(132, Math.max(1, options.length) * 26 + 8)
+        radius: 4
+        color: Theme.bg
+        border.color: Theme.border
+        border.width: 1
+
+        ListView {
+            id: list
+            anchors.fill: parent
+            anchors.margins: 4
+            clip: true
+            model: chooser.options
+            spacing: 1
+            boundsBehavior: Flickable.StopAtBounds
+
+            // Keep the active entry in view without stealing keyboard focus.
+            Component.onCompleted: {
+                const i = chooser.options.indexOf(chooser.current)
+                if (i >= 0)
+                    positionViewAtIndex(i, ListView.Center)
+            }
+
+            delegate: Rectangle {
+                required property int index
+                required property var modelData
+
+                width: list.width
+                height: 25
+                radius: 3
+                readonly property bool isCurrent: modelData === chooser.current
+                color: isCurrent ? Theme.accent
+                     : rowHover.containsMouse ? Theme.chromeBgAlt
+                     : "transparent"
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.leftMargin: 8
+                    anchors.right: parent.right
+                    anchors.rightMargin: 8
+                    anchors.verticalCenter: parent.verticalCenter
+                    text: parent.modelData
+                    elide: Text.ElideRight
+                    color: parent.isCurrent ? Theme.accentText : Theme.text
+                    font.pixelSize: Theme.uiFontSize
+                }
+
+                MouseArea {
+                    id: rowHover
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    // Not focusable: selecting must not pull focus off the
+                    // terminal any longer than opening the drawer already does.
+                    onClicked: chooser.chosen(parent.modelData)
+                }
+            }
+        }
+    }
+
     function close() { root.closeRequested() }
 
     ColumnLayout {
@@ -74,13 +148,11 @@ Rectangle {
             font.pixelSize: 10
             font.letterSpacing: 0.8
         }
-        ComboBox {
-            id: schemeBox
+        Chooser {
             Layout.fillWidth: true
-            model: root.schemes
-            currentIndex: Math.max(0, root.schemes.indexOf(root.colorScheme))
-            font.pixelSize: Theme.uiFontSize
-            onActivated: root.colorSchemeEdited(currentText)
+            options: root.schemes
+            current: root.colorScheme
+            onChosen: (value) => root.colorSchemeEdited(value)
         }
 
         Label {
@@ -89,13 +161,11 @@ Rectangle {
             font.pixelSize: 10
             font.letterSpacing: 0.8
         }
-        ComboBox {
-            id: fontBox
+        Chooser {
             Layout.fillWidth: true
-            model: root.fontFamilies
-            currentIndex: Math.max(0, root.fontFamilies.indexOf(root.fontFamily))
-            font.pixelSize: Theme.uiFontSize
-            onActivated: root.fontFamilyEdited(currentText)
+            options: root.fontFamilies
+            current: root.fontFamily
+            onChosen: (value) => root.fontFamilyEdited(value)
         }
 
         Label {
