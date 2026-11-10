@@ -17,12 +17,29 @@
 
 #include "settings_store.h"
 
-// The KDE Qt Quick Controls style ships with qqc2-desktop-style. Probe for it
-// before asking Qt to use it, so a KDE session without that package falls back
-// to Fusion rather than failing to construct controls at startup.
-static bool kdeQuickStyleAvailable()
+// Qt Quick Controls resolves a style by import name, so "installed" simply
+// means a matching qmldir exists somewhere on the QML import path.
+static bool qmlModuleAvailable(const QString &relativeQmldir)
 {
-    static const QString kRelative = QStringLiteral("/org/kde/desktop/qmldir");
+    // Escapes for testing: treat a style as unavailable without uninstalling
+    // it, so the fallback chain can be exercised on a machine that has all of
+    // them. Comma-separated, e.g. SUPERTERM_HIDE_STYLES=org.kde.union
+    const QString hidden = QString::fromLocal8Bit(qgetenv("SUPERTERM_HIDE_STYLES"));
+    if (!hidden.isEmpty()) {
+        // Compare module names, translating the dotted form to its path form
+        // (org.kde.union -> /org/kde/union/).
+        const QString target = relativeQmldir;
+        for (const QString &entry : hidden.split(QLatin1Char(','))) {
+            QString module = entry.trimmed();
+            if (module.isEmpty())
+                continue;
+            const QString asPath = QLatin1Char('/')
+                + QString(module).replace(QLatin1Char('.'), QLatin1Char('/'))
+                + QLatin1Char('/');
+            if (target.startsWith(asPath))
+                return false;
+        }
+    }
 
     QStringList roots;
     const QByteArray envPaths = qgetenv("QML2_IMPORT_PATH");
@@ -34,7 +51,7 @@ static bool kdeQuickStyleAvailable()
           << QStringLiteral("/usr/local/lib/qt6/qml");
 
     for (const QString &root : roots) {
-        if (!root.isEmpty() && QFileInfo::exists(root + kRelative))
+        if (!root.isEmpty() && QFileInfo::exists(root + relativeQmldir))
             return true;
     }
     return false;
@@ -50,19 +67,36 @@ int main(int argc, char *argv[])
     app.setOrganizationName(QStringLiteral("superterm"));
     app.setDesktopFileName(QStringLiteral("superterm"));
 
-    // Under KDE, prefer the native QML style (org.kde.desktop, from
-    // qqc2-desktop-style). It draws controls with the user's Plasma widget
-    // style and exposes their colour scheme through the QML palette, so the
-    // chrome matches the rest of the desktop. Elsewhere Fusion is the most
-    // unobtrusive built-in and looks the same everywhere.
+    // Controls style: separate from the colour scheme below.
+    //
+    // On a Plasma session the KDE platform theme supplies the palette to
+    // SystemPalette regardless of which Quick style is active, so Fusion
+    // reports exactly the same colours as the KDE styles. Preferring Union is
+    // therefore about control *look*, not colour: Union is Plasma's own style
+    // and covers both QtWidgets and QtQuick.
+    //
+    // "org.kde.desktop" (qqc2-desktop-style) is deliberately NOT used:
+    // version 6.31.0 segfaults the moment a ComboBox is instantiated, it
+    // offers no colour advantage here, and Union supersedes it. Set
+    // SUPERTERM_QUICK_STYLE=<name> to override.
     const bool isKdeSession =
         qgetenv("XDG_CURRENT_DESKTOP").toUpper().contains("KDE")
         || !qgetenv("KDE_FULL_SESSION").isEmpty();
-    const bool useNativeStyle = isKdeSession && kdeQuickStyleAvailable();
-    if (useNativeStyle)
-        QQuickStyle::setStyle(QStringLiteral("org.kde.desktop"));
-    else
-        QQuickStyle::setStyle(QStringLiteral("Fusion"));
+
+    QString style = QStringLiteral("Fusion");
+    const QByteArray overrideStyle = qgetenv("SUPERTERM_QUICK_STYLE");
+    if (!overrideStyle.isEmpty()) {
+        style = QString::fromLocal8Bit(overrideStyle);
+    } else if (isKdeSession
+               && qmlModuleAvailable(QStringLiteral("/org/kde/union/qmldir"))) {
+        style = QStringLiteral("org.kde.union");
+    }
+    // The terminal chrome follows the desktop palette whenever the session
+    // actually supplies one — which is what SystemPalette reports.
+    const bool useNativeStyle = isKdeSession;
+    QQuickStyle::setStyle(style);
+    if (qEnvironmentVariableIsSet("SUPERTERM_SHOWSTYLE"))
+        qInfo() << "quick style:" << style << "followsSystem:" << useNativeStyle;
 
     // QMLTermWidget is installed as a system QML module. Put its directory on
     // the import path so the engine can find it when run from a build tree.

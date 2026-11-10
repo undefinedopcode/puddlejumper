@@ -141,14 +141,27 @@ icons/superterm.svg     app icon
 
 ## Desktop integration
 
-Under KDE the app detects the session and switches to Qt's native
-`org.kde.desktop` QML style (from `qqc2-desktop-style`). The chrome then takes
-the user's actual Plasma widget colours and follows live changes — switching
-Plasma between light and dark restyles the tab bar and status bar immediately.
-Requires `qqc2-desktop-style`; without it the app falls back to Fusion.
+**Colour scheme.** On a Plasma session the KDE platform theme supplies a
+palette to Qt, so the chrome takes the user's actual Plasma colours and follows
+live changes — switching Plasma between light and dark restyles the tab bar and
+status bar immediately, with no restart.
 
-Everywhere else it uses Fusion with a fixed dark palette tuned to sit next to
-common terminal colour schemes.
+Worth knowing: this comes from the *platform theme*, not the Qt Quick style.
+Fusion reports exactly the same `SystemPalette` values as KDE's own styles, so
+the colour scheme is independent of which Quick style is in use.
+
+**Controls style.** On Plasma the app prefers `org.kde.union`, Plasma's own
+style (the `union` package), which covers both QtWidgets and QtQuick. Otherwise
+it uses Fusion.
+
+`org.kde.desktop` is deliberately *not* used. In `qqc2-desktop-style` 6.31.0 it
+segfaults the moment a `ComboBox` is instantiated, and since Fusion already
+yields the identical palette it would buy nothing but risk. To force a style:
+
+```sh
+SUPERTERM_QUICK_STYLE=Fusion ./build/superterm    # or Basic, Material, ...
+SUPERTERM_SHOWSTYLE=1 ./build/superterm           # log the choice
+```
 
 The terminal itself always paints its own colour scheme (Solarized by
 default), so chrome and terminal stay visually distinct.
@@ -231,9 +244,10 @@ from QTermWidget).
   `QLibraryInfo::QmlImportsPath` for `org/kde/desktop/qmldir`.
 - `QLibraryInfo` enumerates `QmlImportsPath`, not `QmlImports`.
 - Window position is set by assigning `x`/`y`; there is no `setPosition()`.
-- **Do not use `ComboBox` under the KDE QML style.** `qqc2-desktop-style`
-  6.31.0 segfaults as soon as a `ComboBox` is instantiated — reproduced in a
-  bare probe app with `QQuickStyle::setStyle("org.kde.desktop")` and a single
-  `ComboBox` in a `ColumnLayout`. `Fusion` and `Basic` are unaffected. The
-  settings drawer therefore uses an inline `ListView`-based `Chooser` rather
-  than popup controls.
+- **`ComboBox` crashes `org.kde.desktop`.** `qqc2-desktop-style` 6.31.0
+  segfaults as soon as a `ComboBox` is instantiated — reproduced in a bare
+  probe app with `QQuickStyle::setStyle("org.kde.desktop")` and a single
+  `ComboBox` in a `ColumnLayout`, independent of the Qt *widget* theme.
+  `Fusion`, `Basic` and `org.kde.union` are all unaffected. The app therefore
+  selects Union rather than `org.kde.desktop`; if you override the style with
+  `SUPERTERM_QUICK_STYLE=org.kde.desktop` the settings drawer will crash.
