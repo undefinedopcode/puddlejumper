@@ -81,7 +81,20 @@ when running straight from the build tree.)
 
 ## Settings
 
-Appearance settings and window geometry persist across runs via `QSettings`:
+Settings live in a centered modal (`Ctrl+,` or the gear button), with four
+sections:
+
+| Section | Options |
+| --- | --- |
+| Appearance | colour scheme, opacity |
+| Text | font family, size, line spacing, bold/italic/antialias |
+| Cursor | blinking |
+| Scrolling | scrollback depth, line-drawing (read-only) |
+
+Only fixed-pitch font families are offered, since the terminal cell grid
+depends on them. Changes apply to open tabs immediately.
+
+Persistence uses `QSettings`:
 
 | Platform | Location |
 | --- | --- |
@@ -98,6 +111,12 @@ fontSize=18
 opacity=0.9
 blinkingCursor=true
 boldIntense=true
+italic=true
+antialias=true
+lineSpacing=0
+
+[scrolling]
+scrollback=5000
 
 [window]
 x=100
@@ -110,6 +129,21 @@ maximized=false
 Appearance changes are written as they happen; window geometry is saved when
 the window closes. Delete the file to return to defaults.
 
+### Box-drawing characters
+
+Box frames, table borders and block art are painted as **vectors**, not taken
+from the font (Konsole calls this "use own line drawing characters"). This is
+why they stay crisp and grid-aligned at any point size while ordinary glyphs
+may only look right at particular sizes. QMLTermWidget enables it
+unconditionally in `TerminalDisplay`'s constructor — `_drawLineChars(true)` —
+and exposes no property, slot or `Q_INVOKABLE` to change it, so the settings
+dialog shows it read-only. `setDrawLineChars()` is an inline method with no
+exported symbol, so it cannot be reached from outside the library either.
+
+The practical consequence: line art looks right regardless of your font size,
+and if ordinary text looks slightly off at a given size, adjusting **line
+spacing** or picking a different point size is the lever available.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -118,6 +152,7 @@ the window closes. Delete the file to return to defaults.
 | `Ctrl+Shift+W` | Close tab |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
 | `Ctrl+Shift+F` | Find in terminal |
+| `Ctrl+,` | Open settings |
 | `Ctrl+=` / `Ctrl+-` | Zoom in / out |
 | `Ctrl+0` | Reset zoom |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste |
@@ -133,7 +168,7 @@ src/settings_store.*    QSettings wrapper exposed to QML
 qml/Main.qml            window chrome, tab strip, status bar, shortcuts
 qml/TerminalPane.qml    wraps one QMLTermWidget + QMLTermSession
 qml/SearchBar.qml       inline find overlay
-qml/SettingsPanel.qml   colour scheme / font / opacity / cursor settings
+qml/SettingsPanel.qml   centered modal settings, sectioned
 qml/Theme.qml           singleton: palette, metrics, colour-scheme list
 data/superterm.desktop  launcher entry
 icons/superterm.svg     app icon

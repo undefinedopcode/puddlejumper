@@ -17,6 +17,10 @@ Item {
     property real   fontSize: Theme.monoFontSize
     property bool   blinking: true
     property bool   boldIntense: true
+    property bool   italicEnabled: true
+    property bool   antialiasText: true
+    property int    lineSpacing: 0
+    property int    scrollback: 5000
     property string workingDirectory: ""
     property string shellProgram: ""
     property var    shellProgramArgs: []
@@ -47,9 +51,11 @@ Item {
         colorScheme: pane.colorScheme
 
         enableBold: pane.boldIntense
+        enableItalic: pane.italicEnabled
         fullCursorHeight: false
         blinkingCursor: pane.blinking
-        antialiasText: true
+        antialiasText: pane.antialiasText
+        lineSpacing: pane.lineSpacing
 
         session: QMLTermSession {
             id: session

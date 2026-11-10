@@ -23,10 +23,13 @@ ApplicationWindow {
     property alias termOpacity: themeState.termOpacity
     property alias blinking: themeState.blinking
     property alias boldIntense: themeState.boldIntense
+    property alias italicEnabled: themeState.italicEnabled
+    property alias antialiasText: themeState.antialiasText
+    property alias lineSpacing: themeState.lineSpacing
+    property alias scrollback: themeState.scrollback
 
     property string activeSessionTitle: ""
     property string activeDirectory: ""
-    property bool   settingsOpen: false
 
     // ---- Persistence ---------------------------------------------------
     // Values are written straight through on change: settings are small and
@@ -38,6 +41,10 @@ ApplicationWindow {
     readonly property string kOpacity:     "appearance/opacity"
     readonly property string kBlink:       "appearance/blinkingCursor"
     readonly property string kBold:        "appearance/boldIntense"
+    readonly property string kItalic:      "appearance/italic"
+    readonly property string kAntialias:   "appearance/antialias"
+    readonly property string kLineSpacing: "appearance/lineSpacing"
+    readonly property string kScrollback:  "scrolling/scrollback"
 
     function loadSettings() {
         // Guard: context properties are absent when running under a bare
@@ -58,6 +65,10 @@ ApplicationWindow {
         win.termOpacity = settingsStore.doubleValue(kOpacity, win.termOpacity)
         win.blinking = settingsStore.boolValue(kBlink, win.blinking)
         win.boldIntense = settingsStore.boolValue(kBold, win.boldIntense)
+        win.italicEnabled = settingsStore.boolValue(kItalic, win.italicEnabled)
+        win.antialiasText = settingsStore.boolValue(kAntialias, win.antialiasText)
+        win.lineSpacing = settingsStore.intValue(kLineSpacing, win.lineSpacing)
+        win.scrollback = settingsStore.intValue(kScrollback, win.scrollback)
 
         restoreGeometry()
     }
@@ -106,14 +117,6 @@ ApplicationWindow {
                                  maximized)
     }
 
-    // The settings controls (sliders, combos, switches) legitimately take
-    // focus while in use. Hand it back to the terminal when the drawer closes,
-    // otherwise keystrokes keep going to the last control touched.
-    onSettingsOpenChanged: {
-        if (!settingsOpen)
-            Qt.callLater(win.focusCurrentTab)
-    }
-
     // Central state shared by every tab.
     QtObject {
         id: themeState
@@ -123,6 +126,10 @@ ApplicationWindow {
         property real   termOpacity: 1.0
         property bool   blinking: true
         property bool   boldIntense: true
+        property bool   italicEnabled: true
+        property bool   antialiasText: true
+        property int    lineSpacing: 0
+        property int    scrollback: 5000
     }
 
     component TabButton: Rectangle {
@@ -314,11 +321,11 @@ ApplicationWindow {
                     focusPolicy: Qt.NoFocus
                     text: "⚙"
                     font.pixelSize: 14
-                    onClicked: win.settingsOpen = !win.settingsOpen
+                    onClicked: settings.open()
 
                     contentItem: Text {
                         text: parent.text
-                        color: win.settingsOpen ? Theme.accent : Theme.textDim
+                        color: Theme.textDim
                         font.pixelSize: 14
                         horizontalAlignment: Text.AlignHCenter
                         verticalAlignment: Text.AlignVCenter
@@ -358,6 +365,10 @@ ApplicationWindow {
                         fontSize: win.monoFontSize
                         blinking: win.blinking
                         boldIntense: win.boldIntense
+                        italicEnabled: win.italicEnabled
+                        antialiasText: win.antialiasText
+                        lineSpacing: win.lineSpacing
+                        scrollback: win.scrollback
                         opacity: win.termOpacity
                         workingDirectory: modelData.cwd !== undefined ? modelData.cwd : ""
                         shellProgram: envShell
@@ -445,14 +456,6 @@ ApplicationWindow {
     // ---- Settings drawer ------------------------------------------------
     SettingsPanel {
         id: settings
-        visible: win.settingsOpen
-        anchors.top: parent.top
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        anchors.topMargin: Theme.titleBarH
-        anchors.bottomMargin: 24
-        x: win.settingsOpen ? win.width - width : win.width
-        opacity: win.settingsOpen ? 1 : 0
 
         colorScheme: win.colorScheme
         fontFamily: win.monoFont
@@ -461,6 +464,10 @@ ApplicationWindow {
         opacityValue: win.termOpacity
         blinkCursor: win.blinking
         boldIntense: win.boldIntense
+        italicEnabled: win.italicEnabled
+        antialiasText: win.antialiasText
+        lineSpacing: win.lineSpacing
+        scrollback: win.scrollback
         schemes: Theme.colorSchemes
 
         onColorSchemeEdited: (value) => {
@@ -487,11 +494,25 @@ ApplicationWindow {
             win.boldIntense = value
             win.saveSetting(win.kBold, value)
         }
-        onCloseRequested: win.settingsOpen = false
-
-        Behavior on x {
-            NumberAnimation { duration: 180; easing.type: Easing.OutCubic }
+        onItalicEdited: (value) => {
+            win.italicEnabled = value
+            win.saveSetting(win.kItalic, value)
         }
+        onAntialiasEdited: (value) => {
+            win.antialiasText = value
+            win.saveSetting(win.kAntialias, value)
+        }
+        onLineSpacingEdited: (value) => {
+            win.lineSpacing = value
+            win.saveSetting(win.kLineSpacing, value)
+        }
+        onScrollbackEdited: (value) => {
+            win.scrollback = value
+            win.saveSetting(win.kScrollback, value)
+        }
+
+        // Closing hands focus back to the terminal.
+        onClosed: Qt.callLater(win.focusCurrentTab)
     }
 
     // ---- Global shortcuts -----------------------------------------------
@@ -536,10 +557,16 @@ ApplicationWindow {
         onActivated: { const p = win.activePane(); if (p && p.pasteClipboard) p.pasteClipboard() }
     }
     Shortcut {
+        sequence: "Ctrl+Comma"
+        onActivated: settings.open()
+    }
+    Shortcut {
         sequence: "Escape"
         onActivated: {
-            if (searchBar.visible) searchBar.close()
-            else if (win.settingsOpen) win.settingsOpen = false
+            // The Dialog closes itself on Escape; only the search bar needs
+            // handling here.
+            if (searchBar.visible)
+                searchBar.close()
         }
     }
 }
