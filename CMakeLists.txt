@@ -104,8 +104,7 @@ qt_generate_deploy_qml_app_script(
 )
 install(SCRIPT ${deploy_script})
 
-# ---------------------------------------------------------------------------
-# Widgets spike (branch explore/qtwidgets only)
+# Qt Widgets port (branch explore/qtwidgets)
 #
 # A separate executable so it can never affect the QML app. This one DOES link
 # qtermwidget6, which the QML build must not do (see the note above): here the
@@ -115,16 +114,24 @@ install(SCRIPT ${deploy_script})
 #   cmake --build build --target superterm-widgets
 #   ./build/superterm-widgets
 # ---------------------------------------------------------------------------
-option(SUPERTERM_BUILD_WIDGETS_SPIKE "Build the Qt Widgets port spike" ON)
+option(SUPERTERM_BUILD_WIDGETS "Build the Qt Widgets port" ON)
 
-if(SUPERTERM_BUILD_WIDGETS_SPIKE)
+if(SUPERTERM_BUILD_WIDGETS)
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(QTERMWIDGET6 REQUIRED IMPORTED_TARGET qtermwidget6)
 
     qt_add_executable(superterm-widgets
-        spike-widgets/main.cpp
-        spike-widgets/mainwindow.cpp
-        spike-widgets/mainwindow.h
+        src-widgets/main.cpp
+        src-widgets/mainwindow.cpp
+        src-widgets/mainwindow.h
+        src-widgets/settingsdialog.cpp
+        src-widgets/settingsdialog.h
+        src-widgets/terminalwidget.cpp
+        src-widgets/terminalwidget.h
+        src-widgets/thumbnailsidebar.cpp
+        src-widgets/thumbnailsidebar.h
+        src-widgets/settings.cpp
+        src-widgets/settings.h
     )
     target_link_libraries(superterm-widgets PRIVATE
         Qt6::Core
@@ -136,6 +143,4 @@ if(SUPERTERM_BUILD_WIDGETS_SPIKE)
         AUTOMOC ON
         OUTPUT_NAME superterm-widgets
     )
-    # The QML target disables AUTOMOC at project level; this one needs it for
-    # MainWindow's Q_OBJECT.
 endif()

@@ -149,3 +149,45 @@ consistency over native integration.
    outright.
 4. Persistence: `SettingsStore` is already `QSettings`, so it survives largely
    as-is; only the QML-facing wrappers would move.
+
+## Port: complete
+
+`src-widgets/` replaces the spike and is feature-complete against the QML build:
+
+| Feature | QML build | Widgets port |
+| --- | --- | --- |
+| Tabs, close/move, OSC titles | yes | yes |
+| Scrollback depth | **not reachable** | live, applies to open tabs |
+| Line-drawing chars | **not reachable** | on (public API) |
+| Cursor shape | **not offered** | wired to `setKeyboardCursorShape` |
+| Search | hand-written overlay | `toggleShowSearchBar()` |
+| Thumbnail sidebar | `ListView` of file-cached grabs | `QListWidget` of `QPixmap` |
+| Settings | modal, 4 sections | `QDialog`, 4 sections, same keys |
+| Persistence | `QSettings` | same keys — configs interoperate |
+| Menus | none (window chrome only) | native `QMenuBar` |
+
+Verified at runtime, not just visually:
+
+```
+SPIKEV requested 25000 -> terminal reports 25000     (scrollback live)
+SPIKEV tab count = 3  current = 2                    (tabs)
+SPIKEV settings dialog visible = true                (dialog)
+```
+
+Both binaries read and write `~/.config/superterm/superterm.conf`, so an
+existing QML-build config carries over — the ported build picked up
+`colorScheme=Tango` unchanged on first run.
+
+Thumbnails are simpler here: `QWidget::grab()` on the
+`Konsole::TerminalDisplay` child, into a `QListWidget` icon. No file cache, no
+versioned filenames, no `useFBORendering` workaround.
+
+Known deltas from the QML build:
+
+- **Half-point font sizes work**, and were measured rather than assumed:
+  requesting 13 / 13.5 / 14 / 14.5 / 15pt gives cell grids of 79×19 / 72×19 /
+  72×18 / 72×18 / 66×16, so 13.5 is a genuinely distinct layout.
+- **Line spacing has no setter** in `QTermWidget`. The setting persists (shared
+  config) but does nothing here.
+- Colours follow the platform palette, so the fixed dark chrome of the QML
+  build is replaced by native styling.
