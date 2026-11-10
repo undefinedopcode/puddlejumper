@@ -27,8 +27,12 @@ Item {
     // Stable per-tab identifier, used to name the preview file.
     property int    tabId: 0
 
-    // Reported back to the tab bar / window title.
+    // Reported back to the tab bar / window title. Declared with an explicit
+    // change signal so handlers in the owner actually fire; a plain property
+    // would still update bindings but emit nothing, which silently broke tab
+    // titles.
     property string title: ""
+    signal titleUpdated(string newTitle)
     property string currentDir: ""
     property bool   hasActiveProcess: false
 
@@ -107,7 +111,10 @@ Item {
 
         session: QMLTermSession {
             id: session
-            onTitleChanged: pane.title = title
+            onTitleChanged: {
+                pane.title = title
+                pane.titleUpdated(title)
+            }
             onFinished: pane.sessionFinished()
         }
 

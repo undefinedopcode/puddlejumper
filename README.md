@@ -130,6 +130,21 @@ maximized=false
 Appearance changes are written as they happen; window geometry is saved when
 the window closes. Delete the file to return to defaults.
 
+### Tab names
+
+Tab labels follow the terminal session title, which comes from the standard
+**OSC 0 / OSC 2** escape sequences (`ESC ] 0 ; title BEL`). Set one and the tab
+and window title update immediately:
+
+```sh
+printf '\033]2;my build\007'
+```
+
+Shells commonly do this already, so with a configured prompt your tabs often
+name themselves. Titles are not persisted; a tab reverts to `Terminal` on
+restart until its shell sets one again. An empty title is ignored rather than
+blanking the label.
+
 ### Tab layouts
 
 Two tab presentations, switchable from the button beside the settings gear, the

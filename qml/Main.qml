@@ -252,6 +252,31 @@ ApplicationWindow {
             tabs.currentIndex = Math.min(index, tabModel.length - 1)
     }
 
+    // Update one tab's label. The model is a var array of plain objects, so it
+    // is rebuilt rather than mutated: in-place changes emit no change signal
+    // and the tab strip / sidebar would not repaint.
+    function setTabTitle(index, newTitle) {
+        if (index < 0 || index >= tabModel.length)
+            return
+        // A program can clear its title with an empty OSC string; keep the
+        // existing label rather than blanking the tab.
+        const label = (newTitle || "").trim()
+        if (label === "" || tabModel[index].title === label)
+            return
+        const t = tabModel.slice()
+        t[index] = Object.assign({}, t[index], { title: label })
+        tabModel = t
+    }
+
+    // Window title follows the active tab's session title. Kept separate from
+    // setTabTitle so the handler does not have to touch the tab ListView while
+    // panes are still being constructed.
+    property int currentTabIndex: 0
+    function noteActiveTitle(index, title) {
+        if (index === win.currentTabIndex)
+            win.activeSessionTitle = title
+    }
+
     function activePane() {
         return paneRepeater.itemAt(tabs.currentIndex)
     }
@@ -373,6 +398,7 @@ ApplicationWindow {
                     model: win.tabModel
                     currentIndex: 0
                     onCurrentIndexChanged: {
+                        win.currentTabIndex = currentIndex
                         Qt.callLater(win.focusCurrentTab)
                         Qt.callLater(win.refreshThumbnail)
                     }
@@ -494,15 +520,23 @@ ApplicationWindow {
                                                ? modelData.id : index
                         tabId: tabPane.tabIdSeed
 
-                        onTitleChanged: {
-                            if (tabPane.tabIndex === tabs.currentIndex)
-                                win.activeSessionTitle = title
+                        // Signal handlers in a Repeater delegate do not see the
+                        // window id reliably, so capture what we need as
+                        // properties (same reason `tabIndex` is captured).
+                        property var windowRef: win
+
+                        onTitleUpdated: (newTitle) => {
+                            // The session title tracks OSC 0/2 escapes, so a
+                            // shell or program that sets a window title names
+                            // its tab too.
+                            windowRef.setTabTitle(tabPane.tabIndex, newTitle)
+                            windowRef.noteActiveTitle(tabPane.tabIndex, newTitle)
                         }
                         onCurrentDirChanged: {
                             if (tabPane.tabIndex === tabs.currentIndex)
-                                win.activeDirectory = currentDir
+                                windowRef.activeDirectory = currentDir
                         }
-                        onSessionFinished: win.closeTab(tabPane.tabIndex)
+                        onSessionFinished: windowRef.closeTab(tabPane.tabIndex)
                         onThumbnailReady: (filePath, version) =>
                             sidebar.setPreview(tabPane.tabIndex, filePath)
                     }
