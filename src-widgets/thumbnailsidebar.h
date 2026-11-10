@@ -10,6 +10,7 @@
 
 class QListWidget;
 class QToolButton;
+class QResizeEvent;
 
 /*
  * Left-hand tab list with live terminal previews.
@@ -41,8 +42,12 @@ signals:
     void settingsRequested();
     void layoutToggleRequested();
 
+protected:
+    void resizeEvent(QResizeEvent *event) override;
+
 private:
-    void rebuildCount();
+    /* Card size that fills the list viewport, so no dead strip remains. */
+    QSize itemSize() const;
 
     QListWidget *m_list = nullptr;
     QSize m_previewSize{150, 90};

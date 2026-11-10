@@ -115,10 +115,17 @@ void MainWindow::buildLayout()
 
     m_splitter->addWidget(m_sidebar);
     m_splitter->addWidget(m_tabs);
+    setCentralWidget(m_splitter);
+
+    // Pin the splitter to the sidebar's own width.
+    //
+    // A QSplitter keeps its remembered handle position and hands the sidebar
+    // that width even when the sidebar wants less, leaving a dead strip before
+    // the terminal (that strip is why dragging the handle appeared to "fix"
+    // it). Sizes must be set after both children are in place.
     m_splitter->setStretchFactor(0, 0);
     m_splitter->setStretchFactor(1, 1);
-
-    setCentralWidget(m_splitter);
+    m_splitter->setSizes({m_sidebar->sizeHint().width(), 1});
 
     connect(m_tabs, &QTabWidget::tabCloseRequested, this, &MainWindow::closeTab);
     connect(m_tabs, &QTabWidget::currentChanged, this, [this](int index) {

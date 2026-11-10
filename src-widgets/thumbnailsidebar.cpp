@@ -9,6 +9,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QListWidget>
+#include <QResizeEvent>
 #include <QToolButton>
 #include <QVBoxLayout>
 
@@ -22,7 +23,14 @@ constexpr int kTabIndexRole = Qt::UserRole + 2;
 ThumbnailSidebar::ThumbnailSidebar(QWidget *parent)
     : QWidget(parent)
 {
-    setFixedWidth(196);
+    // Do NOT setFixedWidth here. A fixed width fights the QSplitter: the
+    // splitter keeps handing this widget its remembered size (e.g. 256px)
+    // while the widget renders only 196px, leaving a dead strip between the
+    // sidebar and the terminal that disappears only when the handle is dragged.
+    // A minimum width plus the splitter's own sizing is the fix.
+    setMinimumWidth(176);
+    setMaximumWidth(420);
+    setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
 
     auto *outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
@@ -71,6 +79,10 @@ ThumbnailSidebar::ThumbnailSidebar(QWidget *parent)
     m_list->setUniformItemSizes(true);
     m_list->setIconSize(m_previewSize);
     m_list->setSpacing(4);
+    // Cards should span the sidebar width rather than sitting at a fixed size
+    // with dead space to their right.
+    m_list->setWordWrap(false);
+    m_list->setTextElideMode(Qt::ElideMiddle);
     m_list->setFrameShape(QFrame::NoFrame);
     m_list->setSelectionMode(QAbstractItemView::SingleSelection);
     m_list->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -99,14 +111,12 @@ void ThumbnailSidebar::syncTabs(const QStringList &titles, int currentIndex)
 
     for (int i = 0; i < titles.size(); ++i) {
         QListWidgetItem *item = m_list->item(i);
-        if (!item) {
+        if (!item)
             item = new QListWidgetItem(m_list);
-            item->setSizeHint(QSize(m_previewSize.width() + 16,
-                                    m_previewSize.height() + 30));
-        }
         item->setText(titles.at(i).isEmpty() ? tr("Terminal") : titles.at(i));
         item->setData(kTabIndexRole, i);
         item->setToolTip(item->text());
+        item->setSizeHint(itemSize());
     }
 
     if (currentIndex >= 0 && currentIndex < m_list->count())
@@ -136,7 +146,24 @@ void ThumbnailSidebar::setTitle(int index, const QString &title)
     item->setToolTip(item->text());
 }
 
-void ThumbnailSidebar::rebuildCount()
+// Card size that spans the current viewport width, so cards do not sit at a
+// fixed size with an empty strip beside them.
+QSize ThumbnailSidebar::itemSize() const
 {
-    // Unused placeholder kept for symmetry with future per-card widgets.
+    const int margin = 8;
+    int width = m_previewSize.width();
+    if (m_list && m_list->viewport())
+        width = qMax(64, m_list->viewport()->width() - margin);
+    return QSize(width, m_previewSize.height() + 30);
+}
+
+void ThumbnailSidebar::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    // Item width tracks the viewport, so re-apply hints when we change width.
+    if (!m_list)
+        return;
+    const QSize sz = itemSize();
+    for (int i = 0; i < m_list->count(); ++i)
+        m_list->item(i)->setSizeHint(sz);
 }
