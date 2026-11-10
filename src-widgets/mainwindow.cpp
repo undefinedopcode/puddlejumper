@@ -13,6 +13,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QMenuBar>
 #include <QSplitter>
@@ -20,6 +21,7 @@
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTimer>
+#include <QToolButton>
 #include <QVBoxLayout>
 
 #include <Emulation.h>
@@ -76,6 +78,40 @@ void MainWindow::buildLayout()
     m_tabs->setDocumentMode(true);
     m_tabs->setElideMode(Qt::ElideRight);
     m_tabs->tabBar()->setExpanding(false);
+
+    // Chrome buttons for the top-tab layout.
+    //
+    // In thumbnail mode the sidebar header carries these, and the tab bar is
+    // hidden, so a corner widget on the tab widget is exactly the right place:
+    // it is only visible when tabs are visible.
+    auto *corner = new QWidget(m_tabs);
+    auto *cornerLayout = new QHBoxLayout(corner);
+    cornerLayout->setContentsMargins(0, 0, 4, 0);
+    cornerLayout->setSpacing(0);
+
+    auto makeCornerButton = [corner](const QString &text, const QString &tip) {
+        auto *b = new QToolButton(corner);
+        b->setText(text);
+        b->setToolTip(tip);
+        b->setAutoRaise(true);
+        // Never steal keyboard focus from the terminal.
+        b->setFocusPolicy(Qt::NoFocus);
+        return b;
+    };
+
+    auto *newBtn = makeCornerButton(QStringLiteral("＋"), tr("New tab (Ctrl+Shift+T)"));
+    auto *sidebarBtn = makeCornerButton(QStringLiteral("▤"), tr("Use thumbnail sidebar"));
+    auto *settingsBtn = makeCornerButton(QStringLiteral("⚙"), tr("Settings (Ctrl+,)"));
+    cornerLayout->addWidget(newBtn);
+    cornerLayout->addWidget(sidebarBtn);
+    cornerLayout->addWidget(settingsBtn);
+    m_tabs->setCornerWidget(corner, Qt::TopRightCorner);
+
+    connect(newBtn, &QToolButton::clicked, this, &MainWindow::newTab);
+    connect(settingsBtn, &QToolButton::clicked, this, [this]() { openSettings(); });
+    connect(sidebarBtn, &QToolButton::clicked, this, [this]() {
+        m_settings.setTabLayout(QStringLiteral("thumbnails"));
+    });
 
     m_splitter->addWidget(m_sidebar);
     m_splitter->addWidget(m_tabs);
