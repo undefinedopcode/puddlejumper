@@ -143,4 +143,10 @@ if(SUPERTERM_BUILD_WIDGETS)
         AUTOMOC ON
         OUTPUT_NAME superterm-widgets
     )
+
+    # Embed the icon so the window/taskbar gets it without an install step.
+    qt_add_resources(superterm-widgets "widgets_icons"
+        PREFIX "/"
+        FILES icons/superterm.svg
+    )
 endif()
