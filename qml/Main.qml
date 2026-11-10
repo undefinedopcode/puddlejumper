@@ -28,6 +28,14 @@ ApplicationWindow {
     property string activeDirectory: ""
     property bool   settingsOpen: false
 
+    // The settings controls (sliders, combos, switches) legitimately take
+    // focus while in use. Hand it back to the terminal when the drawer closes,
+    // otherwise keystrokes keep going to the last control touched.
+    onSettingsOpenChanged: {
+        if (!settingsOpen)
+            Qt.callLater(win.focusCurrentTab)
+    }
+
     // Central state shared by every tab.
     QtObject {
         id: themeState
@@ -85,6 +93,9 @@ ApplicationWindow {
             anchors.verticalCenter: parent.verticalCenter
             width: 24
             height: 24
+            // Chrome must never take focus from the terminal; pressing it
+            // would otherwise leave keystrokes bound to the button.
+            focusPolicy: Qt.NoFocus
             visible: hover.containsMouse || tb.isCurrent
             text: "✕"
             font.pixelSize: 11
@@ -198,6 +209,7 @@ ApplicationWindow {
                 ToolButton {
                     text: "＋"
                     font.pixelSize: 16
+                    focusPolicy: Qt.NoFocus
                     onClicked: win.newTab()
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("New tab (Ctrl+Shift+T)")
@@ -216,6 +228,7 @@ ApplicationWindow {
                 }
 
                 ToolButton {
+                    focusPolicy: Qt.NoFocus
                     text: "⚙"
                     font.pixelSize: 14
                     onClicked: win.settingsOpen = !win.settingsOpen

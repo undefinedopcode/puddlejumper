@@ -143,6 +143,13 @@ A few things that cost time and are worth knowing if you extend this:
   *every* tab. `Main.qml` calls `focusCurrentTab()` whenever the tab index
   changes. The same bug silences the cursor blink, because QMLTermWidget only
   starts its blink timer when the display has focus.
+- **Chrome buttons must set `focusPolicy: Qt.NoFocus`.** A `ToolButton` takes
+  active focus when clicked, so pressing the gear button silently stole the
+  keyboard from the terminal and it stopped responding until you switched
+  tabs. `activeFocusOnTab: false` is *not* enough — it only affects tab
+  navigation, not mouse focus. The drawer also returns focus to the terminal
+  when it closes, since the sliders and combos legitimately hold focus while
+  in use.
 - **Reassign `var` array models instead of mutating them.** `tabModel.push()`
   emits no change signal, so the tab strip and pane `Repeater` never update.
 - **`history` is scrollback, not the visible screen** — it stays empty until

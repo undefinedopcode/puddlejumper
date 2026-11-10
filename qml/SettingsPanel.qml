@@ -52,6 +52,7 @@ Rectangle {
             }
             ToolButton {
                 text: "\u2715"
+                focusPolicy: Qt.NoFocus
                 onClicked: root.close()
                 contentItem: Text {
                     text: parent.text
