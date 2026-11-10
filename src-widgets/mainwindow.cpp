@@ -41,7 +41,7 @@ MainWindow::MainWindow(QWidget *parent)
     // this refreshes the current tab and leaves the others on their last image.
     m_previewTimer = new QTimer(this);
     m_previewTimer->setInterval(2500);
-    connect(m_previewTimer, &QTimer::timeout, this, &MainWindow::refreshThumbnail);
+    connect(m_previewTimer, &QTimer::timeout, this, &MainWindow::captureNextPreview);
     m_previewTimer->start();
 
     connect(&m_settings, &Settings::appearanceChanged,
@@ -131,7 +131,7 @@ void MainWindow::buildLayout()
     connect(m_tabs, &QTabWidget::currentChanged, this, [this](int index) {
         m_sidebar->setCurrentIndex(index);
         updateStatus();
-        refreshThumbnail();
+        captureNextPreview();
     });
 
     connect(m_sidebar, &ThumbnailSidebar::tabActivated, this, [this](int index) {
@@ -284,7 +284,7 @@ void MainWindow::newTab()
     });
 
     syncTabTitles();
-    refreshThumbnail();
+    captureNextPreview();
 }
 
 void MainWindow::closeTab(int index)
@@ -324,7 +324,7 @@ void MainWindow::updateTabLayout()
 
     if (thumbs) {
         syncTabTitles();
-        refreshThumbnail();
+        captureNextPreview();
     }
 }
 
@@ -337,18 +337,62 @@ void MainWindow::syncTabTitles()
     m_sidebar->syncTabs(titles, m_tabs->currentIndex());
 }
 
-void MainWindow::refreshThumbnail()
+/*
+ * Capture previews for every tab, including inactive ones.
+ *
+ * A QTabWidget page that is not current never paints, and an unpainted widget
+ * grabs as a blank pixmap (a hidden page also reports 100x30 until laid out).
+ * So inactive previews require showing the tab briefly.
+ *
+ * The rotation is deliberately one tab per timer tick: switch on this tick,
+ * grab on the next, which is what gives Qt a chance to paint. Measured
+ * behaviour is that a same-tick grab yields 1 colour (blank) while a
+ * cross-tick grab yields ~280 distinct colours of real content.
+ *
+ * Only runs when the sidebar is visible, since the previews exist solely for it.
+ */
+void MainWindow::captureNextPreview()
 {
     if (m_settings.appearance().tabLayout != QStringLiteral("thumbnails"))
-        return; // nothing to show
-
-    auto *term = currentTerminal();
-    if (!term)
+        return;
+    if (m_tabs->count() == 0)
         return;
 
-    const QPixmap pm = term->previewPixmap(QSize(150, 90));
-    if (!pm.isNull())
-        m_sidebar->setPreview(m_tabs->currentIndex(), pm);
+    // Second half of a capture: the target has now had a chance to paint.
+    if (m_capturingPreview) {
+        if (auto *term = terminalAt(m_previewTarget)) {
+            const QPixmap pm = term->previewPixmap(QSize(150, 90));
+            if (!pm.isNull())
+                m_sidebar->setPreview(m_previewTarget, pm);
+        }
+        if (m_restoreTab >= 0 && m_restoreTab < m_tabs->count())
+            m_tabs->setCurrentIndex(m_restoreTab);
+        m_capturingPreview = false;
+        m_previewTarget = -1;
+        m_restoreTab = -1;
+        return;
+    }
+
+    if (m_nextPreviewTab >= m_tabs->count())
+        m_nextPreviewTab = 0;
+
+    m_previewTarget = m_nextPreviewTab;
+    ++m_nextPreviewTab;
+
+    if (m_previewTarget == m_tabs->currentIndex()) {
+        // Already visible; grab straight away without switching.
+        if (auto *term = terminalAt(m_previewTarget)) {
+            const QPixmap pm = term->previewPixmap(QSize(150, 90));
+            if (!pm.isNull())
+                m_sidebar->setPreview(m_previewTarget, pm);
+        }
+        m_previewTarget = -1;
+        return;
+    }
+
+    m_restoreTab = m_tabs->currentIndex();
+    m_capturingPreview = true;
+    m_tabs->setCurrentIndex(m_previewTarget);
 }
 
 void MainWindow::updateStatus()

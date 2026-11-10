@@ -40,9 +40,11 @@ private slots:
     void newTab();
     void closeTab(int index);
     void applyAppearanceToAll();
-    void refreshThumbnail();
     void updateStatus();
     void updateTabLayout();
+
+    /* Capture one tab's preview, rotating through all tabs over time. */
+    void captureNextPreview();
 
 private:
     TerminalWidget *currentTerminal() const;
@@ -64,6 +66,21 @@ private:
     QLabel *m_statusDir = nullptr;
     QLabel *m_statusInfo = nullptr;
     QTimer *m_previewTimer = nullptr;
+
+    /*
+     * Preview rotation.
+     *
+     * A widget only has pixels once it has painted, and a hidden QTabWidget
+     * page never paints: grabbing one yields a blank image (measured -- a
+     * hidden page also collapses to 100x30 until laid out). To preview
+     * inactive tabs the app briefly brings each one to the front, lets it
+     * paint, grabs it, and restores the user's tab. The dwell is short enough
+     * to be visually negligible but must span an event-loop turn.
+     */
+    int m_previewTarget = -1;      // tab currently being captured
+    int m_restoreTab = -1;         // tab to return to afterwards
+    bool m_capturingPreview = false;
+    int m_nextPreviewTab = 0;      // rotation cursor
 
     int m_nextTabId = 1;
 };
