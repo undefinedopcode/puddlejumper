@@ -91,3 +91,61 @@ Keep `explore/qtwidgets` as a spike, not a migration: build the shell
 unreachable settings from the real UI before committing to porting the rest.
 That is a few hundred lines and answers the only question that matters — does
 the widgets UI feel acceptable to you.
+
+## Spike: built and verified
+
+`spike-widgets/` — a separate `superterm-widgets` target (never touches the QML
+app):
+
+```sh
+cmake --build build --target superterm-widgets
+./build/superterm-widgets              # platform style (here: darkly)
+./build/superterm-widgets --style Fusion   # neutral look, same everywhere
+```
+
+`QMainWindow` + `QTabWidget` + `QTermWidget`, with a settings dock exposing the
+four settings the QML build could not reach. Verified at runtime by driving the
+controls and reading the terminal's own state back:
+
+```
+SPIKE historySize      = 12345     (spinbox -> setHistorySize)
+SPIKE keyBindings      = "default"
+SPIKE screen cols/rows = 45 18
+SPIKE hasSearchBar     = true       (built in, no overlay to write)
+```
+
+Plus `setDrawLineChars()` and `setKeyboardCursorShape()` driven from real
+combos, and OSC titles arriving via `QTermWidget::titleChanged`.
+
+### Platform styling
+
+The point you raised: widget styling comes from the platform automatically.
+On this machine the spike reports `platform widget style: "darkly"` — your KDE
+theme applied with no code from us. `--style Fusion` gives an identical look on
+any platform instead, so the choice is available per-build if you want
+consistency over native integration.
+
+### Practical notes for a full port
+
+- `QTermWidget::KeyboardCursorShape` aliases the type but not its values; the
+  enumerators are in `Konsole::Emulation::KeyboardCursorShape` (`#include
+  <Emulation.h>`).
+- The terminal display is reachable as a child widget (`findChildren<QWidget*>`
+  matching `Konsole::TerminalDisplay`), which is how thumbnails would work —
+  with `QWidget::grab()`, and without the FBO workaround.
+- `colorScheme()` and `blinkingCursor()` have setters but no getters; track
+  those in the app rather than reading them back.
+- The QML target must still not link `qtermwidget6`. The spike target does,
+  because it does not load the QML plugin — the two can coexist in one
+  CMakeLists as separate executables.
+
+## Remaining work if it proceeds
+
+1. Port the chrome: custom tab bar or `QTabWidget` styling, status bar, and the
+   settings dialog (QDialog rather than a dock).
+2. Decide the thumbnail sidebar: a `QListWidget` of grabbed pixmaps, refreshed
+   on a timer, replacing the QML `ListView` version.
+3. Port the dark fallback palette to `QPalette`, or adopt the platform palette
+   outright.
+4. Persistence: `SettingsStore` is already `QSettings`, so it survives largely
+   as-is; only the QML-facing wrappers would move.

@@ -9,7 +9,7 @@ project(superterm
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick QuickControls2)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Quick QuickControls2 Widgets)
 qt_standard_project_setup(REQUIRES 6.5)
 
 # ---------------------------------------------------------------------------
@@ -103,3 +103,39 @@ qt_generate_deploy_qml_app_script(
     NO_UNSUPPORTED_PLATFORM_ERROR
 )
 install(SCRIPT ${deploy_script})
+
+# ---------------------------------------------------------------------------
+# Widgets spike (branch explore/qtwidgets only)
+#
+# A separate executable so it can never affect the QML app. This one DOES link
+# qtermwidget6, which the QML build must not do (see the note above): here the
+# Widgets library is the entire point, and the QML plugin is not loaded, so the
+# duplicate-symbol problem does not arise.
+#
+#   cmake --build build --target superterm-widgets
+#   ./build/superterm-widgets
+# ---------------------------------------------------------------------------
+option(SUPERTERM_BUILD_WIDGETS_SPIKE "Build the Qt Widgets port spike" ON)
+
+if(SUPERTERM_BUILD_WIDGETS_SPIKE)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(QTERMWIDGET6 REQUIRED IMPORTED_TARGET qtermwidget6)
+
+    qt_add_executable(superterm-widgets
+        spike-widgets/main.cpp
+        spike-widgets/mainwindow.cpp
+        spike-widgets/mainwindow.h
+    )
+    target_link_libraries(superterm-widgets PRIVATE
+        Qt6::Core
+        Qt6::Gui
+        Qt6::Widgets
+        PkgConfig::QTERMWIDGET6
+    )
+    set_target_properties(superterm-widgets PROPERTIES
+        AUTOMOC ON
+        OUTPUT_NAME superterm-widgets
+    )
+    # The QML target disables AUTOMOC at project level; this one needs it for
+    # MainWindow's Q_OBJECT.
+endif()
