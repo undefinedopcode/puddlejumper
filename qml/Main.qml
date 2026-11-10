@@ -28,6 +28,84 @@ ApplicationWindow {
     property string activeDirectory: ""
     property bool   settingsOpen: false
 
+    // ---- Persistence ---------------------------------------------------
+    // Values are written straight through on change: settings are small and
+    // a burst of slider drags is harmless, whereas losing them on a crash is
+    // not.
+    readonly property string kColorScheme: "appearance/colorScheme"
+    readonly property string kFont:        "appearance/fontFamily"
+    readonly property string kFontSize:    "appearance/fontSize"
+    readonly property string kOpacity:     "appearance/opacity"
+    readonly property string kBlink:       "appearance/blinkingCursor"
+    readonly property string kBold:        "appearance/boldIntense"
+
+    function loadSettings() {
+        // Guard: context properties are absent when running under a bare
+        // qml runtime, in which case we simply keep the defaults.
+        if (typeof settingsStore === "undefined" || settingsStore === null)
+            return
+
+        const scheme = settingsStore.stringValue(kColorScheme, win.colorScheme)
+        if (Theme.colorSchemes.indexOf(scheme) !== -1)
+            win.colorScheme = scheme
+
+        const font = settingsStore.stringValue(kFont, win.monoFont)
+        if (font !== "" && (typeof monoFontFamilies === "undefined"
+                            || monoFontFamilies.indexOf(font) !== -1))
+            win.monoFont = font
+
+        win.monoFontSize = settingsStore.doubleValue(kFontSize, win.monoFontSize)
+        win.termOpacity = settingsStore.doubleValue(kOpacity, win.termOpacity)
+        win.blinking = settingsStore.boolValue(kBlink, win.blinking)
+        win.boldIntense = settingsStore.boolValue(kBold, win.boldIntense)
+
+        restoreGeometry()
+    }
+
+    function saveSetting(key, value) {
+        if (typeof settingsStore === "undefined" || settingsStore === null)
+            return
+        if (typeof value === "number")
+            settingsStore.setDouble(key, value)
+        else if (typeof value === "boolean")
+            settingsStore.setBool(key, value)
+        else
+            settingsStore.setString(key, value)
+    }
+
+    function restoreGeometry() {
+        if (typeof settingsStore === "undefined" || settingsStore === null)
+            return
+        if (!settingsStore.contains("window/width"))
+            return
+        const w = settingsStore.intValue("window/width", win.width)
+        const h = settingsStore.intValue("window/height", win.height)
+        if (w > 0 && h > 0) {
+            win.width = Math.max(win.minimumWidth, w)
+            win.height = Math.max(win.minimumHeight, h)
+        }
+        const x = settingsStore.intValue("window/x", -1)
+        const y = settingsStore.intValue("window/y", -1)
+        if (x >= 0 && y >= 0) {
+            // Window.x / Window.y are writable properties, not setters.
+            win.x = x
+            win.y = y
+        }
+        if (settingsStore.boolValue("window/maximized", false))
+            win.showMaximized()
+    }
+
+    function saveGeometry() {
+        if (typeof settingsStore === "undefined" || settingsStore === null)
+            return
+        // Store the normal (un-maximised) geometry so un-maximising restores
+        // a sensible size.
+        const maximized = win.visibility === Window.Maximized
+        settingsStore.saveWindow(Math.round(win.x), Math.round(win.y),
+                                 Math.round(win.width), Math.round(win.height),
+                                 maximized)
+    }
+
     // The settings controls (sliders, combos, switches) legitimately take
     // focus while in use. Hand it back to the terminal when the drawer closes,
     // otherwise keystrokes keep going to the last control touched.
@@ -156,12 +234,17 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        loadSettings()
         newTab()
         Qt.callLater(function() {
             const p = activePane()
             if (p && p.focusTerminal) p.focusTerminal()
         })
     }
+
+    // Save geometry on the way out; the appearance settings are already
+    // persisted as they change.
+    onClosing: saveGeometry()
 
 
     ColumnLayout {
@@ -374,12 +457,30 @@ ApplicationWindow {
         boldIntense: win.boldIntense
         schemes: Theme.colorSchemes
 
-        onColorSchemeEdited: (value) => win.colorScheme = value
-        onFontFamilyEdited: (value) => win.monoFont = value
-        onFontSizeEdited: (value) => win.monoFontSize = value
-        onOpacityEdited: (value) => win.termOpacity = value
-        onBlinkCursorEdited: (value) => win.blinking = value
-        onBoldIntenseEdited: (value) => win.boldIntense = value
+        onColorSchemeEdited: (value) => {
+            win.colorScheme = value
+            win.saveSetting(win.kColorScheme, value)
+        }
+        onFontFamilyEdited: (value) => {
+            win.monoFont = value
+            win.saveSetting(win.kFont, value)
+        }
+        onFontSizeEdited: (value) => {
+            win.monoFontSize = value
+            win.saveSetting(win.kFontSize, value)
+        }
+        onOpacityEdited: (value) => {
+            win.termOpacity = value
+            win.saveSetting(win.kOpacity, value)
+        }
+        onBlinkCursorEdited: (value) => {
+            win.blinking = value
+            win.saveSetting(win.kBlink, value)
+        }
+        onBoldIntenseEdited: (value) => {
+            win.boldIntense = value
+            win.saveSetting(win.kBold, value)
+        }
         onCloseRequested: win.settingsOpen = false
 
         Behavior on x {

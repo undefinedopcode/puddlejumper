@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=SuperTerm
+GenericName=Terminal Emulator
+Comment=A modern terminal built on Qt Quick
+Exec=superterm
+Icon=superterm
+Terminal=false
+Categories=TerminalEmulator;System;
+Keywords=terminal;shell;console;command;
+StartupNotify=true
+StartupWMClass=superterm

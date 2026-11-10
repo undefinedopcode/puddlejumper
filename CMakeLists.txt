@@ -45,6 +45,8 @@ message(STATUS "QMLTermWidget import dir: ${QMLTERMWIDGET_IMPORT_DIR}")
 
 qt_add_executable(superterm
     src/main.cpp
+    src/settings_store.h
+    src/settings_store.cpp
 )
 
 # Must be set BEFORE qt_add_qml_module so the generated qmldir marks Theme
@@ -80,6 +82,16 @@ target_compile_definitions(superterm PRIVATE
 install(TARGETS superterm
     BUNDLE  DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+# Desktop entry and icon, so the app appears in launchers and the xdg portal
+# recognises its app id (which also silences the startup portal warning).
+include(GNUInstallDirs)
+install(FILES data/superterm.desktop
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
+)
+install(FILES icons/superterm.svg
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
 )
 
 qt_generate_deploy_qml_app_script(

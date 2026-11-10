@@ -13,6 +13,8 @@
 #include <QDir>
 #include <QDebug>
 
+#include "settings_store.h"
+
 int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
@@ -74,6 +76,9 @@ int main(int argc, char *argv[])
     QQmlApplicationEngine engine;
     engine.rootContext()->setContextProperty(QStringLiteral("defaultMonoFont"), mono);
     engine.rootContext()->setContextProperty(QStringLiteral("monoFontFamilies"), monoFamilies);
+
+    SettingsStore settingsStore;
+    engine.rootContext()->setContextProperty(QStringLiteral("settingsStore"), &settingsStore);
 
     // Optional shell override, useful for testing:
     //   SUPERTERM_SHELL=/bin/fish SUPERTERM_SHELL_ARGS="-l" superterm

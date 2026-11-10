@@ -68,6 +68,48 @@ Environment overrides, handy for testing:
 SUPERTERM_SHELL=/bin/fish SUPERTERM_SHELL_ARGS="-l" ./build/superterm
 ```
 
+### Install
+
+```sh
+cmake --install build --prefix ~/.local
+```
+
+This installs the binary, a `superterm.desktop` entry and the icon, so the app
+appears in your launcher. (Installing to `~/.local` also gives xdg-desktop-
+portal an app id to match, which silences the startup portal warning you get
+when running straight from the build tree.)
+
+## Settings
+
+Appearance settings and window geometry persist across runs via `QSettings`:
+
+| Platform | Location |
+| --- | --- |
+| Linux | `~/.config/superterm/superterm.conf` |
+| macOS | `~/Library/Preferences/com.superterm.superterm.plist` |
+
+Stored keys:
+
+```ini
+[appearance]
+colorScheme=Nord
+fontFamily=Hack
+fontSize=18
+opacity=0.9
+blinkingCursor=true
+boldIntense=true
+
+[window]
+x=100
+y=80
+width=1100
+height=700
+maximized=false
+```
+
+Appearance changes are written as they happen; window geometry is saved when
+the window closes. Delete the file to return to defaults.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -87,11 +129,14 @@ SUPERTERM_SHELL=/bin/fish SUPERTERM_SHELL_ARGS="-l" ./build/superterm
 ```
 CMakeLists.txt          build definition
 src/main.cpp            QGuiApplication + QQmlApplicationEngine bootstrap
+src/settings_store.*    QSettings wrapper exposed to QML
 qml/Main.qml            window chrome, tab strip, status bar, shortcuts
 qml/TerminalPane.qml    wraps one QMLTermWidget + QMLTermSession
 qml/SearchBar.qml       inline find overlay
 qml/SettingsPanel.qml   colour scheme / font / opacity / cursor settings
 qml/Theme.qml           singleton: palette, metrics, colour-scheme list
+data/superterm.desktop  launcher entry
+icons/superterm.svg     app icon
 ```
 
 ## Platform support
