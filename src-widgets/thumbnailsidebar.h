@@ -35,6 +35,9 @@ public:
     void setCurrentIndex(int index);
     void setTitle(int index, const QString &title);
 
+    /* Mark a tab that produced output while it was not being watched. */
+    void setBusy(int index, bool busy);
+
 signals:
     void tabActivated(int index);
     void tabClosed(int index);

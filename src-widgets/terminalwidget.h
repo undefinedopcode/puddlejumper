@@ -44,13 +44,35 @@ public:
     /* A live preview of the terminal as painted. Empty if unavailable. */
     QPixmap previewPixmap(const QSize &size) const;
 
+    /*
+     * Content tracking.
+     *
+     * receivedData() fires from the pty, so it fires for hidden tabs too.
+     * That makes it usable as a dirty flag: the sidebar only needs to
+     * re-capture a tab whose output has changed since the last grab, instead
+     * of rotating blindly through every tab.
+     */
+    bool hasNewOutput() const { return m_dirty; }
+    void clearNewOutput() { m_dirty = false; }
+
+    /* Monotonic count of output chunks, for cheap change detection. */
+    quint64 outputSeq() const { return m_outputSeq; }
+
 signals:
     void titleChanged(const QString &title);
     void sessionFinished();
+    /* Coalesced so a burst of output does not spam the window. */
+    void outputArrived();
 
 private:
+    void onOutput();
+
     int m_id = 0;
     const Settings &m_settings;
     QTermWidget *m_terminal = nullptr;
     QString m_title;
+
+    bool m_dirty = false;
+    quint64 m_outputSeq = 0;
+    quint64 m_reportedSeq = 0;
 };

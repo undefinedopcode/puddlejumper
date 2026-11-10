@@ -18,6 +18,7 @@ namespace {
 // the whole list (which would lose scroll position).
 constexpr int kPreviewRole = Qt::UserRole + 1;
 constexpr int kTabIndexRole = Qt::UserRole + 2;
+constexpr int kBaseTitleRole = Qt::UserRole + 3;
 } // namespace
 
 ThumbnailSidebar::ThumbnailSidebar(QWidget *parent)
@@ -113,10 +114,12 @@ void ThumbnailSidebar::syncTabs(const QStringList &titles, int currentIndex)
         QListWidgetItem *item = m_list->item(i);
         if (!item)
             item = new QListWidgetItem(m_list);
-        item->setText(titles.at(i).isEmpty() ? tr("Terminal") : titles.at(i));
+        const QString base = titles.at(i).isEmpty() ? tr("Terminal") : titles.at(i);
+        item->setData(kBaseTitleRole, base);
         item->setData(kTabIndexRole, i);
-        item->setToolTip(item->text());
         item->setSizeHint(itemSize());
+        // Keep any busy marker the item already has.
+        setBusy(i, item->text().startsWith(QStringLiteral("\u25cf ")));
     }
 
     if (currentIndex >= 0 && currentIndex < m_list->count())
@@ -142,8 +145,10 @@ void ThumbnailSidebar::setTitle(int index, const QString &title)
     if (index < 0 || index >= m_list->count())
         return;
     QListWidgetItem *item = m_list->item(index);
-    item->setText(title.isEmpty() ? tr("Terminal") : title);
-    item->setToolTip(item->text());
+    const QString base = title.isEmpty() ? tr("Terminal") : title;
+    const bool wasBusy = item->text().startsWith(QStringLiteral("\u25cf "));
+    item->setData(kBaseTitleRole, base);
+    setBusy(index, wasBusy);
 }
 
 // Card size that spans the current viewport width, so cards do not sit at a
@@ -166,4 +171,17 @@ void ThumbnailSidebar::resizeEvent(QResizeEvent *event)
     const QSize sz = itemSize();
     for (int i = 0; i < m_list->count(); ++i)
         m_list->item(i)->setSizeHint(sz);
+}
+
+void ThumbnailSidebar::setBusy(int index, bool busy)
+{
+    if (index < 0 || index >= m_list->count())
+        return;
+    QListWidgetItem *item = m_list->item(index);
+    // A dot before the label marks a tab that produced output while you were
+    // not looking at it. Cheap, and it survives without extra widgets.
+    const QString base = item->data(kBaseTitleRole).toString();
+    const QString title = base.isEmpty() ? tr("Terminal") : base;
+    item->setText(busy ? QStringLiteral("\u25cf ") + title : title);
+    item->setToolTip(busy ? tr("%1 — new output").arg(title) : title);
 }

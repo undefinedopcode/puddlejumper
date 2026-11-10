@@ -283,6 +283,17 @@ void MainWindow::newTab()
             closeTab(i);
     });
 
+    // Mark a tab as having new output when it is not the one on screen. This is
+    // the visible "something changed here" cue, and it also tells the preview
+    // rotation which tab is worth re-capturing.
+    connect(term, &TerminalWidget::outputArrived, this, [this, term]() {
+        const int i = m_tabs->indexOf(term);
+        if (i < 0)
+            return;
+        if (i != m_tabs->currentIndex())
+            m_sidebar->setBusy(i, true);
+    });
+
     syncTabTitles();
     captureNextPreview();
 }
@@ -338,18 +349,22 @@ void MainWindow::syncTabTitles()
 }
 
 /*
- * Capture previews for every tab, including inactive ones.
+ * Capture a preview for a tab whose output has changed.
  *
- * A QTabWidget page that is not current never paints, and an unpainted widget
- * grabs as a blank pixmap (a hidden page also reports 100x30 until laid out).
- * So inactive previews require showing the tab briefly.
+ * Two measured facts drive this:
  *
- * The rotation is deliberately one tab per timer tick: switch on this tick,
- * grab on the next, which is what gives Qt a chance to paint. Measured
- * behaviour is that a same-tick grab yields 1 colour (blank) while a
- * cross-tick grab yields ~280 distinct colours of real content.
+ * 1. A QTabWidget page that is not current never paints, and an unpainted
+ *    widget grabs as a blank pixmap (a hidden page also reports 100x30 until
+ *    laid out). Neither grab() nor render() helps; switching is required.
+ * 2. receivedData() fires from the pty even for hidden tabs, so we know which
+ *    tab actually changed without looking at it.
  *
- * Only runs when the sidebar is visible, since the previews exist solely for it.
+ * Together: the rotation only visits tabs that have produced output since their
+ * last capture. An idle set of tabs costs nothing, and the visible tab stays
+ * put unless something changed.
+ *
+ * A capture spans two ticks -- show the tab, then grab it -- because a
+ * same-tick grab yields a blank image; the paint has not happened yet.
  */
 void MainWindow::captureNextPreview()
 {
@@ -364,6 +379,7 @@ void MainWindow::captureNextPreview()
             const QPixmap pm = term->previewPixmap(QSize(150, 90));
             if (!pm.isNull())
                 m_sidebar->setPreview(m_previewTarget, pm);
+            term->clearNewOutput();
         }
         if (m_restoreTab >= 0 && m_restoreTab < m_tabs->count())
             m_tabs->setCurrentIndex(m_restoreTab);
@@ -373,11 +389,31 @@ void MainWindow::captureNextPreview()
         return;
     }
 
-    if (m_nextPreviewTab >= m_tabs->count())
-        m_nextPreviewTab = 0;
+    // Prefer a tab whose output changed since its last capture.
+    int target = -1;
+    for (int offset = 0; offset < m_tabs->count(); ++offset) {
+        const int i = (m_nextPreviewTab + offset) % m_tabs->count();
+        auto *t = terminalAt(i);
+        if (t && t->hasNewOutput()) {
+            target = i;
+            break;
+        }
+    }
 
-    m_previewTarget = m_nextPreviewTab;
-    ++m_nextPreviewTab;
+    if (target < 0) {
+        // Nothing dirty: nothing worth switching to. Re-grab the visible tab
+        // only, since its image can be stale after a resize or a theme change.
+        if (auto *term = currentTerminal()) {
+            const QPixmap pm = term->previewPixmap(QSize(150, 90));
+            if (!pm.isNull())
+                m_sidebar->setPreview(m_tabs->currentIndex(), pm);
+            term->clearNewOutput();
+        }
+        return;
+    }
+
+    m_nextPreviewTab = (target + 1) % m_tabs->count();
+    m_previewTarget = target;
 
     if (m_previewTarget == m_tabs->currentIndex()) {
         // Already visible; grab straight away without switching.
@@ -385,6 +421,7 @@ void MainWindow::captureNextPreview()
             const QPixmap pm = term->previewPixmap(QSize(150, 90));
             if (!pm.isNull())
                 m_sidebar->setPreview(m_previewTarget, pm);
+            term->clearNewOutput();
         }
         m_previewTarget = -1;
         return;

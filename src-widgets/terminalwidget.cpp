@@ -42,7 +42,27 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings, QWidget *parent
         emit sessionFinished();
     });
 
+    // receivedData fires from the pty, so it also fires while this tab is
+    // hidden. That is what lets the sidebar know a background tab has changed
+    // without having to look at it.
+    connect(m_terminal, &QTermWidget::receivedData, this, [this]() {
+        ++m_outputSeq;
+        m_dirty = true;
+        onOutput();
+    });
+
     m_terminal->startShellProgram();
+}
+
+void TerminalWidget::onOutput()
+{
+    // receivedData can fire many times a second; report at most a few times a
+    // second so the window is not woken up for every chunk of output.
+    static constexpr quint64 kReportEvery = 4;
+    if (m_outputSeq - m_reportedSeq < kReportEvery)
+        return;
+    m_reportedSeq = m_outputSeq;
+    emit outputArrived();
 }
 
 void TerminalWidget::applyAppearance()
