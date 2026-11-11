@@ -40,7 +40,7 @@ public:
          * box-drawing glyphs may be preferable.
          */
         bool    drawLineChars = true;
-        int     lineSpacing = 0;
+        int     lineSpacing = 0;                // extra pixels between rows
         QString tabLayout = QStringLiteral("standard"); // |thumbnails
 
         /*
@@ -108,6 +108,16 @@ public:
          * the prompt intrusive; a prompt is the safe default.
          */
         bool    confirmCloseWithRunningProcesses = true;
+
+        /*
+         * Paste handling (QTermWidget's own options). Both off by default,
+         * which is what the library does. These are input behaviour rather
+         * than scrolling, but live here because they are applied with the rest
+         * of this struct by TerminalWidget::applyScrolling(); their keys are
+         * under input/.
+         */
+        bool    confirmMultilinePaste = false;
+        bool    trimPastedTrailingNewlines = false;
     };
 
     explicit Settings(QObject *parent = nullptr);
@@ -136,6 +146,8 @@ public:
     void setMonitorActivity(bool v);
     void setMonitorSilence(bool v);
     void setSilenceTimeout(int v);
+    void setConfirmMultilinePaste(bool v);
+    void setTrimPastedTrailingNewlines(bool v);
 
     /*
      * Point the running session at a throwaway copy of a scheme, while keeping

@@ -116,6 +116,9 @@ public:
      */
     bool remove(const QString &id);
 
+    /* Make an existing profile the one "New Tab" uses. False if unknown. */
+    bool setDefault(const QString &id);
+
 signals:
     /* Any change to the collection or to a profile's contents. */
     void profilesChanged();

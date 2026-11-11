@@ -1,7 +1,7 @@
 /*
  * Debug probe — NOT installed, NOT part of the app.
  *
- * Instantiates SettingsDialog offscreen, switches to the Scrolling page,
+ * Instantiates SettingsDialog offscreen, switches to the Tabs & Window page,
  * dumps the object tree + sizes of the output-monitoring group, and saves a
  * rendered snapshot to probe-settingsdialog.png.
  */
@@ -26,7 +26,7 @@ int main(int argc, char *argv[])
     Settings settings;
     ProfileStore profiles;
     SettingsDialog dlg(settings, profiles);
-    dlg.showSection(SettingsDialog::Scrolling);
+    dlg.showSection(SettingsDialog::Window);
     dlg.show();
 
     // Give layouts + polish a turn to propagate.
@@ -34,7 +34,7 @@ int main(int argc, char *argv[])
     app.processEvents();
 
     // Find the group by title among SettingsDialog children.
-    auto title = QStringLiteral("Watch a terminal");
+    auto title = QStringLiteral("Watch a Terminal");
     QList<QGroupBox *> groups = dlg.findChildren<QGroupBox *>();
     QGroupBox *watch = nullptr;
     for (auto *g : groups) {

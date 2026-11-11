@@ -233,7 +233,10 @@ void TerminalWidget::applyAppearance()
     // supports it too, so the shared key finally does something here.
     m_terminal->setTerminalOpacity(a.opacity);
 
-    Q_UNUSED(a.lineSpacing) // QTermWidget has no line-spacing setter.
+    // Extra pixels between rows. QTermWidget has no setter for this, but its
+    // display does. Only set on change: it re-applies the font, which reflows.
+    if (auto *d = this->display(); d && d->lineSpacing() != uint(qMax(0, a.lineSpacing)))
+        d->setLineSpacing(uint(qMax(0, a.lineSpacing)));
 }
 
 void TerminalWidget::applyScrolling()
@@ -257,6 +260,9 @@ void TerminalWidget::applyScrolling()
     // When XON/XOFF freezes the display, say so instead of looking hung.
     m_terminal->setFlowControlEnabled(true);
     m_terminal->setFlowControlWarningEnabled(s.flowControlWarning);
+
+    m_terminal->setConfirmMultilinePaste(s.confirmMultilinePaste);
+    m_terminal->setTrimPastedTrailingNewlines(s.trimPastedTrailingNewlines);
 }
 
 void TerminalWidget::applyMonitoring()

@@ -82,6 +82,24 @@ QString ProfileStore::add(const TerminalProfile &profile)
     return id;
 }
 
+bool ProfileStore::setDefault(const QString &id)
+{
+    bool found = false;
+    for (const auto &p : m_profiles)
+        found = found || p.id == id;
+    if (!found)
+        return false;
+    if (id == m_defaultId)
+        return true;
+
+    m_defaultId = id;
+    for (auto &p : m_profiles)
+        p.isDefault = (p.id == id);
+    save();
+    emit profilesChanged();
+    return true;
+}
+
 QString ProfileStore::duplicate(const QString &sourceId)
 {
     const TerminalProfile *source = nullptr;

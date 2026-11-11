@@ -47,6 +47,7 @@ qt_add_executable(superterm
     src-widgets/colorschemeeditor.h
     src-widgets/screenshotoverlay.cpp
     src-widgets/screenshotoverlay.h
+    src-widgets/themeicon.h
 )
 
 target_link_libraries(superterm PRIVATE

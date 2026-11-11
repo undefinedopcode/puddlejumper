@@ -7,24 +7,31 @@
 #pragma once
 
 #include <QDialog>
+#include <QList>
 
 class Settings;
 class ProfileStore;
 class QListWidget;
 class QStackedWidget;
 class QComboBox;
+class QFormLayout;
 class QSlider;
 class QSpinBox;
 class QDoubleSpinBox;
 class QCheckBox;
 class QLabel;
 class QLineEdit;
-class QPushButton;
+class QToolButton;
 class QGroupBox;
+class QVBoxLayout;
 
 /*
- * Sectioned modal settings dialog, mirroring the QML build's pages plus a
- * Profiles page the QML build never had.
+ * Sectioned modal settings dialog.
+ *
+ * Every page is built the same way: titled groups, each a form whose label
+ * column is the same width on every page, so fields don't shift sideways when
+ * switching sections. Checkboxes sit in the field column like any other
+ * control, and hints sit under the control they explain.
  *
  * Edits are applied live through Settings / ProfileStore (which emit and
  * persist), so the dialog itself holds no state that can drift from what the
@@ -40,18 +47,24 @@ public:
     SettingsDialog(Settings &settings, ProfileStore &profiles,
                    QWidget *parent = nullptr);
 
-    enum Section { Appearance = 0, Text, Cursor, Scrolling, Profiles };
+    enum Section { Appearance = 0, Terminal, Window, Profiles };
 
-    /* Open on a specific page, e.g. from the sidebar's "settings" affordance. */
+    /* Open on a specific page. */
     void showSection(Section section);
 
 private:
     QWidget *buildAppearancePage();
-    QWidget *buildTextPage();
-    QWidget *buildCursorPage();
-    QWidget *buildScrollingPage();
+    QWidget *buildTerminalPage();
+    QWidget *buildWindowPage();
     QWidget *buildProfilesPage();
     void syncFromSettings();
+
+    /*
+     * Add a titled group to a page and return its form. Forms made here get
+     * their label column aligned across all pages once every page is built.
+     */
+    QFormLayout *addGroup(QVBoxLayout *page, const QString &title);
+    void alignFormLabels();
 
     /* Profiles page plumbing. */
     void rebuildProfileList(const QString &selectId = QString());
@@ -88,44 +101,54 @@ private:
     Settings &m_settings;
     ProfileStore &m_profiles;
     QListWidget *m_sections = nullptr;
+    QLabel *m_pageTitle = nullptr;
     QStackedWidget *m_pages = nullptr;
+    QList<QFormLayout *> m_forms;
 
+    // Appearance.
     QComboBox *m_schemeBox = nullptr;
-    QPushButton *m_editSchemeBtn = nullptr;
-    QSlider *m_fontSizeSlider = nullptr;
-    QLabel *m_fontSizeLabel = nullptr;
+    QToolButton *m_editSchemeBtn = nullptr;
+    QSlider *m_opacitySlider = nullptr;
+    QLabel *m_opacityLabel = nullptr;
     QComboBox *m_fontBox = nullptr;
+    QDoubleSpinBox *m_fontSizeBox = nullptr;
+    QSpinBox *m_lineSpacingBox = nullptr;
+    QSpinBox *m_marginBox = nullptr;
     QCheckBox *m_boldBox = nullptr;
     QCheckBox *m_italicBox = nullptr;
     QCheckBox *m_antialiasBox = nullptr;
-    QCheckBox *m_blinkBox = nullptr;
-    QComboBox *m_cursorShapeBox = nullptr;
     QCheckBox *m_lineCharsBox = nullptr;
-    QComboBox *m_tabLayoutBox = nullptr;
-    QSpinBox *m_marginBox = nullptr;
     QCheckBox *m_bidiBox = nullptr;
+
+    // Terminal.
+    QComboBox *m_cursorShapeBox = nullptr;
+    QCheckBox *m_blinkBox = nullptr;
+    QSpinBox *m_scrollbackBox = nullptr;
     QComboBox *m_scrollbarPosBox = nullptr;
+    QCheckBox *m_pasteConfirmBox = nullptr;
+    QCheckBox *m_pasteTrimBox = nullptr;
     QCheckBox *m_flowControlWarnBox = nullptr;
-    QCheckBox *m_confirmCloseBox = nullptr;
+
+    // Tabs & Window.
+    QComboBox *m_tabLayoutBox = nullptr;
     QCheckBox *m_monitorActivityBox = nullptr;
     QCheckBox *m_monitorSilenceBox = nullptr;
     QSpinBox *m_silenceTimeoutBox = nullptr;
-    QSlider *m_opacitySlider = nullptr;
-    QLabel *m_opacityLabel = nullptr;
-    QSpinBox *m_scrollbackBox = nullptr;
+    QCheckBox *m_confirmCloseBox = nullptr;
 
     // Profiles page.
     QListWidget *m_profileList = nullptr;
     QLineEdit *m_profileName = nullptr;
+    QCheckBox *m_profileDefaultBox = nullptr;
     QComboBox *m_profileScheme = nullptr;
     QComboBox *m_profileFont = nullptr;
     QDoubleSpinBox *m_profileFontSize = nullptr;
     QLineEdit *m_profileShell = nullptr;
     QLineEdit *m_profileShellArgs = nullptr;
     QLineEdit *m_profileWorkDir = nullptr;
-    QPushButton *m_profileAdd = nullptr;
-    QPushButton *m_profileDuplicate = nullptr;
-    QPushButton *m_profileDelete = nullptr;
+    QToolButton *m_profileAdd = nullptr;
+    QToolButton *m_profileDuplicate = nullptr;
+    QToolButton *m_profileDelete = nullptr;
     QGroupBox *m_profileFormBox = nullptr;
     /*
      * Suppresses the "commit on edit" handlers while the form is being filled

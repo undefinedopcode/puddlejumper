@@ -35,6 +35,8 @@ constexpr auto kConfirmCloseRunning = "scrolling/confirmCloseWithRunningProcesse
 constexpr auto kMonitorActivity = "scrolling/monitorActivity";
 constexpr auto kMonitorSilence  = "scrolling/monitorSilence";
 constexpr auto kSilenceTimeout  = "scrolling/silenceTimeout";
+constexpr auto kConfirmMultilinePaste = "input/confirmMultilinePaste";
+constexpr auto kTrimPastedNewlines    = "input/trimPastedTrailingNewlines";
 constexpr auto kGeometry    = "window/qtGeometry";
 constexpr auto kWinState    = "window/qtState";
 
@@ -87,6 +89,8 @@ void Settings::load()
         m_settings.value(kAntialias, m_appearance.antialias).toBool();
     m_appearance.drawLineChars =
         m_settings.value(kDrawLineChars, m_appearance.drawLineChars).toBool();
+    m_appearance.lineSpacing =
+        m_settings.value(kLineSpacing, m_appearance.lineSpacing).toInt();
     m_appearance.tabLayout =
         m_settings.value(kTabLayout, m_appearance.tabLayout).toString();
     m_appearance.cursorShape =
@@ -113,6 +117,10 @@ void Settings::load()
         m_settings.value(kMonitorSilence, m_scrolling.monitorSilence).toBool();
     m_scrolling.silenceTimeout =
         m_settings.value(kSilenceTimeout, m_scrolling.silenceTimeout).toInt();
+    m_scrolling.confirmMultilinePaste =
+        m_settings.value(kConfirmMultilinePaste, m_scrolling.confirmMultilinePaste).toBool();
+    m_scrolling.trimPastedTrailingNewlines =
+        m_settings.value(kTrimPastedNewlines, m_scrolling.trimPastedTrailingNewlines).toBool();
 
     // Snap to the half-point grid the UI offers.
     m_appearance.fontSize = qRound(m_appearance.fontSize * 2) / 2.0;
@@ -332,6 +340,24 @@ void Settings::setFlowControlWarning(bool v)
     if (m_scrolling.flowControlWarning == v) return;
     m_scrolling.flowControlWarning = v;
     m_settings.setValue(kFlowCtrlWarn, v);
+    m_settings.sync();
+    emit scrollingChanged();
+}
+
+void Settings::setConfirmMultilinePaste(bool v)
+{
+    if (m_scrolling.confirmMultilinePaste == v) return;
+    m_scrolling.confirmMultilinePaste = v;
+    m_settings.setValue(kConfirmMultilinePaste, v);
+    m_settings.sync();
+    emit scrollingChanged();
+}
+
+void Settings::setTrimPastedTrailingNewlines(bool v)
+{
+    if (m_scrolling.trimPastedTrailingNewlines == v) return;
+    m_scrolling.trimPastedTrailingNewlines = v;
+    m_settings.setValue(kTrimPastedNewlines, v);
     m_settings.sync();
     emit scrollingChanged();
 }

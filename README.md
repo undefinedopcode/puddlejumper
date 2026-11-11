@@ -74,26 +74,24 @@ when running straight from the build tree.)
 
 ## Settings
 
-Settings live in a centered modal (`Ctrl+,` or the gear button), with five
-sections:
+Settings live in a centered modal (`Ctrl+,` or the toolbar's settings button),
+with four sections:
 
 | Section | Options |
 | --- | --- |
-| Appearance | colour scheme (and its editor), tab layout, terminal margin, bidirectional text |
-| Text | font family, size (8–32pt in 0.5pt steps), opacity, bold/italic/antialias |
-| Cursor | shape (block / underline / I-beam), blinking |
-| Scrolling | scrollback depth, scrollbar position, line-drawing, flow-control warning, output monitoring, quit confirmation |
-| Profiles | create, duplicate, rename, delete and edit terminal profiles |
+| Appearance | **Colours:** scheme (and its editor), background opacity · **Font:** family, size (8–32pt in 0.5pt steps), line spacing, margin · **Rendering:** bright colours in bold, italic, antialiasing, own box drawing, bidirectional text |
+| Terminal | **Cursor:** shape, blinking · **Scrollback:** lines kept, scrollbar position · **Input:** confirm multi-line paste, trim trailing newlines, Ctrl+S notice |
+| Tabs & Window | **Tabs:** layout · **Watch a Terminal:** activity, silence (with idle time) · **Quitting:** warn while programs are running |
+| Profiles | create, duplicate, rename, delete and edit terminal profiles, and choose which one New Tab opens |
 
-Only fixed-pitch font families are offered, since the terminal cell grid
-depends on them. Changes apply to open tabs immediately, scrollback depth
-included.
+Every page uses the same structure, titled groups whose label column is the
+same width throughout, so fields don't shift when switching sections. Only
+fixed-pitch font families are offered, since the terminal cell grid depends on
+them. Changes apply to open tabs immediately, scrollback depth included.
 
-One QSettings key from the QML build is still read and preserved but has no
-effect here: `appearance/lineSpacing` (`QTermWidget` has no setter, so the
-control was removed rather than left dead). Keeping it means both builds share
-one config file. (`appearance/opacity` is the opposite story — the widgets API
-does support it via `setTerminalOpacity`, so the key now works in both builds.)
+`appearance/lineSpacing` is shared with the QML build. `QTermWidget` itself has
+no setter for it, but its display does, and the vendored copy makes that
+reachable, so the key now works here too.
 
 Persistence uses `QSettings`:
 
@@ -130,6 +128,10 @@ confirmCloseWithRunningProcesses=true
 monitorActivity=false
 monitorSilence=false
 silenceTimeout=10
+
+[input]
+confirmMultilinePaste=false
+trimPastedTrailingNewlines=false
 
 [window]
 x=100
@@ -375,8 +377,10 @@ There is always exactly one **default** profile, and that is what `New Tab`
 (`Ctrl+Shift+T`) opens. To open a tab with a different profile, use
 **File → New Tab with Profile** and pick one from the list.
 
-Profiles are managed in **Settings → Profiles**: a list on the left with Add,
-Duplicate and Delete, and a form on the right.
+Profiles are managed in **Settings → Profiles**: a list on the left with add,
+duplicate and delete buttons under it, and a form on the right. The default
+profile is starred in the list. To make another profile the default, tick
+**Open new tabs with this profile** on it.
 
 ### Inheritance
 
@@ -385,7 +389,7 @@ Every field is independent, and an unset field **inherits the global setting**:
 | Field left at *Inherit* | Follows |
 | --- | --- |
 | Colour scheme | the Appearance page |
-| Font / font size | the Text page |
+| Font / font size | the Appearance page |
 | Shell program | the login shell (`$SHELL`) |
 | Shell arguments | none |
 | Start directory | the home directory |
@@ -404,7 +408,8 @@ your global font size. Resolution happens on every apply, not once at creation.
 - **Deleting a profile does not affect open tabs.** They keep the settings they
   resolved with, and are not silently reassigned to the default.
 - **The default profile cannot be deleted** — it is what `New Tab` opens. It can
-  be renamed and given overrides like any other.
+  be renamed and given overrides like any other, and the default can be moved
+  to another profile.
 
 `SUPERTERM_SHELL` still wins over a profile's shell program, since it is an
 explicit per-run instruction:

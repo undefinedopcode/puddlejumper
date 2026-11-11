@@ -8,6 +8,7 @@
 
 #include "settingsdialog.h"
 #include "terminalwidget.h"
+#include "themeicon.h"
 #include "thumbnailsidebar.h"
 
 #include <QAction>
@@ -39,22 +40,6 @@
 #include <qtermwidget.h>
 
 namespace {
-
-/*
- * The first of several freedesktop icon names that the current theme has.
- * Themes disagree on names (Breeze and Adwaita each lack some of the others'),
- * so each toolbar action lists a few. If none exists the icon is null and the
- * toolbar button shows the action's text instead.
- */
-QIcon themeIcon(std::initializer_list<const char *> names)
-{
-    for (const char *name : names) {
-        const QString n = QString::fromLatin1(name);
-        if (QIcon::hasThemeIcon(n))
-            return QIcon::fromTheme(n);
-    }
-    return QIcon();
-}
 
 /*
  * Toolbar buttons are icon-only, so the tooltip is the only place a button's
