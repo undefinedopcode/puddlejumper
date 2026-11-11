@@ -1,7 +1,9 @@
 # Exploratory: porting SuperTerm to Qt Widgets
 
-Branch: `explore/qtwidgets`. No port code yet — this records what was measured
-first, so the decision is made on evidence rather than assumption.
+Written while evaluating and carrying out the port, which is now complete: the
+Qt Widgets build is the main `superterm` target and the Qt Quick version is
+optional. Kept because the measurements and traps below are still the reference
+for why the widgets API was chosen and what to watch out for.
 
 ## Why consider it
 
@@ -86,22 +88,26 @@ plus a theming rethink.
 
 ## Suggested shape if it proceeds
 
-Keep `explore/qtwidgets` as a spike, not a migration: build the shell
-(`QMainWindow` + tabs + one `QTermWidget`) and prove the four previously
-unreachable settings from the real UI before committing to porting the rest.
-That is a few hundred lines and answers the only question that matters — does
-the widgets UI feel acceptable to you.
+(Historical: this is how the port was approached, and it worked.)
+
+Build the shell first (`QMainWindow` + tabs + one `QTermWidget`) and prove the
+four previously unreachable settings from the real UI before committing to
+porting the rest. That is a few hundred lines and answers the only question that
+matters — does the widgets UI feel acceptable.
 
 ## Spike: built and verified
 
-`spike-widgets/` — a separate `superterm-widgets` target (never touches the QML
-app):
+The throwaway spike lived in `spike-widgets/` and has since been removed, having
+been superseded by `src-widgets/`. It was built as a separate executable (never
+touching the QML app), invoking it as:
 
 ```sh
 cmake --build build --target superterm-widgets
 ./build/superterm-widgets              # platform style (here: darkly)
 ./build/superterm-widgets --style Fusion   # neutral look, same everywhere
 ```
+
+Today the equivalent is simply the main target: `./build/superterm [--style ...]`.
 
 `QMainWindow` + `QTabWidget` + `QTermWidget`, with a settings dock exposing the
 four settings the QML build could not reach. Verified at runtime by driving the
@@ -159,7 +165,7 @@ consistency over native integration.
 | Tabs, close/move, OSC titles | yes | yes |
 | Scrollback depth | **not reachable** | live, applies to open tabs |
 | Line-drawing chars | **not reachable** | on (public API) |
-| Cursor shape | **not offered** | wired to `setKeyboardCursorShape` |
+| Cursor shape | **not offered** | available in the API; not yet wired to the UI |
 | Search | hand-written overlay | `toggleShowSearchBar()` |
 | Thumbnail sidebar | `ListView` of file-cached grabs | `QListWidget` of `QPixmap` |
 | Settings | modal, 4 sections | `QDialog`, 4 sections, same keys |
@@ -191,3 +197,20 @@ Known deltas from the QML build:
   config) but does nothing here.
 - Colours follow the platform palette, so the fixed dark chrome of the QML
   build is replaced by native styling.
+
+### After the merge
+
+The widgets build is now the main `superterm` target; the QML version is
+`superterm-qml`, opt-in via `-DSUPERTERM_BUILD_QML=ON`, and no longer installed.
+qtermwidget6 is a required dependency and QtQuick is only needed for the legacy
+target.
+
+Two settings were carried over but are inert in the widgets build, and both
+persist only so the two builds can share one config file:
+
+- `appearance/lineSpacing` — no setter in `QTermWidget`. The control was removed
+  from the dialog rather than left as a dead knob.
+- `appearance/opacity` — not surfaced by the widgets API at all.
+
+Cursor shape remains available in the API (`setKeyboardCursorShape`) but is not
+yet exposed in the settings dialog.
