@@ -167,13 +167,9 @@ QWidget *SettingsDialog::buildTextPage()
     });
     form->addRow(tr("Size"), sizeRow);
 
-    m_lineSpacingBox = new QSpinBox(page);
-    m_lineSpacingBox->setRange(-4, 12);
-    m_lineSpacingBox->setSuffix(tr(" px"));
-    connect(m_lineSpacingBox, &QSpinBox::valueChanged, this, [this](int v) {
-        m_settings.setLineSpacing(v);
-    });
-    form->addRow(tr("Line spacing"), m_lineSpacingBox);
+    // No line-spacing control here on purpose: QTermWidget has no setter for
+    // it, so a control would do nothing. The setting is still read and
+    // preserved so the shared config file stays compatible with the QML build.
 
     auto *rendering = new QGroupBox(tr("Rendering"), page);
     auto *rLayout = new QVBoxLayout(rendering);
@@ -276,7 +272,6 @@ void SettingsDialog::syncFromSettings()
     m_fontSizeSlider->setValue(half);
     m_fontSizeLabel->setText(formatPoints(a.fontSize));
 
-    m_lineSpacingBox->setValue(a.lineSpacing);
     m_boldBox->setChecked(a.boldIntense);
     m_italicBox->setChecked(a.italic);
     m_antialiasBox->setChecked(a.antialias);

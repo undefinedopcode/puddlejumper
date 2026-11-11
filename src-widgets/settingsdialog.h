@@ -50,7 +50,6 @@ private:
     QSlider *m_fontSizeSlider = nullptr;
     QLabel *m_fontSizeLabel = nullptr;
     QComboBox *m_fontBox = nullptr;
-    QSpinBox *m_lineSpacingBox = nullptr;
     QCheckBox *m_boldBox = nullptr;
     QCheckBox *m_italicBox = nullptr;
     QCheckBox *m_antialiasBox = nullptr;
