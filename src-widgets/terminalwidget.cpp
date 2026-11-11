@@ -51,6 +51,12 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings, QWidget *parent
         onOutput();
     });
 
+    // Optional shell override, useful for testing:
+    //   SUPERTERM_SHELL=/bin/fish superterm
+    const QByteArray shell = qgetenv("SUPERTERM_SHELL");
+    if (!shell.isEmpty())
+        m_terminal->setShellProgram(QString::fromLocal8Bit(shell));
+
     m_terminal->startShellProgram();
 }
 
@@ -82,9 +88,9 @@ void TerminalWidget::applyAppearance()
 
     m_terminal->setBoldIntense(a.boldIntense);
     m_terminal->setBlinkingCursor(a.blinkingCursor);
-    // Not exposed as a property; these are the calls the QML build could not
-    // make at all.
-    m_terminal->setDrawLineChars(true);
+    // Draw box/block characters as vectors. The library defaults this to true,
+    // so setting it is only meaningful when the user has turned it off.
+    m_terminal->setDrawLineChars(a.drawLineChars);
     Q_UNUSED(a.lineSpacing) // QTermWidget has no line-spacing setter.
 }
 

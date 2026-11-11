@@ -92,7 +92,7 @@ sections:
 | Appearance | colour scheme, tab layout |
 | Text | font family, size (8–32pt in 0.5pt steps), bold/italic/antialias |
 | Cursor | blinking |
-| Scrolling | scrollback depth, line-drawing (read-only) |
+| Scrolling | scrollback depth, line-drawing |
 
 Only fixed-pitch font families are offered, since the terminal cell grid
 depends on them. Changes apply to open tabs immediately, scrollback depth
@@ -123,6 +123,7 @@ blinkingCursor=true
 boldIntense=true
 italic=true
 antialias=true
+drawLineChars=true
 lineSpacing=0
 tabLayout=standard
 
@@ -201,8 +202,11 @@ from the font (Konsole calls this "use own line drawing characters"). This is
 why they stay crisp and grid-aligned at any point size while ordinary glyphs
 may only look right at particular sizes.
 
-`QTermWidget::setDrawLineChars()` is public, but the terminal enables it
-unconditionally, so the settings dialog shows it read-only.
+`QTermWidget::setDrawLineChars()` is public, and the **Scrolling → line-drawing**
+setting toggles it. It defaults to on because that is also the library's own
+default; turn it off to use the font's glyphs instead. (Before this was exposed
+the app called `setDrawLineChars(true)` on a display that was already `true`,
+which was a no-op.)
 
 The practical consequence: line art looks right regardless of your font size,
 and if ordinary text looks slightly off at a given size, picking a different

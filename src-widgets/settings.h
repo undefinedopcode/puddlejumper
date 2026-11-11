@@ -33,6 +33,13 @@ public:
         bool    boldIntense = true;
         bool    italic = true;
         bool    antialias = true;
+        /*
+         * Draw box-drawing and block characters as vectors rather than taking
+         * them from the font. Defaults to true because that is the library
+         * default too; exposed as a setting because a font with good
+         * box-drawing glyphs may be preferable.
+         */
+        bool    drawLineChars = true;
         int     lineSpacing = 0;
         QString tabLayout = QStringLiteral("standard"); // |thumbnails
     };
@@ -53,6 +60,7 @@ public:
     void setBoldIntense(bool v);
     void setItalic(bool v);
     void setAntialias(bool v);
+    void setDrawLineChars(bool v);
     void setLineSpacing(int v);
     void setTabLayout(const QString &v);
     void setScrollback(int v);

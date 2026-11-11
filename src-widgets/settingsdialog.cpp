@@ -237,14 +237,16 @@ QWidget *SettingsDialog::buildScrollingPage()
     scrollHint->setEnabled(false);
     form->addRow(QString(), scrollHint);
 
-    auto *lineChars = new QCheckBox(tr("Terminal draws its own box characters"), page);
-    lineChars->setChecked(true);
-    lineChars->setEnabled(false); // always on in qtermwidget
-    form->addRow(QString(), lineChars);
+    m_lineCharsBox = new QCheckBox(tr("Terminal draws its own box characters"), page);
+    connect(m_lineCharsBox, &QCheckBox::toggled, this, [this](bool v) {
+        m_settings.setDrawLineChars(v);
+    });
+    form->addRow(QString(), m_lineCharsBox);
 
-    auto *lineHint = new QLabel(tr("Always on. Box frames and block art are painted "
-                                   "as vectors rather than taken from the font, so "
-                                   "they stay crisp at any point size."), page);
+    auto *lineHint = new QLabel(tr("On by default. Box frames and block art are "
+                                   "painted as vectors rather than taken from the "
+                                   "font, so they stay crisp at any point size. "
+                                   "Turn this off to use the font's own glyphs."), page);
     lineHint->setWordWrap(true);
     lineHint->setEnabled(false);
     form->addRow(QString(), lineHint);
@@ -276,5 +278,6 @@ void SettingsDialog::syncFromSettings()
     m_italicBox->setChecked(a.italic);
     m_antialiasBox->setChecked(a.antialias);
     m_blinkBox->setChecked(a.blinkingCursor);
+    m_lineCharsBox->setChecked(a.drawLineChars);
     m_scrollbackBox->setValue(s.scrollback);
 }

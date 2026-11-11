@@ -53,7 +53,6 @@ int main(int argc, char *argv[])
                        << "- available:" << QStyleFactory::keys();
         }
     }
-
     MainWindow window;
     window.show();
     return app.exec();

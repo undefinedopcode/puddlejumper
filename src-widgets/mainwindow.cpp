@@ -15,6 +15,7 @@
 #include <QCloseEvent>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QListWidget>
 #include <QMenuBar>
 #include <QSplitter>
 #include <QStatusBar>

@@ -17,6 +17,7 @@ constexpr auto kBlink       = "appearance/blinkingCursor";
 constexpr auto kBold        = "appearance/boldIntense";
 constexpr auto kItalic      = "appearance/italic";
 constexpr auto kAntialias   = "appearance/antialias";
+constexpr auto kDrawLineChars = "appearance/drawLineChars";
 constexpr auto kLineSpacing = "appearance/lineSpacing";
 constexpr auto kTabLayout   = "appearance/tabLayout";
 constexpr auto kScrollback  = "scrolling/scrollback";
@@ -70,6 +71,8 @@ void Settings::load()
     m_appearance.italic = m_settings.value(kItalic, m_appearance.italic).toBool();
     m_appearance.antialias =
         m_settings.value(kAntialias, m_appearance.antialias).toBool();
+    m_appearance.drawLineChars =
+        m_settings.value(kDrawLineChars, m_appearance.drawLineChars).toBool();
     m_appearance.lineSpacing =
         m_settings.value(kLineSpacing, m_appearance.lineSpacing).toInt();
     m_appearance.tabLayout =
@@ -142,6 +145,15 @@ void Settings::setAntialias(bool v)
     if (m_appearance.antialias == v) return;
     m_appearance.antialias = v;
     m_settings.setValue(kAntialias, v);
+    m_settings.sync();
+    emit appearanceChanged();
+}
+
+void Settings::setDrawLineChars(bool v)
+{
+    if (m_appearance.drawLineChars == v) return;
+    m_appearance.drawLineChars = v;
+    m_settings.setValue(kDrawLineChars, v);
     m_settings.sync();
     emit appearanceChanged();
 }

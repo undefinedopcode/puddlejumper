@@ -54,6 +54,7 @@ private:
     QCheckBox *m_italicBox = nullptr;
     QCheckBox *m_antialiasBox = nullptr;
     QCheckBox *m_blinkBox = nullptr;
+    QCheckBox *m_lineCharsBox = nullptr;
     QComboBox *m_tabLayoutBox = nullptr;
     QSpinBox *m_scrollbackBox = nullptr;
 };
