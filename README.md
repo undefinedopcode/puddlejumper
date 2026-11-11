@@ -35,24 +35,12 @@ The window chrome, tab strip, status bar, and a live zsh prompt:
 | Qt | 6.5+ (developed against 6.12) |
 | CMake | 3.21+ |
 | Compiler | C++17 |
-| qtermwidget6 | 2.x (developed against 2.4.0) |
 
-Install qtermwidget:
-
-```sh
-# Arch
-pacman -S qtermwidget
-
-# Debian / Ubuntu
-apt install libqtermwidget6-dev
-
-# Fedora
-dnf install qtermwidget-qt6-devel
-```
-
-qtermwidget is packaged by most distributions. If yours does not package it,
-build [lxqt/qtermwidget](https://github.com/lxqt/qtermwidget) and point
-`PKG_CONFIG_PATH` at it.
+QTermWidget is **vendored** in `third_party/qtermwidget` (2.4.0, with rendering
+patches) and built as a static library, so no system qtermwidget package is
+needed. Its keyboard layouts and colour schemes are compiled in as Qt
+resources. See `third_party/qtermwidget/SUPERTERM.md` for what differs from
+upstream.
 
 The legacy Qt Quick build needs the separate **QMLTermWidget** module instead;
 see the project layout section.
@@ -239,22 +227,28 @@ Two constraints worth knowing:
   Idle tabs are not visited at all, and a tab that produced output while you were
   not looking gets a `●` marker that clears when you select it.
 
-### Box-drawing characters
+### Box-drawing, block and Powerline characters
 
-Box frames, table borders and block art are painted as **vectors**, not taken
-from the font (Konsole calls this "use own line drawing characters"). This is
-why they stay crisp and grid-aligned at any point size while ordinary glyphs
-may only look right at particular sizes.
+Some characters are painted as **geometry** sized to the cell rather than taken
+from the font, so they stay grid-aligned and join their neighbours at any point
+size. A font's glyphs for these are sized to its own ascent and descent, not to
+the whole-pixel cell, which leaves hairline gaps at many sizes.
 
-`QTermWidget::setDrawLineChars()` is public, and the **Scrolling → line-drawing**
-setting toggles it. It defaults to on because that is also the library's own
-default; turn it off to use the font's glyphs instead. (Before this was exposed
-the app called `setDrawLineChars(true)` on a display that was already `true`,
-which was a no-op.)
+- **Block elements** (U+2580–U+259F: `▀▄█▌▐░▒▓▖▗▘▙▚▛▜▝▞▟` …) and **Powerline
+  separators** (U+E0B0–U+E0BF) are always drawn this way. This is a patch to
+  the vendored QTermWidget.
+- **Box drawing** (U+2500–U+257F) is drawn this way when
+  `QTermWidget::setDrawLineChars()` is on (Konsole calls this "use own line
+  drawing characters"). The **Scrolling → line-drawing** setting toggles it. It
+  defaults to on because that is also the library's own default; turn it off to
+  use the font's glyphs instead. (Before this was exposed the app called
+  `setDrawLineChars(true)` on a display that was already `true`, which was a
+  no-op.)
 
-The practical consequence: line art looks right regardless of your font size,
-and if ordinary text looks slightly off at a given size, picking a different
-point size (half-point steps are supported) is the lever available.
+The practical consequence: line and block art looks right regardless of your
+font size. Symbols wider than a cell (often from a fallback font) are no longer
+clipped to the cell; a glyph whose advance is two cells wide is centred on its
+one cell instead.
 
 ### Watching a terminal for activity or silence
 
@@ -483,6 +477,7 @@ src-widgets/colorscheme.* .colorscheme file read/write (20 roles)
 src-widgets/colorschemeeditor.*  scheme editor dialog with live preview
 src-widgets/thumbnailsidebar.*  left sidebar with live previews
 src-widgets/settings.*    QSettings-backed configuration
+third_party/qtermwidget/  vendored, patched QTermWidget (see SUPERTERM.md)
 data/superterm.desktop    launcher entry
 icons/superterm.svg       app icon
 

@@ -37,6 +37,7 @@
 #include <QLayout>
 #include <QMessageBox>
 #include <QPainter>
+#include <QPainterPath>
 #include <QPixmap>
 #include <QRegularExpression>
 #include <QStyle>
@@ -208,12 +209,38 @@ void TerminalDisplay::setColorTable(const ColorEntry table[])
    QCodec.
 */
 
+// superterm: characters drawn as geometry rather than taken from the font, so
+// they fill their cell exactly and join up with their neighbours. Font glyphs
+// for these are sized to the font's ascent/descent, not to the integer cell,
+// which leaves gaps between rows at many font sizes.
+static bool isBoxDrawing(uint c) { return (c & 0xFF80) == 0x2500; }      // U+2500..U+257F
+static bool isBlockElement(uint c) { return c >= 0x2580 && c <= 0x259F; }
+static bool isPowerlineGlyph(uint c) { return c >= 0xE0B0 && c <= 0xE0BF; }
+// Box drawing follows setDrawLineChars(), since some fonts' own box glyphs are
+// preferable to the thin lines drawn here. Block elements and Powerline
+// separators are plain fills with nothing to lose, so they are always drawn.
+static bool isDrawnChar(uint c, bool drawLineChars)
+{
+    return (drawLineChars && isBoxDrawing(c)) || isBlockElement(c) || isPowerlineGlyph(c);
+}
+
+// superterm: QChar is 16 bits, so QChar(c) silently truncates code points
+// above U+FFFF (e.g. Nerd Font icons at U+F0000+) and measures the wrong glyph.
+static int charAdvance(const QFontMetrics& fm, uint c)
+{
+    if (QChar::requiresSurrogates(c)) {
+        const char32_t ucs4 = c;
+        return fm.horizontalAdvance(QString::fromUcs4(&ucs4, 1));
+    }
+    return fm.horizontalAdvance(QChar(c));
+}
+
 bool TerminalDisplay::isLineChar(Character c) const {
-    return _drawLineChars && c.isLineChar();
+    return !(c.rendition & RE_EXTENDED_CHAR) && isDrawnChar(c.character, _drawLineChars);
 }
 
 bool TerminalDisplay::isLineCharString(const std::wstring& string) const {
-    return string.length() > 0 && _drawLineChars && (string[0] & 0xFF80) == 0x2500;
+    return string.length() > 0 && isDrawnChar(static_cast<uint>(string[0]), _drawLineChars);
 }
 
 
@@ -660,6 +687,114 @@ static void drawOtherChar(QPainter& paint, int x, int y, int w, int h, uchar cod
     }
 }
 
+// superterm: U+2580..U+259F, filled to exact cell boundaries. Antialiasing
+// stays off so adjacent cells share edges with no seam or overlap, including
+// under fractional display scaling.
+static void drawBlockElement(QPainter& paint, int x, int y, int w, int h, uint c)
+{
+    const QColor color = paint.pen().color();
+    const auto ex = [&](int eighths) { return x + (w * eighths + 4) / 8; };
+    const auto ey = [&](int eighths) { return y + (h * eighths + 4) / 8; };
+    const auto fill = [&](int x0, int y0, int x1, int y1) {
+        paint.fillRect(QRect(x0, y0, x1 - x0, y1 - y0), color);
+    };
+    const int r = x + w;
+    const int b = y + h;
+
+    if (c == 0x2580) {                         // upper half
+        fill(x, y, r, ey(4));
+    } else if (c >= 0x2581 && c <= 0x2588) {   // lower 1/8 .. full
+        fill(x, ey(8 - static_cast<int>(c - 0x2580)), r, b);
+    } else if (c >= 0x2589 && c <= 0x258F) {   // left 7/8 .. 1/8
+        fill(x, y, ex(static_cast<int>(0x2590 - c)), b);
+    } else if (c == 0x2590) {                  // right half
+        fill(ex(4), y, r, b);
+    } else if (c >= 0x2591 && c <= 0x2593) {   // light, medium, dark shade
+        QColor shade = color;
+        shade.setAlphaF(color.alphaF() * static_cast<float>(c - 0x2590) / 4.0f);
+        paint.fillRect(QRect(x, y, w, h), shade);
+    } else if (c == 0x2594) {                  // upper 1/8
+        fill(x, y, r, ey(1));
+    } else if (c == 0x2595) {                  // right 1/8
+        fill(ex(7), y, r, b);
+    } else if (c >= 0x2596 && c <= 0x259F) {   // quadrants
+        enum { UL = 1, UR = 2, LL = 4, LR = 8 };
+        static const quint8 quadrants[] = {
+            LL, LR, UL, UL | LL | LR, UL | LR, UL | UR | LL, UL | UR | LR, UR, UR | LL, UR | LL | LR,
+        };
+        const quint8 q = quadrants[c - 0x2596];
+        const int mx = ex(4);
+        const int my = ey(4);
+        if (q & UL) fill(x, y, mx, my);
+        if (q & UR) fill(mx, y, r, my);
+        if (q & LL) fill(x, my, mx, b);
+        if (q & LR) fill(mx, my, r, b);
+    }
+}
+
+// superterm: Powerline separators (U+E0B0..U+E0BF, as defined by Powerline
+// and Nerd Fonts), drawn to the cell so they meet the adjacent segment's
+// background exactly instead of depending on the font's glyph size.
+static void drawPowerlineGlyph(QPainter& paint, int x, int y, int w, int h, uint c)
+{
+    const qreal l = x;
+    const qreal t = y;
+    const qreal r = x + w;
+    const qreal b = y + h;
+    const qreal my = y + h / 2.0;
+
+    QPainterPath path;
+    bool filled = true;
+    switch (c) {
+    case 0xE0B1: filled = false; /* Falls through. */
+    case 0xE0B0: // right-pointing triangle
+        path.moveTo(l, t); path.lineTo(r, my); path.lineTo(l, b);
+        break;
+    case 0xE0B3: filled = false; /* Falls through. */
+    case 0xE0B2: // left-pointing triangle
+        path.moveTo(r, t); path.lineTo(l, my); path.lineTo(r, b);
+        break;
+    case 0xE0B5: filled = false; /* Falls through. */
+    case 0xE0B4: // right half circle
+        path.moveTo(l, t); path.arcTo(QRectF(l - w, t, 2.0 * w, h), 90, -180);
+        break;
+    case 0xE0B7: filled = false; /* Falls through. */
+    case 0xE0B6: // left half circle
+        path.moveTo(r, t); path.arcTo(QRectF(l, t, 2.0 * w, h), 90, 180);
+        break;
+    case 0xE0B8: // lower left triangle
+        path.moveTo(l, t); path.lineTo(l, b); path.lineTo(r, b);
+        break;
+    case 0xE0BA: // lower right triangle
+        path.moveTo(r, t); path.lineTo(r, b); path.lineTo(l, b);
+        break;
+    case 0xE0BC: // upper left triangle
+        path.moveTo(l, t); path.lineTo(r, t); path.lineTo(l, b);
+        break;
+    case 0xE0BE: // upper right triangle
+        path.moveTo(l, t); path.lineTo(r, t); path.lineTo(r, b);
+        break;
+    case 0xE0B9: case 0xE0BF: // backslash separator
+        filled = false;
+        path.moveTo(l, t); path.lineTo(r, b);
+        break;
+    case 0xE0BB: case 0xE0BD: // forward slash separator
+        filled = false;
+        path.moveTo(r, t); path.lineTo(l, b);
+        break;
+    default:
+        return;
+    }
+
+    paint.save();
+    paint.setRenderHint(QPainter::Antialiasing);
+    if (filled)
+        paint.fillPath(path, paint.pen().color());
+    else
+        paint.strokePath(path, paint.pen());
+    paint.restore();
+}
+
 void TerminalDisplay::drawLineCharString(    QPainter& painter, int x, int y, const std::wstring& str,
                                     const Character* attributes) const
 {
@@ -674,11 +809,23 @@ void TerminalDisplay::drawLineCharString(    QPainter& painter, int x, int y, co
 
         for (size_t i=0 ; i < str.length(); i++)
         {
-            uint8_t code = static_cast<uint8_t>(str[i] & 0xffU);
+            const uint c = static_cast<uint>(str[i]);
+            const int cellX = x + _fontWidth * static_cast<int>(i);
+            if (isBlockElement(c))
+            {
+                drawBlockElement(painter, cellX, y, _fontWidth, _fontHeight, c);
+                continue;
+            }
+            if (isPowerlineGlyph(c))
+            {
+                drawPowerlineGlyph(painter, cellX, y, _fontWidth, _fontHeight, c);
+                continue;
+            }
+            uint8_t code = static_cast<uint8_t>(c & 0xffU);
             if (LineChars[code])
-                drawLineChar(painter, x + (_fontWidth*i), y, _fontWidth, _fontHeight, code);
+                drawLineChar(painter, cellX, y, _fontWidth, _fontHeight, code);
             else
-                drawOtherChar(painter, x + (_fontWidth * i), y, _fontWidth, _fontHeight, code);
+                drawOtherChar(painter, cellX, y, _fontWidth, _fontHeight, code);
         }
 
         painter.setPen( currentPen );
@@ -864,24 +1011,34 @@ void TerminalDisplay::drawCharacters(QPainter& painter,
         // This still allows RTL characters to be rendered in the RTL way.
         painter.setLayoutDirection(Qt::LeftToRight);
 
+        // superterm: QPainter::drawText(QRect, ...) clips to the rect unless
+        // told not to, which cut every glyph wider than its cell in half.
+        // A single-cell character whose glyph has a much wider advance (a
+        // fallback font's symbol, typically) is also centred on its cell, as
+        // the font would otherwise put its ink over the next cell.
+        const QString str = QString::fromStdWString(text);
+        const auto wideRect = [&]() {
+            QRect drawRect(rect.topLeft(), rect.size());
+            drawRect.setHeight(rect.height() + _drawTextAdditionHeight);
+            if (tooWide)
+                drawRect.translate(-(painter.fontMetrics().horizontalAdvance(str) - rect.width()) / 2, 0);
+            return drawRect;
+        };
+        const int flags = Qt::AlignBottom | Qt::TextDontClip;
+
         if (_bidiEnabled) {
             if (tooWide)
             {
-                QRect drawRect(rect.topLeft(), rect.size());
-                drawRect.setHeight(rect.height() + _drawTextAdditionHeight);
-                painter.drawText(drawRect, Qt::AlignBottom, QString::fromStdWString(text));
+                painter.drawText(wideRect(), flags, str);
             }
             else
             {
-                painter.drawText(rect.x(), rect.y() + _fontAscent + _lineSpacing,
-                                 QString::fromStdWString(text));
+                painter.drawText(rect.x(), rect.y() + _fontAscent + _lineSpacing, str);
             }
         }
         else
         {
-            QRect drawRect(rect.topLeft(), rect.size());
-            drawRect.setHeight(rect.height() + _drawTextAdditionHeight);
-            painter.drawText(drawRect, Qt::AlignBottom, LTR_OVERRIDE_CHAR + QString::fromStdWString(text));
+            painter.drawText(wideRect(), flags, LTR_OVERRIDE_CHAR + str);
         }
     }
 }
@@ -890,7 +1047,8 @@ void TerminalDisplay::drawTextFragment(QPainter& painter ,
                                        const QRect& rect,
                                        const std::wstring& text,
                                        const Character* style,
-                                       bool tooWide)
+                                       bool tooWide,
+                                       bool backgroundPass)
 {
     painter.save();
 
@@ -898,10 +1056,18 @@ void TerminalDisplay::drawTextFragment(QPainter& painter ,
     const QColor foregroundColor = style->foregroundColor.color(_colorTable);
     const QColor backgroundColor = style->backgroundColor.color(_colorTable);
 
-    // draw background if different from the display's background color
-    if ( backgroundColor != palette().window().color() )
-        drawBackground(painter,rect,backgroundColor,
-                       false /* do not use transparency */);
+    // superterm: backgrounds and text are painted in separate passes (see
+    // paintEvent()), so this fragment's background can't cover the part of a
+    // previous fragment's glyph that overhangs into it.
+    if (backgroundPass)
+    {
+        // draw background if different from the display's background color
+        if ( backgroundColor != palette().window().color() )
+            drawBackground(painter,rect,backgroundColor,
+                           false /* do not use transparency */);
+        painter.restore();
+        return;
+    }
 
     // draw cursor shape if the current character is the cursor
     // this may alter the foreground and background colors
@@ -1188,7 +1354,7 @@ void TerminalDisplay::updateImage()
         disstrU[p++] = c; //fontMap(c);
         bool lineDraw = isLineChar(newLine[x+0]);
         bool doubleWidth = (x+1 == columnsToUpdate) ? false : (newLine[x+1].character == 0);
-        int charWidth = fm.horizontalAdvance(QChar(c));
+        int charWidth = charAdvance(fm, static_cast<uint>(c));
         bool bigWidth = _fixedFont && !doubleWidth && charWidth > _fontWidth;
         bool smallWidth = _fixedFont && charWidth < _fontWidth;
         cr = newLine[x].rendition;
@@ -1203,7 +1369,7 @@ void TerminalDisplay::updateImage()
                 continue; // Skip trailing part of multi-col chars.
 
             bool nextIsDoubleWidth = (x+len+1 == columnsToUpdate) ? false : (newLine[x+len+1].character == 0);
-            int nxtCharWidth = fm.horizontalAdvance(QChar(newLine[x+len].character));
+            int nxtCharWidth = charAdvance(fm, newLine[x+len].character);
             bool nextIsbigWidth = _fixedFont && !nextIsDoubleWidth && nxtCharWidth > _fontWidth;
             bool nextIsSmallWidth = _fixedFont && newLine[x+len].character && nxtCharWidth < _fontWidth;
 
@@ -1512,13 +1678,25 @@ void TerminalDisplay::paintEvent( QPaintEvent* pe )
     calDrawTextAdditionHeight(paint);
   }
 
+  // superterm: paint every background before any text. Painting fragment by
+  // fragment let each background cover whatever the previous fragment's glyph
+  // drew past its cell edge, which cut wide symbols off on the right.
   const QRegion regToDraw = pe->region() & cr;
+  QRegion textRegion;
   for (auto rect = regToDraw.begin(); rect != regToDraw.end(); rect++)
   {
     drawBackground(paint,*rect,palette().window().color(),
                    true /* use opacity setting */);
-    drawContents(paint, *rect);
+    drawContents(paint, *rect, true);
+    // Text is redrawn one cell further out on each side, so the overhang of a
+    // glyph just outside the repainted area comes back too. The painter is
+    // clipped to the paint region, so nothing outside it changes. Building a
+    // region (rather than looping over the widened rects) keeps overlapping
+    // rects from drawing the same antialiased text twice.
+    textRegion |= rect->adjusted(-_fontWidth, 0, _fontWidth, 0);
   }
+  for (auto rect = textRegion.begin(); rect != textRegion.end(); rect++)
+    drawContents(paint, *rect, false);
   drawInputMethodPreeditString(paint,preeditRect());
   paintFilters(paint);
 }
@@ -1699,9 +1877,15 @@ int TerminalDisplay::textWidth(const int startColumn, const int length, const in
     { // c == 0 may happen here after a double-column character
         result += fm.horizontalAdvance(QLatin1Char(REPCHAR[0]));
     }
+    else if (_fixedFont_original)
+    {
+        // superterm: drawn characters occupy exactly one cell, whatever
+        // advance the font (or a fallback font) gives its own glyph.
+        result += _fontWidth;
+    }
     else
     {
-        result += fm.horizontalAdvance(QChar(static_cast<uint>(c.character)));
+        result += charAdvance(fm, c.character);
     }
   }
   return result;
@@ -1717,7 +1901,7 @@ QRect TerminalDisplay::calculateTextArea(int topLeftX, int topLeftY, int startCo
                _fontHeight};
 }
 
-void TerminalDisplay::drawContents(QPainter &paint, const QRect &rect)
+void TerminalDisplay::drawContents(QPainter &paint, const QRect &rect, bool backgroundPass)
 {
   QPoint tL  = contentsRect().topLeft();
   int    tLx = tL.x();
@@ -1779,7 +1963,7 @@ void TerminalDisplay::drawContents(QPainter &paint, const QRect &rect)
 
       bool lineDraw = isLineChar(_image[loc(x,y)]);
       bool doubleWidth = (_image[ qMin(loc(x,y)+1,_imageSize) ].character == 0);
-      int charWidth = fm.horizontalAdvance(QChar(c));
+      int charWidth = charAdvance(fm, static_cast<uint>(c));
       bool bigWidth = _fixedFont && !doubleWidth && charWidth > _fontWidth;
       bool tooWide = bigWidth && charWidth >= 2 * _fontWidth;
       bool smallWidth = _fixedFont && c && charWidth < _fontWidth;
@@ -1796,7 +1980,7 @@ void TerminalDisplay::drawContents(QPainter &paint, const QRect &rect)
              _image[loc(x+len,y)].rendition == currentRendition &&
              (nxtDoubleWidth = (_image[qMin(loc(x+len,y)+1,_imageSize)].character == 0)) == doubleWidth &&
              !smallWidth &&
-             !(_fixedFont && (nxtC = _image[loc(x+len,y)].character) && (nxtCharWidth = fm.horizontalAdvance(QChar(nxtC))) < _fontWidth) &&
+             !(_fixedFont && (nxtC = _image[loc(x+len,y)].character) && (nxtCharWidth = charAdvance(fm, nxtC)) < _fontWidth) &&
              !bigWidth &&
              !(_fixedFont && !nxtDoubleWidth && nxtC && nxtCharWidth > _fontWidth) &&
              isLineChar(_image[loc(x+len,y)]) == lineDraw) // Assignment!
@@ -1872,7 +2056,8 @@ void TerminalDisplay::drawContents(QPainter &paint, const QRect &rect)
                           textArea,
                           unistr,
                           &_image[loc(x,y)],
-                          tooWide);
+                          tooWide,
+                          backgroundPass);
 
          _fixedFont = save__fixedFont;
 

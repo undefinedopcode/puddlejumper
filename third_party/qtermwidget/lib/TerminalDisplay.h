@@ -664,11 +664,14 @@ private:
     // divides the part of the display specified by 'rect' into
     // fragments according to their colors and styles and calls
     // drawTextFragment() to draw the fragments
-    void drawContents(QPainter &paint, const QRect &rect);
+    // superterm: called twice per paint, first with backgroundPass set to
+    // fill backgrounds, then without it to draw the cursor and text
+    void drawContents(QPainter &paint, const QRect &rect, bool backgroundPass);
     // draws a section of text, all the text in this section
     // has a common color and style
     void drawTextFragment(QPainter& painter, const QRect& rect,
-                          const std::wstring& text, const Character* style, bool tooWide);
+                          const std::wstring& text, const Character* style, bool tooWide,
+                          bool backgroundPass);
     // draws the background for a text fragment
     // if useOpacitySetting is true then the color's alpha value will be set to
     // the display's transparency (set with setOpacity()), otherwise the background
