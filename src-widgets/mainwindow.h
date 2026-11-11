@@ -9,11 +9,13 @@
 #include <QMainWindow>
 #include <QVector>
 
+#include "profiles.h"
 #include "settings.h"
 
 class QTabWidget;
 class QSplitter;
 class QLabel;
+class QMenu;
 class QTimer;
 class TerminalWidget;
 class SettingsDialog;
@@ -37,7 +39,10 @@ protected:
     void closeEvent(QCloseEvent *event) override;
 
 private slots:
+    /* Open a tab using the default profile. */
     void newTab();
+    /* Open a tab using a specific profile id; falls back to the default. */
+    void newTabWithProfile(const QString &profileId);
     void closeTab(int index);
     void applyAppearanceToAll();
     void updateStatus();
@@ -56,7 +61,24 @@ private:
     void openSettings(int section = 0);
     void zoomBy(int halfPoints);
 
+    /*
+     * Rebuild the "New Tab with Profile" menu from the store, and push each
+     * profile's current definition onto the tabs already open under it.
+     */
+    void refreshProfiles();
+
+    /*
+     * Guard against destroying running work.
+     *
+     * Returns true if it is safe to quit now. If any terminal is running a
+     * foreground process (and the user has not switched the warning off), this
+     * asks for confirmation first; the user may cancel, or choose to quit
+     * anyway.
+     */
+    bool confirmQuitIfBusy();
+
     Settings m_settings;
+    ProfileStore m_profiles;
     SettingsDialog *m_settingsDialog = nullptr;
 
     QSplitter *m_splitter = nullptr;
@@ -66,6 +88,7 @@ private:
     QLabel *m_statusDir = nullptr;
     QLabel *m_statusInfo = nullptr;
     QTimer *m_previewTimer = nullptr;
+    QMenu *m_newTabWithProfileMenu = nullptr;
 
     /*
      * Preview rotation.

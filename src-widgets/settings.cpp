@@ -27,6 +27,7 @@ constexpr auto kBidi           = "appearance/bidi";
 constexpr auto kScrollback  = "scrolling/scrollback";
 constexpr auto kScrollbarPos   = "scrolling/scrollbarPosition";
 constexpr auto kFlowCtrlWarn   = "scrolling/flowControlWarning";
+constexpr auto kConfirmCloseRunning = "scrolling/confirmCloseWithRunningProcesses";
 constexpr auto kMonitorActivity = "scrolling/monitorActivity";
 constexpr auto kMonitorSilence  = "scrolling/monitorSilence";
 constexpr auto kSilenceTimeout  = "scrolling/silenceTimeout";
@@ -99,6 +100,9 @@ void Settings::load()
         m_settings.value(kScrollbarPos, m_scrolling.scrollbarPosition).toString();
     m_scrolling.flowControlWarning =
         m_settings.value(kFlowCtrlWarn, m_scrolling.flowControlWarning).toBool();
+    m_scrolling.confirmCloseWithRunningProcesses =
+        m_settings.value(kConfirmCloseRunning,
+                         m_scrolling.confirmCloseWithRunningProcesses).toBool();
     m_scrolling.monitorActivity =
         m_settings.value(kMonitorActivity, m_scrolling.monitorActivity).toBool();
     m_scrolling.monitorSilence =
@@ -266,6 +270,15 @@ void Settings::setFlowControlWarning(bool v)
     if (m_scrolling.flowControlWarning == v) return;
     m_scrolling.flowControlWarning = v;
     m_settings.setValue(kFlowCtrlWarn, v);
+    m_settings.sync();
+    emit scrollingChanged();
+}
+
+void Settings::setConfirmCloseWithRunningProcesses(bool v)
+{
+    if (m_scrolling.confirmCloseWithRunningProcesses == v) return;
+    m_scrolling.confirmCloseWithRunningProcesses = v;
+    m_settings.setValue(kConfirmCloseRunning, v);
     m_settings.sync();
     emit scrollingChanged();
 }

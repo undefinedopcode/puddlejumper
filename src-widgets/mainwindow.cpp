@@ -17,6 +17,8 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QMenuBar>
+#include <QMessageBox>
+#include <QPushButton>
 #include <QSplitter>
 #include <QStatusBar>
 #include <QTabBar>
@@ -54,6 +56,11 @@ MainWindow::MainWindow(QWidget *parent)
         }
     });
 
+    // Any profile edit: rebuild the menu and refresh live tabs that are still
+    // open under that profile.
+    connect(&m_profiles, &ProfileStore::profilesChanged,
+            this, &MainWindow::refreshProfiles);
+
     // Restore geometry from the previous session.
     if (!m_settings.windowGeometry().isEmpty())
         restoreGeometry(m_settings.windowGeometry());
@@ -62,6 +69,7 @@ MainWindow::MainWindow(QWidget *parent)
     if (!m_settings.windowState().isEmpty())
         restoreState(m_settings.windowState());
 
+    refreshProfiles();   // populate the submenu before the first tab opens
     newTab();
     updateTabLayout();
 }
@@ -156,11 +164,35 @@ void MainWindow::buildLayout()
 
 void MainWindow::buildMenus()
 {
+    /*
+     * Shortcut policy.
+     *
+     * A QAction shortcut is claimed by the shortcut map before the focused
+     * widget -- the terminal -- ever sees the key. Anything a terminal program
+     * might want is therefore off limits to the app, however conventional it
+     * looks as a desktop shortcut.
+     *
+     * Plain Ctrl+letter is the terminal's: those are the control codes programs
+     * are built around (Ctrl+C, Ctrl+Q, Ctrl+S, Ctrl+Z, Ctrl+D...). The app
+     * keeps nothing there. Ctrl+Q in particular was bound to Quit via
+     * QKeySequence::Quit, which swallowed micro's quit key and killed the app
+     * instead.
+     *
+     * Chrome navigation may use plain Ctrl only where a terminal program has no
+     * use for the combination -- Ctrl+Tab, Ctrl+Comma, Ctrl+Equal/Minus/0 --
+     * or Ctrl+Shift+letter for anything else. This is the same split Konsole
+     * makes.
+     */
     auto *file = menuBar()->addMenu(tr("&File"));
 
     auto *newAct = file->addAction(tr("&New Tab"));
     newAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+T")));
     connect(newAct, &QAction::triggered, this, &MainWindow::newTab);
+
+    // Populated by refreshProfiles(), which runs whenever the store changes.
+    // A submenu rather than N top-level actions keeps the File menu stable as
+    // profiles come and go.
+    m_newTabWithProfileMenu = file->addMenu(tr("New Tab &with Profile"));
 
     auto *closeAct = file->addAction(tr("&Close Tab"));
     closeAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+W")));
@@ -186,8 +218,16 @@ void MainWindow::buildMenus()
 
     file->addSeparator();
     auto *quitAct = file->addAction(tr("&Quit"));
-    quitAct->setShortcut(QKeySequence::Quit);
-    connect(quitAct, &QAction::triggered, qApp, &QApplication::quit);
+    // NOT QKeySequence::Quit -- that is plain Ctrl+Q on Linux, and a QAction
+    // shortcut is consumed by the shortcut map before the focused widget sees
+    // the key. Ctrl+Q belongs to the program in the terminal (it is micro's
+    // quit, and a shell's XON resume), so it must never be an app accelerator.
+    // See the shortcut policy in buildMenus() above.
+    quitAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+Q")));
+    // Route through close() rather than straight to QApplication::quit(), so
+    // this path runs the same "programs are still running" guard as the window
+    // close button. close() delivers a QCloseEvent, which closeEvent() vets.
+    connect(quitAct, &QAction::triggered, this, &QWidget::close);
 
     auto *edit = menuBar()->addMenu(tr("&Edit"));
     auto *copyAct = edit->addAction(tr("&Copy"));
@@ -266,11 +306,25 @@ TerminalWidget *MainWindow::terminalAt(int index) const
 
 void MainWindow::newTab()
 {
-    auto *term = new TerminalWidget(m_nextTabId++, m_settings, this);
+    newTabWithProfile(QString());
+}
+
+void MainWindow::newTabWithProfile(const QString &profileId)
+{
+    // An empty or dangling id means "the default profile". profileById()
+    // already falls back, so this cannot fail to find something to open with.
+    const TerminalProfile profile =
+        profileId.isEmpty() ? m_profiles.defaultProfile()
+                            : m_profiles.profileById(profileId);
+
+    auto *term = new TerminalWidget(m_nextTabId++, m_settings, profile, this);
     term->applyAppearance();
     term->applyScrolling();
 
     const int index = m_tabs->addTab(term, tr("Terminal"));
+    // The tab tooltip carries the profile, which is the only cue in the
+    // standard layout that a tab is not just "another terminal".
+    m_tabs->setTabToolTip(index, tr("%1 — %2").arg(profile.name, tr("Terminal")));
     m_tabs->setCurrentIndex(index);
     term->focusTerminal();
 
@@ -472,11 +526,12 @@ void MainWindow::updateStatus()
     m_statusDir->setText(title);
 
     auto *t = term->terminal();
+    // Report the tab's *effective* scheme, which a profile may have overridden.
     m_statusInfo->setText(tr("%1 × %2   ·   scrollback %3   ·   %4")
                               .arg(t->screenColumnsCount())
                               .arg(t->screenLinesCount())
                               .arg(t->historySize())
-                              .arg(m_settings.appearance().colorScheme));
+                              .arg(term->appliedColorScheme()));
 }
 
 void MainWindow::zoomBy(int halfPoints)
@@ -485,15 +540,126 @@ void MainWindow::zoomBy(int halfPoints)
     m_settings.setFontSize(qBound(8.0, next, 32.0));
 }
 
+bool MainWindow::confirmQuitIfBusy()
+{
+    if (!m_settings.scrolling().confirmCloseWithRunningProcesses)
+        return true;
+
+    // Collect the terminals that would lose work. Tab order, so the list
+    // matches what the user sees in the tab strip / sidebar.
+    struct Busy { int index; QString program; };
+    QVector<Busy> busy;
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        if (auto *t = terminalAt(i)) {
+            if (t->hasRunningProcess())
+                busy.append({ i, t->foregroundProgramName() });
+        }
+    }
+    if (busy.isEmpty())
+        return true;
+
+    QMessageBox box(this);
+    box.setIcon(QMessageBox::Warning);
+    box.setWindowTitle(tr("Quit SuperTerm?"));
+
+    // Name the programs where possible: "Quitting will terminate micro, ssh"
+    // is far more useful than a bare count.
+    QStringList names;
+    for (const Busy &b : busy) {
+        QString label = b.program.isEmpty() ? tr("a program")
+                                            : b.program;
+        auto *t = terminalAt(b.index);
+        const QString title = t ? t->sessionTitle().trimmed() : QString();
+        if (!title.isEmpty())
+            label += QStringLiteral(" (%1)").arg(title);
+        names << label;
+    }
+
+    if (busy.size() == 1) {
+        box.setText(tr("A program is still running in one terminal."));
+        box.setInformativeText(
+            tr("Quitting will terminate %1. Any unsaved work will be lost.")
+                .arg(names.first()));
+    } else {
+        box.setText(tr("Programs are still running in %1 terminals.")
+                        .arg(busy.size()));
+        box.setInformativeText(
+            tr("Quitting will terminate:\n\n%1\n\nAny unsaved work will be lost.")
+                .arg(names.join(QLatin1Char('\n'))));
+    }
+
+    QPushButton *quitBtn = box.addButton(tr("&Quit Anyway"),
+                                         QMessageBox::DestructiveRole);
+    QPushButton *cancelBtn = box.addButton(tr("&Cancel"), QMessageBox::RejectRole);
+    box.setDefaultButton(cancelBtn);   // safe default: Enter cancels
+    box.setEscapeButton(cancelBtn);
+    box.exec();
+
+    return box.clickedButton() == quitBtn;
+}
+
+void MainWindow::refreshProfiles()
+{
+    // Rebuild the submenu. Profiles are few, so clearing and refilling is
+    // simpler than diffing, and it keeps ordering identical to the store.
+    if (m_newTabWithProfileMenu) {
+        m_newTabWithProfileMenu->clear();
+        const auto &all = m_profiles.profiles();
+        if (all.isEmpty()) {
+            m_newTabWithProfileMenu->setEnabled(false);
+        } else {
+            m_newTabWithProfileMenu->setEnabled(true);
+            for (const auto &p : all) {
+                const QString id = p.id;
+                QAction *act = m_newTabWithProfileMenu->addAction(p.name);
+                if (p.isDefault)
+                    act->setToolTip(tr("The default profile — what New Tab opens"));
+                connect(act, &QAction::triggered, this,
+                        [this, id]() { newTabWithProfile(id); });
+            }
+        }
+    }
+
+    /*
+     * Push updated definitions onto open tabs.
+     *
+     * Only the appearance is re-applied (setProfile): the shell stays running,
+     * because restarting it to pick up a new shell program would destroy
+     * whatever is in the tab. A tab whose profile was deleted keeps the
+     * settings it resolved with, which is the least surprising outcome.
+     */
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        auto *t = terminalAt(i);
+        if (!t)
+            continue;
+        const TerminalProfile current = m_profiles.profileById(t->profileId());
+        // profileById() falls back to the default for a dangling id; do not
+        // silently reassign a deleted tab to the default profile.
+        if (current.id != t->profileId())
+            continue;
+        t->setProfile(current);
+        // Keep the tooltip's profile name current after a rename.
+        if (!t->sessionTitle().isEmpty())
+            m_tabs->setTabToolTip(i, tr("%1 — %2").arg(current.name,
+                                                       t->sessionTitle()));
+    }
+}
+
+
 void MainWindow::openSettings(int section)
 {
     if (!m_settingsDialog)
-        m_settingsDialog = new SettingsDialog(m_settings, this);
+        m_settingsDialog = new SettingsDialog(m_settings, m_profiles, this);
     m_settingsDialog->showSection(static_cast<SettingsDialog::Section>(section));
 }
 
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    // Refuse to take running work down with us without asking.
+    if (!confirmQuitIfBusy()) {
+        event->ignore();
+        return;
+    }
     m_settings.saveWindowGeometry(saveGeometry(), saveState());
     QMainWindow::closeEvent(event);
 }

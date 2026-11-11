@@ -37,6 +37,8 @@ qt_add_executable(superterm
     src-widgets/thumbnailsidebar.h
     src-widgets/settings.cpp
     src-widgets/settings.h
+    src-widgets/profiles.cpp
+    src-widgets/profiles.h
 )
 
 target_link_libraries(superterm PRIVATE
@@ -76,6 +78,7 @@ qt_add_executable(probe-settingsdialog
     src-widgets/dev/probe_settingsdialog.cpp
     src-widgets/settingsdialog.cpp src-widgets/settingsdialog.h
     src-widgets/settings.cpp src-widgets/settings.h
+    src-widgets/profiles.cpp src-widgets/profiles.h
 )
 target_link_libraries(probe-settingsdialog PRIVATE
     Qt6::Core

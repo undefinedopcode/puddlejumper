@@ -6,6 +6,7 @@
  * rendered snapshot to probe-settingsdialog.png.
  */
 
+#include "../profiles.h"
 #include "../settingsdialog.h"
 #include "../settings.h"
 
@@ -23,7 +24,8 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
 
     Settings settings;
-    SettingsDialog dlg(settings);
+    ProfileStore profiles;
+    SettingsDialog dlg(settings, profiles);
     dlg.showSection(SettingsDialog::Scrolling);
     dlg.show();
 

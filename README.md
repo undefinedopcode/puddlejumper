@@ -84,7 +84,7 @@ when running straight from the build tree.)
 
 ## Settings
 
-Settings live in a centered modal (`Ctrl+,` or the gear button), with four
+Settings live in a centered modal (`Ctrl+,` or the gear button), with five
 sections:
 
 | Section | Options |
@@ -92,7 +92,8 @@ sections:
 | Appearance | colour scheme, tab layout, terminal margin, bidirectional text |
 | Text | font family, size (8–32pt in 0.5pt steps), opacity, bold/italic/antialias |
 | Cursor | shape (block / underline / I-beam), blinking |
-| Scrolling | scrollback depth, scrollbar position, line-drawing, flow-control warning, output monitoring |
+| Scrolling | scrollback depth, scrollbar position, line-drawing, flow-control warning, output monitoring, quit confirmation |
+| Profiles | create, duplicate, rename, delete and edit terminal profiles |
 
 Only fixed-pitch font families are offered, since the terminal cell grid
 depends on them. Changes apply to open tabs immediately, scrollback depth
@@ -135,6 +136,7 @@ opacity=1
 scrollback=5000
 scrollbarPosition=right
 flowControlWarning=true
+confirmCloseWithRunningProcesses=true
 monitorActivity=false
 monitorSilence=false
 silenceTimeout=10
@@ -166,6 +168,39 @@ restart until its shell sets one again. An empty title is ignored rather than
 blanking the label.
 
 Titles arrive via `QTermWidget::titleChanged`.
+
+### Quitting with programs running
+
+Closing the window (or the Quit action, `Ctrl+Shift+Q`) checks whether any
+terminal has a **foreground program** and, if so, asks first:
+
+> A program is still running in one terminal.
+> Quitting will terminate micro (micro notes.md). Any unsaved work will be lost.
+>
+> [Quit Anyway] [Cancel]
+
+**Cancel is the default button and the Escape action**, so a stray Enter or Esc
+does nothing destructive.
+
+Detection uses the pty's foreground process group (`tcgetpgrp`, surfaced as
+`QTermWidget::getForegroundProcessId()`). It is compared against the *shell's own
+process group*, not its PID: equal means the shell is reading the terminal, i.e.
+an idle prompt (or one with only background jobs), and no warning is shown.
+Different means a foreground program owns the tty and would be killed. The
+program name comes from `/proc/<pid>/comm`.
+
+Consequences worth knowing:
+
+- A window full of idle shells never prompts. Only a genuinely running
+  foreground program (an editor, a build, `ssh`) triggers it.
+- Background jobs (`cmd &`) do not trigger it — they are not in the foreground
+  process group, and quitting a terminal does not kill them.
+- A program that has exited but whose shell has not yet reaped it can, very
+  briefly, look busy.
+
+Turn it off with **Warn before quitting with programs running**
+(`scrolling/confirmCloseWithRunningProcesses`). The check is skipped entirely when
+the setting is off, so quitting is instantaneous.
 
 (The paragraph below describes the legacy Qt Quick build, where the tab model
 was also the pane model. It is kept because the reasoning is easy to repeat:
@@ -240,6 +275,74 @@ Both live on top of QTermWidget's `setMonitorActivity()` / `setMonitorSilence()`
 where you're typing, "no output for N seconds" is the normal case rather than
 a signal.
 
+## Profiles
+
+A **profile** is a named bundle of per-terminal overrides: a colour scheme, a
+font, a shell program and its arguments, and a start directory. Profiles let
+one window hold, say, a themed "Dev" tab running `fish -l` next to a plain
+default tab.
+
+There is always exactly one **default** profile, and that is what `New Tab`
+(`Ctrl+Shift+T`) opens. To open a tab with a different profile, use
+**File → New Tab with Profile** and pick one from the list.
+
+Profiles are managed in **Settings → Profiles**: a list on the left with Add,
+Duplicate and Delete, and a form on the right.
+
+### Inheritance
+
+Every field is independent, and an unset field **inherits the global setting**:
+
+| Field left at *Inherit* | Follows |
+| --- | --- |
+| Colour scheme | the Appearance page |
+| Font / font size | the Text page |
+| Shell program | the login shell (`$SHELL`) |
+| Shell arguments | none |
+| Start directory | the home directory |
+
+The distinction matters at runtime. Changing the global font size re-applies
+the appearance to every tab, and only the fields a profile actually overrides
+stay put — so a "themed" profile keeps its colour scheme while still tracking
+your global font size. Resolution happens on every apply, not once at creation.
+
+### What profiles deliberately do *not* do
+
+- **They do not restart a running shell.** Editing a profile's shell program
+  updates the appearance of open tabs immediately, but their shells keep
+  running; the new program takes effect on the next tab opened with that
+  profile. Relaunching would throw away whatever is in the tab.
+- **Deleting a profile does not affect open tabs.** They keep the settings they
+  resolved with, and are not silently reassigned to the default.
+- **The default profile cannot be deleted** — it is what `New Tab` opens. It can
+  be renamed and given overrides like any other.
+
+`SUPERTERM_SHELL` still wins over a profile's shell program, since it is an
+explicit per-run instruction:
+
+```sh
+SUPERTERM_SHELL=/bin/fish superterm   # every new tab uses fish
+```
+
+Config layout, under `[profiles]`:
+
+```ini
+[profiles]
+order=5a907420, 844949ed
+default=5a907420
+5a907420\name=Default
+844949ed\name=Dev
+844949ed\colorScheme=Nord
+844949ed\fontSize=18
+844949ed\shellProgram=/usr/bin/fish
+844949ed\shellArgs=-l
+844949ed\workingDirectory=/home/me/work
+```
+
+Only fields that are actually set are written, so an inheriting profile stays
+short and a later global change still reaches it. Profile ids are stable across
+renames, which is what lets open tabs keep pointing at them.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -252,12 +355,24 @@ a signal.
 | `Ctrl+=` / `Ctrl+-` | Zoom in / out (0.5pt steps) |
 | `Ctrl+0` | Reset zoom |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste |
+| `Ctrl+Shift+Q` | Quit |
 | `Ctrl` + mouse wheel | Zoom |
 | `Escape` | Close search or settings |
 
 Right-clicking inside a terminal opens a context menu with copy, paste, find,
 clear, save-output-to-file, and zoom actions, so those are discoverable without
 memorising the shortcuts.
+
+Plain `Ctrl`+letter combinations are deliberately **not** bound to app actions.
+A `QAction` shortcut is claimed by the shortcut map before the focused widget —
+the terminal — ever sees the key, so binding one would silently break the
+program running inside it. `Ctrl+Q` in particular is micro's quit key, and the
+shell's XON resume; it used to be `Quit` (via `QKeySequence::Quit`) and killed
+SuperTerm instead of the editor. Quit is now `Ctrl+Shift+Q`.
+
+The plain-`Ctrl` bindings that remain (`Ctrl+Tab`, `Ctrl+,`, `Ctrl+=`/`-`/`0`)
+are non-letter keys that produce no control code, so no terminal program wants
+them. Anything else uses `Ctrl+Shift`+letter.
 
 ## Project layout
 

@@ -100,6 +100,14 @@ public:
          */
         bool    monitorSilence = false;
         int     silenceTimeout = 10;    // seconds
+
+        /*
+         * Before closing the window or quitting, ask for confirmation if any
+         * terminal is running a foreground program -- an editor, a build, an
+         * ssh session -- since quitting kills it. Off only for users who find
+         * the prompt intrusive; a prompt is the safe default.
+         */
+        bool    confirmCloseWithRunningProcesses = true;
     };
 
     explicit Settings(QObject *parent = nullptr);
@@ -124,6 +132,7 @@ public:
     void setScrollback(int v);
     void setScrollbarPosition(const QString &v);
     void setFlowControlWarning(bool v);
+    void setConfirmCloseWithRunningProcesses(bool v);
     void setMonitorActivity(bool v);
     void setMonitorSilence(bool v);
     void setSilenceTimeout(int v);

@@ -6,6 +6,7 @@
 
 #include "settingsdialog.h"
 
+#include "profiles.h"
 #include "settings.h"
 
 #include <QCheckBox>
@@ -17,7 +18,11 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QGroupBox>
+#include <QLineEdit>
 #include <QListWidget>
+#include <QMessageBox>
+#include <QPushButton>
 #include <QSlider>
 #include <QSpinBox>
 #include <QStackedWidget>
@@ -49,9 +54,11 @@ QStringList monoFamilies()
 }
 } // namespace
 
-SettingsDialog::SettingsDialog(Settings &settings, QWidget *parent)
+SettingsDialog::SettingsDialog(Settings &settings, ProfileStore &profiles,
+                               QWidget *parent)
     : QDialog(parent)
     , m_settings(settings)
+    , m_profiles(profiles)
 {
     setWindowTitle(tr("Settings"));
     setModal(true);
@@ -62,7 +69,8 @@ SettingsDialog::SettingsDialog(Settings &settings, QWidget *parent)
 
     m_sections = new QListWidget(this);
     m_sections->setFixedWidth(170);
-    m_sections->addItems({tr("Appearance"), tr("Text"), tr("Cursor"), tr("Scrolling")});
+    m_sections->addItems({tr("Appearance"), tr("Text"), tr("Cursor"),
+                          tr("Scrolling"), tr("Profiles")});
     m_sections->setFrameShape(QFrame::NoFrame);
     outer->addWidget(m_sections);
 
@@ -75,6 +83,7 @@ SettingsDialog::SettingsDialog(Settings &settings, QWidget *parent)
     m_pages->addWidget(buildTextPage());
     m_pages->addWidget(buildCursorPage());
     m_pages->addWidget(buildScrollingPage());
+    m_pages->addWidget(buildProfilesPage());
     right->addWidget(m_pages, 1);
 
     auto *footer = new QHBoxLayout;
@@ -99,7 +108,16 @@ SettingsDialog::SettingsDialog(Settings &settings, QWidget *parent)
     // KDE fonts) used to exceed the old fixed 470px and squeeze the group
     // box's contents to nothing on some styles. This keeps every control
     // visible while staying as compact as the content allows.
+    //
+    // adjustSize() is not enough on its own: Qt caps it at two-thirds of the
+    // screen, so on a short screen the Scrolling page (which is the tallest)
+    // gets clipped and its group boxes collapse to a few pixels. Ask for the
+    // page's real height as a floor.
     adjustSize();
+    const int contentHeight = m_pages->sizeHint().height()
+                              + (height() - m_pages->height());  // + footer
+    if (height() < contentHeight)
+        resize(width(), contentHeight);
     if (width() < 680 || height() < 470)
         resize(qMax(width(), 680), qMax(height(), 470));
 }
@@ -321,6 +339,21 @@ QWidget *SettingsDialog::buildScrollingPage()
     flowHint->setEnabled(false);
     form->addRow(QString(), flowHint);
 
+    // ---- closing ----------------------------------------------------------
+    m_confirmCloseBox = new QCheckBox(tr("Warn before quitting with programs running"), page);
+    connect(m_confirmCloseBox, &QCheckBox::toggled, this, [this](bool v) {
+        m_settings.setConfirmCloseWithRunningProcesses(v);
+    });
+    form->addRow(QString(), m_confirmCloseBox);
+
+    auto *closeHint = new QLabel(tr("Asks for confirmation when a terminal is running a "
+                                    "foreground program (an editor, a build, an ssh "
+                                    "session) that quitting would terminate. An idle "
+                                    "shell prompt never triggers it."), page);
+    closeHint->setWordWrap(true);
+    closeHint->setEnabled(false);
+    form->addRow(QString(), closeHint);
+
     // ---- output monitoring ------------------------------------------------
     auto *watchGroup = new QGroupBox(tr("Watch a terminal"), page);
     auto *watchLayout = new QVBoxLayout(watchGroup);
@@ -384,6 +417,312 @@ QWidget *SettingsDialog::buildScrollingPage()
     return page;
 }
 
+QWidget *SettingsDialog::buildProfilesPage()
+{
+    auto *page = new QWidget(this);
+    auto *outer = new QHBoxLayout(page);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(12);
+
+    // ---- left: the list + CRUD ------------------------------------------
+    auto *left = new QVBoxLayout;
+    left->setSpacing(6);
+
+    m_profileList = new QListWidget(page);
+    m_profileList->setMinimumWidth(170);
+    m_profileList->setFrameShape(QFrame::StyledPanel);
+    left->addWidget(m_profileList, 1);
+
+    auto *buttons = new QHBoxLayout;
+    buttons->setSpacing(4);
+    auto makeBtn = [page](const QString &text, const QString &tip) {
+        auto *b = new QPushButton(text, page);
+        b->setToolTip(tip);
+        return b;
+    };
+    m_profileAdd = makeBtn(tr("Add"), tr("Create a new profile"));
+    m_profileDuplicate = makeBtn(tr("Duplicate"), tr("Copy the selected profile"));
+    m_profileDelete = makeBtn(tr("Delete"), tr("Delete the selected profile"));
+    buttons->addWidget(m_profileAdd);
+    buttons->addWidget(m_profileDuplicate);
+    buttons->addWidget(m_profileDelete);
+    left->addLayout(buttons);
+
+    outer->addLayout(left);
+
+    // ---- right: the form -------------------------------------------------
+    m_profileFormBox = new QGroupBox(tr("Profile settings"), page);
+    auto *form = new QFormLayout(m_profileFormBox);
+    form->setSpacing(8);
+
+    m_profileName = new QLineEdit(m_profileFormBox);
+    m_profileName->setPlaceholderText(tr("Profile name"));
+    form->addRow(tr("Name"), m_profileName);
+
+    auto *inheritHint = new QLabel(
+        tr("Leave a field at “Inherit” to follow the global setting."),
+        m_profileFormBox);
+    inheritHint->setWordWrap(true);
+    inheritHint->setEnabled(false);
+    form->addRow(QString(), inheritHint);
+
+    m_profileScheme = new QComboBox(m_profileFormBox);
+    m_profileScheme->addItem(tr("Inherit"), QString());
+    for (const QString &s : QTermWidget::availableColorSchemes())
+        m_profileScheme->addItem(s, s);
+    form->addRow(tr("Colour scheme"), m_profileScheme);
+
+    m_profileFont = new QComboBox(m_profileFormBox);
+    m_profileFont->addItem(tr("Inherit"), QString());
+    for (const QString &f : monoFamilies())
+        m_profileFont->addItem(f, f);
+    form->addRow(tr("Font"), m_profileFont);
+
+    m_profileFontSize = new QDoubleSpinBox(m_profileFormBox);
+    m_profileFontSize->setRange(kFontSliderMin, kFontSliderMax);
+    m_profileFontSize->setSingleStep(0.5);
+    m_profileFontSize->setDecimals(1);
+    // A spin box cannot express "no value", so the minimum doubles as the
+    // inherit sentinel and the label spells it out.
+    m_profileFontSize->setSpecialValueText(tr("Inherit"));
+    m_profileFontSize->setValue(kFontSliderMin);
+    form->addRow(tr("Font size"), m_profileFontSize);
+
+    m_profileShell = new QLineEdit(m_profileFormBox);
+    m_profileShell->setPlaceholderText(tr("Inherit (login shell)"));
+    m_profileShell->setToolTip(tr("Full path to a shell or program, e.g. /usr/bin/fish"));
+    form->addRow(tr("Shell program"), m_profileShell);
+
+    m_profileShellArgs = new QLineEdit(m_profileFormBox);
+    m_profileShellArgs->setPlaceholderText(tr("Inherit (no arguments)"));
+    m_profileShellArgs->setToolTip(tr("Space-separated arguments for the shell program"));
+    form->addRow(tr("Shell arguments"), m_profileShellArgs);
+
+    m_profileWorkDir = new QLineEdit(m_profileFormBox);
+    m_profileWorkDir->setPlaceholderText(tr("Inherit (home directory)"));
+    form->addRow(tr("Start directory"), m_profileWorkDir);
+
+    outer->addWidget(m_profileFormBox, 1);
+
+    /*
+     * Wiring.
+     *
+     * Commit on commit-oriented signals (editingFinished, activated) rather
+     * than on every keystroke: renaming a profile should not rewrite the
+     * config file once per character, and a half-typed shell path is not a
+     * value worth persisting.
+     */
+    connect(m_profileList, &QListWidget::currentRowChanged, this, [this](int row) {
+        if (row < 0)
+            return;
+        loadProfileIntoForm(currentProfileId());
+    });
+
+    connect(m_profileName, &QLineEdit::editingFinished,
+            this, &SettingsDialog::commitProfileForm);
+    connect(m_profileShell, &QLineEdit::editingFinished,
+            this, &SettingsDialog::commitProfileForm);
+    connect(m_profileShellArgs, &QLineEdit::editingFinished,
+            this, &SettingsDialog::commitProfileForm);
+    connect(m_profileWorkDir, &QLineEdit::editingFinished,
+            this, &SettingsDialog::commitProfileForm);
+    connect(m_profileScheme, &QComboBox::currentIndexChanged,
+            this, [this](int) { commitProfileForm(); });
+    connect(m_profileFont, &QComboBox::currentIndexChanged,
+            this, [this](int) { commitProfileForm(); });
+    connect(m_profileFontSize, &QDoubleSpinBox::valueChanged,
+            this, [this](double) { commitProfileForm(); });
+
+    connect(m_profileAdd, &QPushButton::clicked, this, [this]() {
+        TerminalProfile p;
+        // A readable, non-colliding placeholder name, so an immediately-used
+        // profile does not look like an error.
+        int n = m_profiles.profiles().size() + 1;
+        QString name;
+        auto taken = [this](const QString &c) {
+            for (const auto &e : m_profiles.profiles()) {
+                if (e.name.compare(c, Qt::CaseInsensitive) == 0)
+                    return true;
+            }
+            return false;
+        };
+        do {
+            name = tr("Profile %1").arg(n++);
+        } while (taken(name));
+        p.name = name;
+        const QString id = m_profiles.add(p);
+        rebuildProfileList(id);
+    });
+
+    connect(m_profileDuplicate, &QPushButton::clicked, this, [this]() {
+        const QString id = currentProfileId();
+        if (id.isEmpty())
+            return;
+        const QString copy = m_profiles.duplicate(id);
+        if (!copy.isEmpty())
+            rebuildProfileList(copy);
+    });
+
+    connect(m_profileDelete, &QPushButton::clicked, this, [this]() {
+        const QString id = currentProfileId();
+        if (id.isEmpty())
+            return;
+        if (id == m_profiles.defaultProfile().id) {
+            // The store refuses this too; say why rather than doing nothing.
+            QMessageBox::information(
+                this, tr("Cannot delete the default profile"),
+                tr("The default profile is what “New Tab” opens, so it cannot be "
+                   "deleted. You can rename it or change its settings."));
+            return;
+        }
+        const auto answer = QMessageBox::question(
+            this, tr("Delete profile?"),
+            tr("Delete “%1”?\n\nTabs already open with it keep their settings.")
+                .arg(m_profiles.profileById(id).name),
+            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
+        if (answer != QMessageBox::Yes)
+            return;
+        m_profiles.remove(id);
+        rebuildProfileList();
+    });
+
+    rebuildProfileList();
+    return page;
+}
+
+void SettingsDialog::rebuildProfileList(const QString &selectId)
+{
+    if (!m_profileList)
+        return;
+
+    const QString want = selectId.isEmpty() ? currentProfileId() : selectId;
+
+    // Block signals so repopulating does not fire currentRowChanged for every
+    // intermediate row, which would reload (and re-commit) the form repeatedly.
+    const QSignalBlocker block(m_profileList);
+    m_profileList->clear();
+    for (const auto &p : m_profiles.profiles()) {
+        auto *item = new QListWidgetItem(
+            p.isDefault ? tr("%1  (default)").arg(p.name) : p.name);
+        item->setData(Qt::UserRole, p.id);
+        if (p.isDefault) {
+            QFont f = item->font();
+            f.setBold(true);
+            item->setFont(f);
+        }
+        m_profileList->addItem(item);
+    }
+
+    int row = 0;
+    for (int i = 0; i < m_profileList->count(); ++i) {
+        if (m_profileList->item(i)->data(Qt::UserRole).toString() == want) {
+            row = i;
+            break;
+        }
+    }
+    m_profileList->setCurrentRow(row);
+
+    loadProfileIntoForm(currentProfileId());
+    setProfileFormEnabled(m_profileList->count() > 0);
+}
+
+QString SettingsDialog::currentProfileId() const
+{
+    if (!m_profileList || !m_profileList->currentItem())
+        return QString();
+    return m_profileList->currentItem()->data(Qt::UserRole).toString();
+}
+
+void SettingsDialog::setProfileFormEnabled(bool on)
+{
+    if (m_profileFormBox)
+        m_profileFormBox->setEnabled(on);
+}
+
+void SettingsDialog::loadProfileIntoForm(const QString &id)
+{
+    if (!m_profileFormBox || id.isEmpty())
+        return;
+
+    const TerminalProfile p = m_profiles.profileById(id);
+
+    // Guard every setter below: each one would otherwise look like a user edit
+    // and be written straight back.
+    m_loadingProfile = true;
+
+    m_profileName->setText(p.name);
+
+    // Inherit is index 0; a value no longer in the list (e.g. a scheme that has
+    // been removed) falls back to Inherit rather than being silently rewritten.
+    m_profileScheme->setCurrentIndex(
+        p.colorScheme ? qMax(0, m_profileScheme->findData(*p.colorScheme)) : 0);
+    m_profileFont->setCurrentIndex(
+        p.fontFamily ? qMax(0, m_profileFont->findData(*p.fontFamily)) : 0);
+
+    m_profileFontSize->setValue(p.fontSize ? *p.fontSize : kFontSliderMin);
+
+    m_profileShell->setText(p.shellProgram ? *p.shellProgram : QString());
+    m_profileShellArgs->setText(
+        (p.shellProgram && p.shellArgs) ? p.shellArgs->join(QLatin1Char(' '))
+                                        : QString());
+    m_profileWorkDir->setText(p.workingDirectory ? *p.workingDirectory
+                                                 : QString());
+
+    // The arguments field only means something alongside a program.
+    m_profileShellArgs->setEnabled(p.shellProgram.has_value());
+
+    m_loadingProfile = false;
+}
+
+void SettingsDialog::commitProfileForm()
+{
+    if (m_loadingProfile || !m_profileFormBox)
+        return;
+    const QString id = currentProfileId();
+    if (id.isEmpty())
+        return;
+
+    TerminalProfile p = m_profiles.profileById(id);
+
+    const QString name = m_profileName->text().trimmed();
+    if (!name.isEmpty())
+        p.name = name;
+
+    // Inherit -> nullopt; a real value -> that value.
+    const QString scheme = m_profileScheme->currentData().toString();
+    p.colorScheme = scheme.isEmpty() ? std::nullopt
+                                     : std::optional<QString>(scheme);
+    const QString family = m_profileFont->currentData().toString();
+    p.fontFamily = family.isEmpty() ? std::nullopt
+                                    : std::optional<QString>(family);
+
+    if (m_profileFontSize->value() <= kFontSliderMin)
+        p.fontSize = std::nullopt;
+    else
+        p.fontSize = m_profileFontSize->value();
+
+    const QString shell = m_profileShell->text().trimmed();
+    if (shell.isEmpty()) {
+        p.shellProgram = std::nullopt;
+        p.shellArgs = std::nullopt;
+    } else {
+        p.shellProgram = shell;
+        // An empty list is meaningful ("this program, no arguments"), so keep
+        // it rather than leaving args unset.
+        const QString argsText = m_profileShellArgs->text().trimmed();
+        p.shellArgs = argsText.isEmpty()
+                          ? QStringList()
+                          : argsText.split(QLatin1Char(' '), Qt::SkipEmptyParts);
+    }
+    m_profileShellArgs->setEnabled(!shell.isEmpty());
+
+    const QString dir = m_profileWorkDir->text().trimmed();
+    p.workingDirectory = dir.isEmpty() ? std::nullopt
+                                       : std::optional<QString>(dir);
+
+    m_profiles.update(p);
+}
+
 void SettingsDialog::syncFromSettings()
 {
     const auto &a = m_settings.appearance();
@@ -425,6 +764,7 @@ void SettingsDialog::syncFromSettings()
     if (sbIndex >= 0)
         m_scrollbarPosBox->setCurrentIndex(sbIndex);
     m_flowControlWarnBox->setChecked(s.flowControlWarning);
+    m_confirmCloseBox->setChecked(s.confirmCloseWithRunningProcesses);
 
     m_monitorActivityBox->setChecked(s.monitorActivity);
     m_monitorSilenceBox->setChecked(s.monitorSilence);

@@ -19,13 +19,17 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include <unistd.h>   // getpgid
+
 #include <Emulation.h>
 #include <qtermwidget.h>
 
-TerminalWidget::TerminalWidget(int id, const Settings &settings, QWidget *parent)
+TerminalWidget::TerminalWidget(int id, const Settings &settings,
+                               const TerminalProfile &profile, QWidget *parent)
     : QWidget(parent)
     , m_id(id)
     , m_settings(settings)
+    , m_profile(profile)
 {
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
@@ -89,11 +93,43 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings, QWidget *parent
 
     // Optional shell override, useful for testing:
     //   SUPERTERM_SHELL=/bin/fish superterm
+    //
+    // The environment variable wins over the profile: it is an explicit,
+    // per-run instruction, and tools/tests rely on it to pin a shell without
+    // editing config.
     const QByteArray shell = qgetenv("SUPERTERM_SHELL");
-    if (!shell.isEmpty())
-        m_terminal->setShellProgram(QString::fromLocal8Bit(shell));
+    const QString envShell = QString::fromLocal8Bit(shell);
+
+    const QString program =
+        !envShell.isEmpty() ? envShell
+                            : (m_profile.shellProgram ? *m_profile.shellProgram
+                                                      : QString());
+    if (!program.isEmpty())
+        m_terminal->setShellProgram(program);
+
+    // Arguments only make sense with an explicit program; passing them to the
+    // login shell would silently change its behaviour.
+    if (envShell.isEmpty() && m_profile.shellProgram && m_profile.shellArgs)
+        m_terminal->setArgs(*m_profile.shellArgs);
+
+    if (m_profile.workingDirectory && !m_profile.workingDirectory->isEmpty())
+        m_terminal->setWorkingDirectory(*m_profile.workingDirectory);
 
     m_terminal->startShellProgram();
+}
+
+void TerminalWidget::setProfile(const TerminalProfile &profile)
+{
+    m_profile = profile;
+    // The running shell is left alone -- relaunching it would destroy the
+    // session -- but the appearance is ours to update.
+    applyAppearance();
+}
+
+double TerminalWidget::appliedFontSize() const
+{
+    return m_profile.fontSize ? *m_profile.fontSize
+                              : m_settings.appearance().fontSize;
 }
 
 void TerminalWidget::onOutput()
@@ -114,12 +150,23 @@ void TerminalWidget::applyAppearance()
 
     const auto &a = m_settings.appearance();
 
-    m_terminal->setColorScheme(a.colorScheme);
+    /*
+     * Resolve the profile against the globals.
+     *
+     * This runs on every appearance change, so each field is decided
+     * independently: an overridden field keeps its profile value, an inherited
+     * one picks up the new global. That is what makes "themed Dev tab" and
+     * "global font size" coexist without fighting.
+     */
+    const QString scheme = m_profile.colorScheme ? *m_profile.colorScheme
+                                                 : a.colorScheme;
+    m_appliedColorScheme = scheme;
+    m_terminal->setColorScheme(scheme);
 
-    QFont font(a.fontFamily);
+    QFont font(m_profile.fontFamily ? *m_profile.fontFamily : a.fontFamily);
     // setPointSizeF is honoured: measured 13 / 13.5 / 14pt producing distinct
     // cell grids (79x19 / 72x19 / 72x18), so half-point steps are real.
-    font.setPointSizeF(a.fontSize);
+    font.setPointSizeF(m_profile.fontSize ? *m_profile.fontSize : a.fontSize);
     m_terminal->setTerminalFont(font);
 
     m_terminal->setBoldIntense(a.boldIntense);
@@ -195,6 +242,51 @@ void TerminalWidget::focusTerminal()
 {
     if (m_terminal)
         m_terminal->setFocus();
+}
+
+/*
+ * Is something running in this terminal that quitting would kill?
+ *
+ * The pty's foreground process group is read with tcgetpgrp(). When it equals
+ * the shell's own group, the shell is the one reading the terminal -- an idle
+ * prompt, or one with only a background job. When it differs, a foreground
+ * program owns the tty and would be killed by a quit.
+ *
+ * Both ids can legitimately be 0 (no pty / session not started yet); that
+ * reports false rather than warning about a terminal that does not exist.
+ */
+bool TerminalWidget::hasRunningProcess() const
+{
+    if (!m_terminal)
+        return false;
+
+    const int shellPid = m_terminal->getShellPID();
+    const int fgPgrp = m_terminal->getForegroundProcessId();
+    if (shellPid <= 0 || fgPgrp <= 0)
+        return false;
+
+    // getpgid() rather than a direct shellPid comparison, so a shell that is
+    // not its own group leader is still recognised as "at the prompt".
+    const int shellPgrp = ::getpgid(shellPid);
+    const int reference = (shellPgrp > 0) ? shellPgrp : shellPid;
+    return fgPgrp != reference;
+}
+
+QString TerminalWidget::foregroundProgramName() const
+{
+    if (!m_terminal)
+        return QString();
+
+    const int fgPgrp = m_terminal->getForegroundProcessId();
+    if (fgPgrp <= 0)
+        return QString();
+
+    // /proc/<pid>/comm is the kernel's short name for the process, truncated to
+    // 15 characters. Read it directly rather than shelling out to ps.
+    QFile comm(QStringLiteral("/proc/%1/comm").arg(fgPgrp));
+    if (!comm.open(QIODevice::ReadOnly))
+        return QString();
+    return QString::fromUtf8(comm.readAll()).trimmed();
 }
 
 QPixmap TerminalWidget::previewPixmap(const QSize &size) const
