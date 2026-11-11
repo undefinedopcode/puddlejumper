@@ -10,7 +10,6 @@
 #include <QLabel>
 #include <QListWidget>
 #include <QResizeEvent>
-#include <QToolButton>
 #include <QVBoxLayout>
 
 namespace {
@@ -50,26 +49,8 @@ ThumbnailSidebar::ThumbnailSidebar(QWidget *parent)
     label->setEnabled(false);
     headerLayout->addWidget(label, 1);
 
-    auto makeButton = [header](const QString &text, const QString &tip) {
-        auto *b = new QToolButton(header);
-        b->setText(text);
-        b->setToolTip(tip);
-        b->setAutoRaise(true);
-        b->setFocusPolicy(Qt::NoFocus);
-        return b;
-    };
-
-    auto *addBtn = makeButton(QStringLiteral("＋"), tr("New tab (Ctrl+Shift+T)"));
-    auto *layoutBtn = makeButton(QStringLiteral("▥"), tr("Use top tabs"));
-    auto *settingsBtn = makeButton(QStringLiteral("⚙"), tr("Settings (Ctrl+,)"));
-    headerLayout->addWidget(addBtn);
-    headerLayout->addWidget(layoutBtn);
-    headerLayout->addWidget(settingsBtn);
+    // New tab, layout toggle and settings live on the main window's toolbar.
     outer->addWidget(header);
-
-    connect(addBtn, &QToolButton::clicked, this, &ThumbnailSidebar::addTabRequested);
-    connect(layoutBtn, &QToolButton::clicked, this, &ThumbnailSidebar::layoutToggleRequested);
-    connect(settingsBtn, &QToolButton::clicked, this, &ThumbnailSidebar::settingsRequested);
 
     // ---- list ------------------------------------------------------------
     m_list = new QListWidget(this);

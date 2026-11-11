@@ -13,7 +13,7 @@
 #include <QAction>
 #include <QApplication>
 #include <QCloseEvent>
-#include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
 #include <QListWidget>
 #include <QMenuBar>
@@ -24,11 +24,45 @@
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTimer>
+#include <QToolBar>
 #include <QToolButton>
 #include <QVBoxLayout>
 
 #include <Emulation.h>
 #include <qtermwidget.h>
+
+namespace {
+
+/*
+ * The first of several freedesktop icon names that the current theme has.
+ * Themes disagree on names (Breeze and Adwaita each lack some of the others'),
+ * so each toolbar action lists a few. If none exists the icon is null and the
+ * toolbar button shows the action's text instead.
+ */
+QIcon themeIcon(std::initializer_list<const char *> names)
+{
+    for (const char *name : names) {
+        const QString n = QString::fromLatin1(name);
+        if (QIcon::hasThemeIcon(n))
+            return QIcon::fromTheme(n);
+    }
+    return QIcon();
+}
+
+/*
+ * Toolbar buttons are icon-only, so the tooltip is the only place a button's
+ * name and shortcut appear. Qt doesn't add the shortcut itself.
+ */
+void setToolTipWithShortcut(QAction *act)
+{
+    QString text = act->text();
+    text.remove(QLatin1Char('&'));
+    text.remove(QChar(0x2026));   // "…"
+    const QString keys = act->shortcut().toString(QKeySequence::NativeText);
+    act->setToolTip(keys.isEmpty() ? text : QStringLiteral("%1 (%2)").arg(text, keys));
+}
+
+} // namespace
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -88,40 +122,6 @@ void MainWindow::buildLayout()
     m_tabs->setElideMode(Qt::ElideRight);
     m_tabs->tabBar()->setExpanding(false);
 
-    // Chrome buttons for the top-tab layout.
-    //
-    // In thumbnail mode the sidebar header carries these, and the tab bar is
-    // hidden, so a corner widget on the tab widget is exactly the right place:
-    // it is only visible when tabs are visible.
-    auto *corner = new QWidget(m_tabs);
-    auto *cornerLayout = new QHBoxLayout(corner);
-    cornerLayout->setContentsMargins(0, 0, 4, 0);
-    cornerLayout->setSpacing(0);
-
-    auto makeCornerButton = [corner](const QString &text, const QString &tip) {
-        auto *b = new QToolButton(corner);
-        b->setText(text);
-        b->setToolTip(tip);
-        b->setAutoRaise(true);
-        // Never steal keyboard focus from the terminal.
-        b->setFocusPolicy(Qt::NoFocus);
-        return b;
-    };
-
-    auto *newBtn = makeCornerButton(QStringLiteral("＋"), tr("New tab (Ctrl+Shift+T)"));
-    auto *sidebarBtn = makeCornerButton(QStringLiteral("▤"), tr("Use thumbnail sidebar"));
-    auto *settingsBtn = makeCornerButton(QStringLiteral("⚙"), tr("Settings (Ctrl+,)"));
-    cornerLayout->addWidget(newBtn);
-    cornerLayout->addWidget(sidebarBtn);
-    cornerLayout->addWidget(settingsBtn);
-    m_tabs->setCornerWidget(corner, Qt::TopRightCorner);
-
-    connect(newBtn, &QToolButton::clicked, this, &MainWindow::newTab);
-    connect(settingsBtn, &QToolButton::clicked, this, [this]() { openSettings(); });
-    connect(sidebarBtn, &QToolButton::clicked, this, [this]() {
-        m_settings.setTabLayout(QStringLiteral("thumbnails"));
-    });
-
     m_splitter->addWidget(m_sidebar);
     m_splitter->addWidget(m_tabs);
     setCentralWidget(m_splitter);
@@ -155,11 +155,6 @@ void MainWindow::buildLayout()
             m_tabs->setCurrentIndex(index);
     });
     connect(m_sidebar, &ThumbnailSidebar::tabClosed, this, &MainWindow::closeTab);
-    connect(m_sidebar, &ThumbnailSidebar::addTabRequested, this, &MainWindow::newTab);
-    connect(m_sidebar, &ThumbnailSidebar::settingsRequested, this, [this]() { openSettings(); });
-    connect(m_sidebar, &ThumbnailSidebar::layoutToggleRequested, this, [this]() {
-        m_settings.setTabLayout(QStringLiteral("standard"));
-    });
 }
 
 void MainWindow::buildMenus()
@@ -277,11 +272,83 @@ void MainWindow::buildMenus()
         m_settings.setTabLayout(on ? QStringLiteral("thumbnails")
                                    : QStringLiteral("standard"));
     });
-    // Keep the check state in step with the setting, however it changed.
-    connect(&m_settings, &Settings::appearanceChanged, this, [this, toggleLayout]() {
+    // Keep the check state in step with the setting, however it changed, and
+    // start it from the saved setting (which emits nothing at startup).
+    const auto syncLayoutCheck = [this, toggleLayout]() {
         toggleLayout->setChecked(
             m_settings.appearance().tabLayout == QStringLiteral("thumbnails"));
-    });
+    };
+    syncLayoutCheck();
+    connect(&m_settings, &Settings::appearanceChanged, this, syncLayoutCheck);
+
+    /*
+     * Toolbar.
+     *
+     * The same QActions as the menus, so shortcuts, enabled state and the
+     * sidebar check stay in one place. Its visibility and position are part of
+     * saveState(), which closeEvent() persists; that needs the object name.
+     */
+    newAct->setIcon(themeIcon({"tab-new", "list-add"}));
+    closeAct->setIcon(themeIcon({"tab-close", "window-close"}));
+    copyAct->setIcon(themeIcon({"edit-copy"}));
+    pasteAct->setIcon(themeIcon({"edit-paste"}));
+    findAct->setIcon(themeIcon({"edit-find", "system-search"}));
+    zoomOut->setIcon(themeIcon({"zoom-out"}));
+    zoomIn->setIcon(themeIcon({"zoom-in"}));
+    toggleLayout->setIcon(themeIcon({"sidebar-show", "sidebar-show-symbolic", "view-preview"}));
+    settingsAct->setIcon(themeIcon({"configure", "preferences-system", "document-properties"}));
+    for (QAction *act : {newAct, closeAct, copyAct, pasteAct, findAct, zoomOut, zoomIn,
+                         zoomReset, toggleLayout, settingsAct})
+        setToolTipWithShortcut(act);
+
+    auto *bar = addToolBar(tr("Main Toolbar"));
+    bar->setObjectName(QStringLiteral("mainToolBar"));
+    bar->setFloatable(false);
+
+    // New Tab with the profile list as a drop-down, rather than a second
+    // button: clicking opens the default profile, the arrow picks another.
+    auto *newButton = new QToolButton(bar);
+    newButton->setDefaultAction(newAct);
+    newButton->setMenu(m_newTabWithProfileMenu);
+    newButton->setPopupMode(QToolButton::MenuButtonPopup);
+    bar->addWidget(newButton);
+    bar->addAction(closeAct);
+
+    bar->addSeparator();
+    bar->addAction(copyAct);
+    bar->addAction(pasteAct);
+    bar->addAction(findAct);
+
+    // The current font size sits between the zoom buttons, and clicking it
+    // resets the zoom. Not setDefaultAction(): that would replace the size with
+    // the action's text.
+    bar->addSeparator();
+    bar->addAction(zoomOut);
+    auto *sizeButton = new QToolButton(bar);
+    sizeButton->setToolTip(zoomReset->toolTip());
+    sizeButton->setToolButtonStyle(Qt::ToolButtonTextOnly);
+    connect(sizeButton, &QToolButton::clicked, zoomReset, &QAction::trigger);
+    const auto showFontSize = [this, sizeButton]() {
+        sizeButton->setText(tr("%L1 pt").arg(m_settings.appearance().fontSize));
+    };
+    showFontSize();
+    connect(&m_settings, &Settings::appearanceChanged, sizeButton, showFontSize);
+    bar->addWidget(sizeButton);
+    bar->addAction(zoomIn);
+
+    bar->addSeparator();
+    bar->addAction(toggleLayout);
+
+    // Settings at the far end, as in most desktop apps.
+    auto *spacer = new QWidget(bar);
+    spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    bar->addWidget(spacer);
+    bar->addAction(settingsAct);
+
+    view->addSeparator();
+    QAction *showBar = bar->toggleViewAction();
+    showBar->setText(tr("Show &Toolbar"));
+    view->addAction(showBar);
 }
 
 void MainWindow::buildStatusBar()

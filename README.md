@@ -14,11 +14,13 @@ look instead.
 
 ## Screenshots
 
-The window chrome, tab strip, status bar, and a live zsh prompt:
+The window chrome, toolbar, tab strip, status bar, and a live zsh prompt:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  Terminal  ✕                                    ＋   ⚙   │
+│  ⊞▾  ⊠ │ ⧉  ▤  ⌕ │ ⊖ 13 pt ⊕ │ ◧                      ⚙  │
+├──────────────────────────────────────────────────────────┤
+│  Terminal  ✕                                             │
 ├──────────────────────────────────────────────────────────┤
 │  ~/projects/superterm  on  main ?5        at 02:19:38 PM │
 │  ❯                                                       │
@@ -430,6 +432,20 @@ Only fields that are actually set are written, so an inheriting profile stays
 short and a later global change still reaches it. Profile ids are stable across
 renames, which is what lets open tabs keep pointing at them.
 
+## Toolbar
+
+A toolbar under the menu bar carries the common actions: new tab (the arrow
+beside it opens the profile list), close tab, copy, paste, find, zoom out and
+in, the thumbnail sidebar toggle, and settings at the far end. The current font
+size sits between the zoom buttons; click it to reset the zoom.
+
+The buttons are the same actions as the menus, so each tooltip shows its
+shortcut. Icons come from the desktop icon theme, with a few alternative names
+per action because Breeze and Adwaita name some differently. If the theme has
+none of them, the button shows its name instead. **View → Show Toolbar** (or
+right-clicking the toolbar) hides it, and its visibility and position are kept
+between sessions.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -441,6 +457,7 @@ renames, which is what lets open tabs keep pointing at them.
 | `Ctrl+,` | Open settings |
 | `Ctrl+=` / `Ctrl+-` | Zoom in / out (0.5pt steps) |
 | `Ctrl+0` | Reset zoom |
+| `Ctrl+Shift+B` | Toggle thumbnail sidebar |
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste |
 | `Ctrl+Shift+Q` | Quit |
 | `Ctrl` + mouse wheel | Zoom |
@@ -469,7 +486,7 @@ is kept buildable but is no longer installed.
 ```
 CMakeLists.txt            build definition
 src-widgets/main.cpp      QApplication bootstrap, style and icon
-src-widgets/mainwindow.*  tabs, menus, status bar, preview rotation
+src-widgets/mainwindow.*  tabs, menus, toolbar, status bar, preview rotation
 src-widgets/terminalwidget.*  one QTermWidget plus appearance plumbing
 src-widgets/settingsdialog.*  modal settings, five sections
 src-widgets/profiles.*    terminal profiles and their persistence

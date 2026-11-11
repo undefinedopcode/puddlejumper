@@ -9,7 +9,6 @@
 #include <QWidget>
 
 class QListWidget;
-class QToolButton;
 class QResizeEvent;
 
 /*
@@ -41,9 +40,6 @@ public:
 signals:
     void tabActivated(int index);
     void tabClosed(int index);
-    void addTabRequested();
-    void settingsRequested();
-    void layoutToggleRequested();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
