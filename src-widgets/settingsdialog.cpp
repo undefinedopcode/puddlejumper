@@ -11,6 +11,7 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QDoubleSpinBox>
 #include <QFontDatabase>
 #include <QFormLayout>
 #include <QGroupBox>
@@ -54,7 +55,6 @@ SettingsDialog::SettingsDialog(Settings &settings, QWidget *parent)
 {
     setWindowTitle(tr("Settings"));
     setModal(true);
-    resize(680, 470);
 
     auto *outer = new QHBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
@@ -93,6 +93,15 @@ SettingsDialog::SettingsDialog(Settings &settings, QWidget *parent)
 
     m_sections->setCurrentRow(Appearance);
     syncFromSettings();
+
+    // Size to the tallest page rather than a hard-coded pixel count: with the
+    // monitoring group added, the Scrolling page's natural height (~500px on
+    // KDE fonts) used to exceed the old fixed 470px and squeeze the group
+    // box's contents to nothing on some styles. This keeps every control
+    // visible while staying as compact as the content allows.
+    adjustSize();
+    if (width() < 680 || height() < 470)
+        resize(qMax(width(), 680), qMax(height(), 470));
 }
 
 void SettingsDialog::showSection(Section section)
@@ -124,6 +133,26 @@ QWidget *SettingsDialog::buildAppearancePage()
         m_settings.setTabLayout(m_tabLayoutBox->itemData(i).toString());
     });
     form->addRow(tr("Tab layout"), m_tabLayoutBox);
+
+    m_marginBox = new QSpinBox(page);
+    m_marginBox->setRange(0, 32);
+    m_marginBox->setSuffix(QStringLiteral(" px"));
+    connect(m_marginBox, &QSpinBox::valueChanged, this, [this](int v) {
+        m_settings.setTerminalMargin(v);
+    });
+    form->addRow(tr("Terminal margin"), m_marginBox);
+
+    auto *marginHint = new QLabel(tr("Empty space painted around the terminal grid, "
+                                     "so the text does not touch the window edges."), page);
+    marginHint->setWordWrap(true);
+    marginHint->setEnabled(false);
+    form->addRow(QString(), marginHint);
+
+    m_bidiBox = new QCheckBox(tr("Bidirectional text (for right-to-left scripts)"), page);
+    connect(m_bidiBox, &QCheckBox::toggled, this, [this](bool v) {
+        m_settings.setBidi(v);
+    });
+    form->addRow(QString(), m_bidiBox);
 
     return page;
 }
@@ -167,6 +196,27 @@ QWidget *SettingsDialog::buildTextPage()
     });
     form->addRow(tr("Size"), sizeRow);
 
+    // Background opacity as a 30–100% slider; matching the Settings range so
+    // the text is always at least faintly visible. Revives the QML build's
+    // appearance/opacity key, which the widgets API can serve after all.
+    auto *opRow = new QWidget(page);
+    auto *opLayout = new QHBoxLayout(opRow);
+    opLayout->setContentsMargins(0, 0, 0, 0);
+    m_opacitySlider = new QSlider(Qt::Horizontal, opRow);
+    m_opacitySlider->setRange(30, 100);
+    m_opacitySlider->setSingleStep(5);
+    m_opacitySlider->setPageStep(10);
+    m_opacityLabel = new QLabel(opRow);
+    m_opacityLabel->setMinimumWidth(52);
+    m_opacityLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    opLayout->addWidget(m_opacitySlider, 1);
+    opLayout->addWidget(m_opacityLabel);
+    connect(m_opacitySlider, &QSlider::valueChanged, this, [this](int pct) {
+        m_opacityLabel->setText(tr("%1%").arg(pct));
+        m_settings.setOpacity(pct / 100.0);
+    });
+    form->addRow(tr("Opacity"), opRow);
+
     // No line-spacing control here on purpose: QTermWidget has no setter for
     // it, so a control would do nothing. The setting is still read and
     // preserved so the shared config file stays compatible with the QML build.
@@ -199,6 +249,18 @@ QWidget *SettingsDialog::buildCursorPage()
     auto *layout = new QVBoxLayout(page);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(10);
+
+    auto *shapeRow = new QHBoxLayout;
+    shapeRow->addWidget(new QLabel(tr("Cursor shape"), page));
+    m_cursorShapeBox = new QComboBox(page);
+    m_cursorShapeBox->addItem(tr("Block"),     QStringLiteral("0"));
+    m_cursorShapeBox->addItem(tr("Underline"), QStringLiteral("1"));
+    m_cursorShapeBox->addItem(tr("I-Beam"),    QStringLiteral("2"));
+    connect(m_cursorShapeBox, &QComboBox::currentIndexChanged, this, [this](int i) {
+        m_settings.setCursorShape(m_cursorShapeBox->itemData(i).toInt());
+    });
+    shapeRow->addWidget(m_cursorShapeBox, 1);
+    layout->addLayout(shapeRow);
 
     m_blinkBox = new QCheckBox(tr("Blinking cursor"), page);
     connect(m_blinkBox, &QCheckBox::toggled, this, [this](bool v) {
@@ -237,6 +299,74 @@ QWidget *SettingsDialog::buildScrollingPage()
     scrollHint->setEnabled(false);
     form->addRow(QString(), scrollHint);
 
+    m_scrollbarPosBox = new QComboBox(page);
+    m_scrollbarPosBox->addItem(tr("None"),  QStringLiteral("none"));
+    m_scrollbarPosBox->addItem(tr("Left"),  QStringLiteral("left"));
+    m_scrollbarPosBox->addItem(tr("Right"), QStringLiteral("right"));
+    connect(m_scrollbarPosBox, &QComboBox::currentIndexChanged, this, [this](int i) {
+        m_settings.setScrollbarPosition(m_scrollbarPosBox->itemData(i).toString());
+    });
+    form->addRow(tr("Scrollbar position"), m_scrollbarPosBox);
+
+    m_flowControlWarnBox = new QCheckBox(tr("Warn when flow control freezes the display"), page);
+    connect(m_flowControlWarnBox, &QCheckBox::toggled, this, [this](bool v) {
+        m_settings.setFlowControlWarning(v);
+    });
+    form->addRow(QString(), m_flowControlWarnBox);
+
+    auto *flowHint = new QLabel(tr("When a program holds XOFF (e.g. after Ctrl-S the "
+                                   "output pauses), show a notice instead of looking "
+                                   "hung. Applies live to open tabs."), page);
+    flowHint->setWordWrap(true);
+    flowHint->setEnabled(false);
+    form->addRow(QString(), flowHint);
+
+    // ---- output monitoring ------------------------------------------------
+    auto *watchGroup = new QGroupBox(tr("Watch a terminal"), page);
+    auto *watchLayout = new QVBoxLayout(watchGroup);
+
+    m_monitorActivityBox = new QCheckBox(tr("Mark the tab when output arrives"), watchGroup);
+    connect(m_monitorActivityBox, &QCheckBox::toggled, this, [this](bool v) {
+        m_settings.setMonitorActivity(v);
+    });
+    watchLayout->addWidget(m_monitorActivityBox);
+
+    m_monitorSilenceBox = new QCheckBox(tr("Mark the tab when output stops"), watchGroup);
+    connect(m_monitorSilenceBox, &QCheckBox::toggled, this, [this](bool v) {
+        m_settings.setMonitorSilence(v);
+    });
+    watchLayout->addWidget(m_monitorSilenceBox);
+
+    auto *timeoutRow = new QHBoxLayout;
+    auto *timeoutLabel = new QLabel(tr("Idle for"), watchGroup);
+    m_silenceTimeoutBox = new QSpinBox(watchGroup);
+    m_silenceTimeoutBox->setRange(1, 600);
+    m_silenceTimeoutBox->setSuffix(QStringLiteral(" s"));
+    connect(m_silenceTimeoutBox, &QSpinBox::valueChanged, this, [this](int v) {
+        m_settings.setSilenceTimeout(v);
+    });
+    timeoutRow->addSpacing(20); // indent under the checkbox above
+    timeoutRow->addWidget(timeoutLabel);
+    timeoutRow->addWidget(m_silenceTimeoutBox);
+    timeoutRow->addStretch(1);
+    watchLayout->addLayout(timeoutRow);
+
+    auto *watchHint = new QLabel(tr("Silence means \"no output for this many "
+                                    "seconds\" — a useful \"build finished\" cue. "
+                                    "Both markers clear when you select the tab."), watchGroup);
+    watchHint->setWordWrap(true);
+    watchHint->setEnabled(false);
+    watchLayout->addWidget(watchHint);
+
+    // The timeout row is only meaningful while silence monitoring is on.
+    auto syncTimeoutEnabled = [this]() {
+        m_silenceTimeoutBox->setEnabled(m_monitorSilenceBox->isChecked());
+    };
+    connect(m_monitorSilenceBox, &QCheckBox::toggled,
+            this, [syncTimeoutEnabled](bool) { syncTimeoutEnabled(); });
+
+    form->addRow(watchGroup);
+
     m_lineCharsBox = new QCheckBox(tr("Terminal draws its own box characters"), page);
     connect(m_lineCharsBox, &QCheckBox::toggled, this, [this](bool v) {
         m_settings.setDrawLineChars(v);
@@ -274,10 +404,30 @@ void SettingsDialog::syncFromSettings()
     m_fontSizeSlider->setValue(half);
     m_fontSizeLabel->setText(formatPoints(a.fontSize));
 
+    const int pct = qRound(a.opacity * 100);
+    m_opacitySlider->setValue(pct);
+    m_opacityLabel->setText(tr("%1%").arg(pct));
+
     m_boldBox->setChecked(a.boldIntense);
     m_italicBox->setChecked(a.italic);
     m_antialiasBox->setChecked(a.antialias);
     m_blinkBox->setChecked(a.blinkingCursor);
     m_lineCharsBox->setChecked(a.drawLineChars);
     m_scrollbackBox->setValue(s.scrollback);
+
+    const int cursorIndex = m_cursorShapeBox->findData(QString::number(a.cursorShape));
+    if (cursorIndex >= 0)
+        m_cursorShapeBox->setCurrentIndex(cursorIndex);
+    m_marginBox->setValue(a.terminalMargin);
+    m_bidiBox->setChecked(a.bidi);
+
+    const int sbIndex = m_scrollbarPosBox->findData(s.scrollbarPosition);
+    if (sbIndex >= 0)
+        m_scrollbarPosBox->setCurrentIndex(sbIndex);
+    m_flowControlWarnBox->setChecked(s.flowControlWarning);
+
+    m_monitorActivityBox->setChecked(s.monitorActivity);
+    m_monitorSilenceBox->setChecked(s.monitorSilence);
+    m_silenceTimeoutBox->setValue(s.silenceTimeout);
+    m_silenceTimeoutBox->setEnabled(s.monitorSilence);
 }

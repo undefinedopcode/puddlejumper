@@ -20,7 +20,16 @@ constexpr auto kAntialias   = "appearance/antialias";
 constexpr auto kDrawLineChars = "appearance/drawLineChars";
 constexpr auto kLineSpacing = "appearance/lineSpacing";
 constexpr auto kTabLayout   = "appearance/tabLayout";
+constexpr auto kOpacity        = "appearance/opacity";
+constexpr auto kCursorShape    = "appearance/cursorShape";
+constexpr auto kTerminalMargin = "appearance/terminalMargin";
+constexpr auto kBidi           = "appearance/bidi";
 constexpr auto kScrollback  = "scrolling/scrollback";
+constexpr auto kScrollbarPos   = "scrolling/scrollbarPosition";
+constexpr auto kFlowCtrlWarn   = "scrolling/flowControlWarning";
+constexpr auto kMonitorActivity = "scrolling/monitorActivity";
+constexpr auto kMonitorSilence  = "scrolling/monitorSilence";
+constexpr auto kSilenceTimeout  = "scrolling/silenceTimeout";
 constexpr auto kGeometry    = "window/qtGeometry";
 constexpr auto kWinState    = "window/qtState";
 
@@ -73,16 +82,36 @@ void Settings::load()
         m_settings.value(kAntialias, m_appearance.antialias).toBool();
     m_appearance.drawLineChars =
         m_settings.value(kDrawLineChars, m_appearance.drawLineChars).toBool();
-    m_appearance.lineSpacing =
-        m_settings.value(kLineSpacing, m_appearance.lineSpacing).toInt();
     m_appearance.tabLayout =
         m_settings.value(kTabLayout, m_appearance.tabLayout).toString();
+    m_appearance.cursorShape =
+        m_settings.value(kCursorShape, m_appearance.cursorShape).toInt();
+    m_appearance.terminalMargin =
+        m_settings.value(kTerminalMargin, m_appearance.terminalMargin).toInt();
+    m_appearance.bidi =
+        m_settings.value(kBidi, m_appearance.bidi).toBool();
+    m_appearance.opacity =
+        m_settings.value(kOpacity, m_appearance.opacity).toDouble();
 
     m_scrolling.scrollback =
         m_settings.value(kScrollback, m_scrolling.scrollback).toInt();
+    m_scrolling.scrollbarPosition =
+        m_settings.value(kScrollbarPos, m_scrolling.scrollbarPosition).toString();
+    m_scrolling.flowControlWarning =
+        m_settings.value(kFlowCtrlWarn, m_scrolling.flowControlWarning).toBool();
+    m_scrolling.monitorActivity =
+        m_settings.value(kMonitorActivity, m_scrolling.monitorActivity).toBool();
+    m_scrolling.monitorSilence =
+        m_settings.value(kMonitorSilence, m_scrolling.monitorSilence).toBool();
+    m_scrolling.silenceTimeout =
+        m_settings.value(kSilenceTimeout, m_scrolling.silenceTimeout).toInt();
 
     // Snap to the half-point grid the UI offers.
     m_appearance.fontSize = qRound(m_appearance.fontSize * 2) / 2.0;
+    // Keep the cursor shape within the three values the enum defines.
+    m_appearance.cursorShape = qBound(0, m_appearance.cursorShape, 2);
+    // Opacity below this hides text entirely.
+    m_appearance.opacity = qBound(0.3, m_appearance.opacity, 1.0);
 }
 
 void Settings::setColorScheme(const QString &v)
@@ -176,6 +205,44 @@ void Settings::setTabLayout(const QString &v)
     emit appearanceChanged();
 }
 
+void Settings::setCursorShape(int v)
+{
+    v = qBound(0, v, 2);
+    if (m_appearance.cursorShape == v) return;
+    m_appearance.cursorShape = v;
+    m_settings.setValue(kCursorShape, v);
+    m_settings.sync();
+    emit appearanceChanged();
+}
+
+void Settings::setTerminalMargin(int v)
+{
+    if (m_appearance.terminalMargin == v) return;
+    m_appearance.terminalMargin = v;
+    m_settings.setValue(kTerminalMargin, v);
+    m_settings.sync();
+    emit appearanceChanged();
+}
+
+void Settings::setBidi(bool v)
+{
+    if (m_appearance.bidi == v) return;
+    m_appearance.bidi = v;
+    m_settings.setValue(kBidi, v);
+    m_settings.sync();
+    emit appearanceChanged();
+}
+
+void Settings::setOpacity(double v)
+{
+    v = qBound(0.3, v, 1.0);
+    if (qFuzzyCompare(m_appearance.opacity, v)) return;
+    m_appearance.opacity = v;
+    m_settings.setValue(kOpacity, v);
+    m_settings.sync();
+    emit appearanceChanged();
+}
+
 void Settings::setScrollback(int v)
 {
     if (m_scrolling.scrollback == v) return;
@@ -183,6 +250,51 @@ void Settings::setScrollback(int v)
     m_settings.setValue(kScrollback, v);
     m_settings.sync();
     emit scrollingChanged();
+}
+
+void Settings::setScrollbarPosition(const QString &v)
+{
+    if (m_scrolling.scrollbarPosition == v) return;
+    m_scrolling.scrollbarPosition = v;
+    m_settings.setValue(kScrollbarPos, v);
+    m_settings.sync();
+    emit scrollingChanged();
+}
+
+void Settings::setFlowControlWarning(bool v)
+{
+    if (m_scrolling.flowControlWarning == v) return;
+    m_scrolling.flowControlWarning = v;
+    m_settings.setValue(kFlowCtrlWarn, v);
+    m_settings.sync();
+    emit scrollingChanged();
+}
+
+void Settings::setMonitorActivity(bool v)
+{
+    if (m_scrolling.monitorActivity == v) return;
+    m_scrolling.monitorActivity = v;
+    m_settings.setValue(kMonitorActivity, v);
+    m_settings.sync();
+    emit monitoringChanged();
+}
+
+void Settings::setMonitorSilence(bool v)
+{
+    if (m_scrolling.monitorSilence == v) return;
+    m_scrolling.monitorSilence = v;
+    m_settings.setValue(kMonitorSilence, v);
+    m_settings.sync();
+    emit monitoringChanged();
+}
+
+void Settings::setSilenceTimeout(int v)
+{
+    if (m_scrolling.silenceTimeout == v) return;
+    m_scrolling.silenceTimeout = v;
+    m_settings.setValue(kSilenceTimeout, v);
+    m_settings.sync();
+    emit monitoringChanged();
 }
 
 void Settings::saveWindowGeometry(const QByteArray &geometry, const QByteArray &state)

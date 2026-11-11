@@ -302,6 +302,26 @@ void MainWindow::newTab()
             m_sidebar->setBusy(i, true);
     });
 
+    // The context menu zoom requests apply to the shared Settings, so every
+    // tab updates at once (and the choice is persisted).
+    connect(term, &TerminalWidget::zoomInRequested,    this, [this]() { zoomBy(+1); });
+    connect(term, &TerminalWidget::zoomOutRequested,   this, [this]() { zoomBy(-1); });
+    connect(term, &TerminalWidget::zoomResetRequested, this, [this]() {
+        m_settings.setFontSize(13.0);
+    });
+
+    // Output monitoring (activity / silence). Both reuse the existing busy
+    // marker: the sidebar prefix-dot is cheap, survives, and clears on tab
+    // select, which is exactly the affordance "come back when the build is
+    // done" wants. The signals only fire while the matching setting is on.
+    auto markIfBackground = [this, term]() {
+        const int i = m_tabs->indexOf(term);
+        if (i >= 0 && i != m_tabs->currentIndex())
+            m_sidebar->setBusy(i, true);
+    };
+    connect(term, &TerminalWidget::activityDetected, this, markIfBackground);
+    connect(term, &TerminalWidget::silenceDetected,  this, markIfBackground);
+
     syncTabTitles();
     captureNextPreview();
 }

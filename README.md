@@ -89,20 +89,20 @@ sections:
 
 | Section | Options |
 | --- | --- |
-| Appearance | colour scheme, tab layout |
-| Text | font family, size (8–32pt in 0.5pt steps), bold/italic/antialias |
-| Cursor | blinking |
-| Scrolling | scrollback depth, line-drawing |
+| Appearance | colour scheme, tab layout, terminal margin, bidirectional text |
+| Text | font family, size (8–32pt in 0.5pt steps), opacity, bold/italic/antialias |
+| Cursor | shape (block / underline / I-beam), blinking |
+| Scrolling | scrollback depth, scrollbar position, line-drawing, flow-control warning, output monitoring |
 
 Only fixed-pitch font families are offered, since the terminal cell grid
 depends on them. Changes apply to open tabs immediately, scrollback depth
 included.
 
-Two QSettings keys from the QML build are still read and preserved but have no
+One QSettings key from the QML build is still read and preserved but has no
 effect here: `appearance/lineSpacing` (`QTermWidget` has no setter, so the
-control was removed rather than left dead) and `appearance/opacity` (not
-surfaced by the widgets API). Keeping the keys means both builds share one
-config file.
+control was removed rather than left dead). Keeping it means both builds share
+one config file. (`appearance/opacity` is the opposite story — the widgets API
+does support it via `setTerminalOpacity`, so the key now works in both builds.)
 
 Persistence uses `QSettings`:
 
@@ -126,9 +126,18 @@ antialias=true
 drawLineChars=true
 lineSpacing=0
 tabLayout=standard
+cursorShape=0
+terminalMargin=4
+bidi=true
+opacity=1
 
 [scrolling]
 scrollback=5000
+scrollbarPosition=right
+flowControlWarning=true
+monitorActivity=false
+monitorSilence=false
+silenceTimeout=10
 
 [window]
 x=100
@@ -212,6 +221,25 @@ The practical consequence: line art looks right regardless of your font size,
 and if ordinary text looks slightly off at a given size, picking a different
 point size (half-point steps are supported) is the lever available.
 
+### Watching a terminal for activity or silence
+
+Settings → Scrolling has a small "Watch a terminal" group. Both options mark a
+non-current tab with the same `●` dot that output already uses, clearing when
+you select the tab — so they are a cue, not a popup.
+
+- **Output arrives** — mark the tab the first time output appears. The
+  counterpart to the existing busy marker, useful when you're waiting on
+  something in a background tab and want to know the moment it stirs.
+- **Output stops** — mark the tab when it has been quiet for the configured
+  number of seconds (default 10). The classic "build finished" / "test suite
+  is done" cue: start the command, switch away, and the dot tells you when it
+  has gone idle.
+
+Both live on top of QTermWidget's `setMonitorActivity()` / `setMonitorSilence()`
+/ `setSilenceTimeout()` and are off by default, since in an interactive shell
+where you're typing, "no output for N seconds" is the normal case rather than
+a signal.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -226,6 +254,10 @@ point size (half-point steps are supported) is the lever available.
 | `Ctrl+Shift+C` / `Ctrl+Shift+V` | Copy / paste |
 | `Ctrl` + mouse wheel | Zoom |
 | `Escape` | Close search or settings |
+
+Right-clicking inside a terminal opens a context menu with copy, paste, find,
+clear, save-output-to-file, and zoom actions, so those are discoverable without
+memorising the shortcuts.
 
 ## Project layout
 

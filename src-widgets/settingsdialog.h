@@ -14,6 +14,7 @@ class QStackedWidget;
 class QComboBox;
 class QSlider;
 class QSpinBox;
+class QDoubleSpinBox;
 class QCheckBox;
 class QLabel;
 
@@ -54,7 +55,17 @@ private:
     QCheckBox *m_italicBox = nullptr;
     QCheckBox *m_antialiasBox = nullptr;
     QCheckBox *m_blinkBox = nullptr;
+    QComboBox *m_cursorShapeBox = nullptr;
     QCheckBox *m_lineCharsBox = nullptr;
     QComboBox *m_tabLayoutBox = nullptr;
+    QSpinBox *m_marginBox = nullptr;
+    QCheckBox *m_bidiBox = nullptr;
+    QComboBox *m_scrollbarPosBox = nullptr;
+    QCheckBox *m_flowControlWarnBox = nullptr;
+    QCheckBox *m_monitorActivityBox = nullptr;
+    QCheckBox *m_monitorSilenceBox = nullptr;
+    QSpinBox *m_silenceTimeoutBox = nullptr;
+    QSlider *m_opacitySlider = nullptr;
+    QLabel *m_opacityLabel = nullptr;
     QSpinBox *m_scrollbackBox = nullptr;
 };

@@ -11,13 +11,16 @@
 #include "settings.h"
 
 class QTermWidget;
+class QMenu;
+class QPoint;
 
 /*
  * One terminal tab.
  *
  * Bundles a QTermWidget with the bits the widgets API does not provide:
- * a stable id (for preview files), the live title, and the ability to re-apply
- * the whole appearance in one call.
+ * a stable id (for preview files), the live title, the ability to re-apply
+ * the whole appearance in one call, and a right-click context menu that
+ * reuses QTermWidget's built-in copy/paste, zoom and search actions.
  */
 class TerminalWidget : public QWidget
 {
@@ -35,8 +38,11 @@ public:
     /* Re-apply every appearance setting. Safe to call on live terminals. */
     void applyAppearance();
 
-    /* Re-apply scrollback depth. */
+    /* Re-apply scrollback depth / scrollbar / flow-control. */
     void applyScrolling();
+
+    /* Re-apply activity/silence monitoring. */
+    void applyMonitoring();
 
     void sendText(const QString &text);
     void focusTerminal();
@@ -63,9 +69,21 @@ signals:
     void sessionFinished();
     /* Coalesced so a burst of output does not spam the window. */
     void outputArrived();
+    /* Ask the owner to adjust everyone's font size (the shared Settings). */
+    void zoomInRequested();
+    void zoomOutRequested();
+    void zoomResetRequested();
+    /*
+     * Monitoring signals, fed from QTermWidget::activity() / silence() when
+     * the corresponding scrolling/monitor* setting is on. The owner decides
+     * how to surface them (tab marker, bell, &c).
+     */
+    void activityDetected();
+    void silenceDetected();
 
 private:
     void onOutput();
+    void showContextMenu(const QPoint &globalPos);
 
     int m_id = 0;
     const Settings &m_settings;
@@ -75,4 +93,6 @@ private:
     bool m_dirty = false;
     quint64 m_outputSeq = 0;
     quint64 m_reportedSeq = 0;
+
+    bool m_canCopy = false;
 };

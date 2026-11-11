@@ -69,6 +69,26 @@ install(FILES icons/superterm.svg
 )
 
 # ---------------------------------------------------------------------------
+# probe-settingsdialog — offscreen diagnostics for the Settings dialog. Dev
+# tool only; never installed. Run: QT_QPA_PLATFORM=offscreen ./build/probe-settingsdialog
+# ---------------------------------------------------------------------------
+qt_add_executable(probe-settingsdialog
+    src-widgets/dev/probe_settingsdialog.cpp
+    src-widgets/settingsdialog.cpp src-widgets/settingsdialog.h
+    src-widgets/settings.cpp src-widgets/settings.h
+)
+target_link_libraries(probe-settingsdialog PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    PkgConfig::QTERMWIDGET6
+)
+set_target_properties(probe-settingsdialog PROPERTIES AUTOMOC ON)
+# Probe sources live under src-widgets/dev, so give it access to the parent
+# headers without "../..".
+target_include_directories(probe-settingsdialog PRIVATE src-widgets)
+
+# ---------------------------------------------------------------------------
 # superterm-qml — the original Qt Quick implementation.
 #
 # Kept buildable for comparison and as a fallback, but no longer installed and

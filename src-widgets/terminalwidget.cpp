@@ -6,7 +6,16 @@
 
 #include "terminalwidget.h"
 
+#include <QAction>
+#include <QApplication>
+#include <QClipboard>
+#include <QDesktopServices>
+#include <QFileDialog>
+#include <QFile>
 #include <QFont>
+#include <QHash>
+#include <QMenu>
+#include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -42,6 +51,19 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings, QWidget *parent
         emit sessionFinished();
     });
 
+    // Track whether there is a selection, so the context menu can enable Copy.
+    connect(m_terminal, &QTermWidget::copyAvailable, this, [this](bool available) {
+        m_canCopy = available;
+    });
+
+    // Right-click menu: our own, built from QTermWidget's public actions. It
+    // is assembled on demand (see showContextMenu) so Copy reflects selection.
+    m_terminal->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(m_terminal, &QWidget::customContextMenuRequested, this,
+            [this](const QPoint &pos) {
+                showContextMenu(m_terminal->mapToGlobal(pos));
+            });
+
     // receivedData fires from the pty, so it also fires while this tab is
     // hidden. That is what lets the sidebar know a background tab has changed
     // without having to look at it.
@@ -50,6 +72,20 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings, QWidget *parent
         m_dirty = true;
         onOutput();
     });
+
+    // Monitor signals: pass them on only when the matching setting is on, so
+    // the owner never has to care whether monitoring is enabled.
+    connect(m_terminal, &QTermWidget::activity, this, [this]() {
+        if (m_settings.scrolling().monitorActivity)
+            emit activityDetected();
+    });
+    connect(m_terminal, &QTermWidget::silence, this, [this]() {
+        if (m_settings.scrolling().monitorSilence)
+            emit silenceDetected();
+    });
+    applyMonitoring();
+    connect(&m_settings, &Settings::monitoringChanged,
+            this, &TerminalWidget::applyMonitoring);
 
     // Optional shell override, useful for testing:
     //   SUPERTERM_SHELL=/bin/fish superterm
@@ -91,6 +127,26 @@ void TerminalWidget::applyAppearance()
     // Draw box/block characters as vectors. The library defaults this to true,
     // so setting it is only meaningful when the user has turned it off.
     m_terminal->setDrawLineChars(a.drawLineChars);
+
+    // Cursor glyph. Settings stores 0/1/2; Konsole's KeyboardCursorShape is
+    // BlockCursor/UnderlineCursor/IBeamCursor in that order.
+    static const Konsole::Emulation::KeyboardCursorShape kShapes[] = {
+        Konsole::Emulation::KeyboardCursorShape::BlockCursor,
+        Konsole::Emulation::KeyboardCursorShape::UnderlineCursor,
+        Konsole::Emulation::KeyboardCursorShape::IBeamCursor,
+    };
+    m_terminal->setKeyboardCursorShape(kShapes[qBound(0, a.cursorShape, 2)]);
+
+    // Breathing room around the terminal grid.
+    m_terminal->setMargin(a.terminalMargin);
+
+    // Bidirectional text rendering (Konsole's "bidi").
+    m_terminal->setBidiEnabled(a.bidi);
+
+    // Background opacity. The old QML build surfaced this; the widgets API
+    // supports it too, so the shared key finally does something here.
+    m_terminal->setTerminalOpacity(a.opacity);
+
     Q_UNUSED(a.lineSpacing) // QTermWidget has no line-spacing setter.
 }
 
@@ -98,7 +154,35 @@ void TerminalWidget::applyScrolling()
 {
     if (!m_terminal)
         return;
-    m_terminal->setHistorySize(m_settings.scrolling().scrollback);
+
+    const auto &s = m_settings.scrolling();
+    m_terminal->setHistorySize(s.scrollback);
+
+    // Scrollbar placement. "none" hides it (useful with the thumbnail sidebar,
+    // where the card's preview already shows position).
+    static const QHash<QString, QTermWidgetInterface::ScrollBarPosition> kPos = {
+        { QStringLiteral("none"),  QTermWidgetInterface::NoScrollBar   },
+        { QStringLiteral("left"),  QTermWidgetInterface::ScrollBarLeft  },
+        { QStringLiteral("right"), QTermWidgetInterface::ScrollBarRight },
+    };
+    m_terminal->setScrollBarPosition(
+        kPos.value(s.scrollbarPosition, QTermWidgetInterface::ScrollBarRight));
+
+    // When XON/XOFF freezes the display, say so instead of looking hung.
+    m_terminal->setFlowControlEnabled(true);
+    m_terminal->setFlowControlWarningEnabled(s.flowControlWarning);
+}
+
+void TerminalWidget::applyMonitoring()
+{
+    if (!m_terminal)
+        return;
+
+    const auto &s = m_settings.scrolling();
+
+    m_terminal->setMonitorActivity(s.monitorActivity);
+    m_terminal->setMonitorSilence(s.monitorSilence);
+    m_terminal->setSilenceTimeout(s.silenceTimeout);
 }
 
 void TerminalWidget::sendText(const QString &text)
@@ -129,4 +213,59 @@ QPixmap TerminalWidget::previewPixmap(const QSize &size) const
         }
     }
     return {};
+}
+
+void TerminalWidget::showContextMenu(const QPoint &globalPos)
+{
+    QMenu menu(this);
+
+    // Copy is enabled only while the terminal reports a live selection.
+    QAction *copyAct = menu.addAction(tr("&Copy"), m_terminal, &QTermWidget::copyClipboard);
+    copyAct->setEnabled(m_canCopy);
+    copyAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+C")));
+
+    QAction *pasteAct = menu.addAction(tr("&Paste"), m_terminal, &QTermWidget::pasteClipboard);
+    pasteAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+V")));
+
+    menu.addSeparator();
+
+    QAction *findAct = menu.addAction(tr("&Find…"), m_terminal,
+                                      &QTermWidget::toggleShowSearchBar);
+    findAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+F")));
+
+    QAction *clearAct = menu.addAction(tr("C&lear"), m_terminal, &QTermWidget::clear);
+
+    menu.addSeparator();
+
+    // Write the full scrollback (not just the visible screen) to a file.
+    // Writes in plain text — exactly what Konsole's "Save Output As" does.
+    menu.addAction(tr("&Save Output As…"), this, [this]() {
+        const QString path = QFileDialog::getSaveFileName(
+            this, tr("Save Terminal Output"), QString(),
+            tr("Text files (*.txt);;All files (*)"));
+        if (path.isEmpty())
+            return;
+        QFile file(path);
+        if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+            return;
+        m_terminal->saveHistory(&file);
+    });
+
+    menu.addSeparator();
+
+    // Zoom acts on the shared Settings via the owner, which propagates to
+    // every open tab (and persists).
+    QAction *zoomInAct = menu.addAction(tr("Zoom &In"), this,
+                                        &TerminalWidget::zoomInRequested);
+    zoomInAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+=")));
+
+    QAction *zoomOutAct = menu.addAction(tr("Zoom &Out"), this,
+                                         &TerminalWidget::zoomOutRequested);
+    zoomOutAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+-")));
+
+    QAction *zoomResetAct = menu.addAction(tr("&Reset Zoom"), this,
+                                           &TerminalWidget::zoomResetRequested);
+    zoomResetAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+0")));
+
+    menu.exec(globalPos);
 }
