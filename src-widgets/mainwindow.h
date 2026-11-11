@@ -7,6 +7,7 @@
 #pragma once
 
 #include <QMainWindow>
+#include <QPixmap>
 #include <QVector>
 
 #include "profiles.h"
@@ -62,6 +63,13 @@ private:
     void zoomBy(int halfPoints);
 
     /*
+     * A screenshot goes straight to the clipboard, and the status bar offers
+     * to save it too for a few seconds. Nothing is written to disk unasked.
+     */
+    void onScreenshot(const QPixmap &image);
+    void saveScreenshot();
+
+    /*
      * Rebuild the "New Tab with Profile" menu from the store, and push each
      * profile's current definition onto the tabs already open under it.
      */
@@ -87,6 +95,9 @@ private:
 
     QLabel *m_statusDir = nullptr;
     QLabel *m_statusInfo = nullptr;
+    QLabel *m_screenshotNotice = nullptr;
+    QTimer *m_screenshotNoticeTimer = nullptr;
+    QPixmap m_lastScreenshot;
     QTimer *m_previewTimer = nullptr;
     QMenu *m_newTabWithProfileMenu = nullptr;
 

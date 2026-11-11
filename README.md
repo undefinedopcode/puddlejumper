@@ -435,7 +435,8 @@ renames, which is what lets open tabs keep pointing at them.
 ## Toolbar
 
 A toolbar under the menu bar carries the common actions: new tab (the arrow
-beside it opens the profile list), close tab, copy, paste, find, zoom out and
+beside it opens the profile list), close tab, copy, paste, find, screenshot
+(the arrow offers the whole terminal), zoom out and
 in, the thumbnail sidebar toggle, and settings at the far end. The current font
 size sits between the zoom buttons; click it to reset the zoom.
 
@@ -446,6 +447,26 @@ none of them, the button shows its name instead. **View → Show Toolbar** (or
 right-clicking the toolbar) hides it, and its visibility and position are kept
 between sessions.
 
+## Taking screenshots
+
+**Edit → Screenshot Region…** (`Ctrl+Shift+S`, or the toolbar's camera button)
+freezes the terminal and lets you drag out a rectangle. The selection snaps to
+whole character cells, so a capture never shows half a glyph; hold **Shift**
+while dragging to select freely to the pixel. A label shows the size in cells
+(or pixels) as you drag. **Esc** or a right click cancels, as does switching
+tab or resizing the window.
+
+**Edit → Screenshot Terminal** (`Ctrl+Shift+P`) captures the whole visible
+screen: the character grid and its margin, without the scrollbar.
+
+Either way the image goes straight to the clipboard, and for ten seconds the
+status bar offers **Save…**, which suggests
+`~/Pictures/superterm-<date>-<time>.png`. Nothing is written to disk unless you
+ask. Both actions are also in the terminal's right-click menu.
+
+Captures are at device resolution, so on a scaled display they come out at the
+real pixel size rather than the logical one.
+
 ## Keyboard shortcuts
 
 | Shortcut | Action |
@@ -454,6 +475,8 @@ between sessions.
 | `Ctrl+Shift+W` | Close tab |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
 | `Ctrl+Shift+F` | Find in terminal |
+| `Ctrl+Shift+S` | Screenshot a region (drag to select) |
+| `Ctrl+Shift+P` | Screenshot the whole terminal |
 | `Ctrl+,` | Open settings |
 | `Ctrl+=` / `Ctrl+-` | Zoom in / out (0.5pt steps) |
 | `Ctrl+0` | Reset zoom |
@@ -464,7 +487,7 @@ between sessions.
 | `Escape` | Close search or settings |
 
 Right-clicking inside a terminal opens a context menu with copy, paste, find,
-clear, save-output-to-file, and zoom actions, so those are discoverable without
+clear, screenshot, save-output-to-file, and zoom actions, so those are discoverable without
 memorising the shortcuts.
 
 Plain `Ctrl`+letter combinations are deliberately **not** bound to app actions.
@@ -492,6 +515,7 @@ src-widgets/settingsdialog.*  modal settings, five sections
 src-widgets/profiles.*    terminal profiles and their persistence
 src-widgets/colorscheme.* .colorscheme file read/write (20 roles)
 src-widgets/colorschemeeditor.*  scheme editor dialog with live preview
+src-widgets/screenshotoverlay.*  drag-to-select region screenshots
 src-widgets/thumbnailsidebar.*  left sidebar with live previews
 src-widgets/settings.*    QSettings-backed configuration
 third_party/qtermwidget/  vendored, patched QTermWidget (see SUPERTERM.md)

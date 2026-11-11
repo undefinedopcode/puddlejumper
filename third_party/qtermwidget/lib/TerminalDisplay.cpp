@@ -3685,6 +3685,13 @@ void TerminalDisplay::setLineSpacing(uint i)
   setVTFont(font()); // Trigger an update.
 }
 
+QRect TerminalDisplay::cellArea() const
+{
+    const QPoint topLeft = contentsRect().topLeft();
+    return {topLeft.x() + _leftMargin, topLeft.y() + _topMargin,
+            _columns * _fontWidth, _lines * _fontHeight};
+}
+
 int TerminalDisplay::margin() const
 {
     return _topBaseMargin;

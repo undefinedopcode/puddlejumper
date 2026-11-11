@@ -273,6 +273,14 @@ public:
      */
     int  fontWidth()    { return _fontWidth; }
 
+    /**
+     * superterm: the rectangle the character grid occupies, in widget
+     * coordinates. Excludes the margins, the scrollbar, and any part of a cell
+     * left over at the right and bottom edges. A cell is fontWidth() by
+     * fontHeight(), so this lets callers map pixels to cells.
+     */
+    QRect cellArea() const;
+
     void setSize(int cols, int lins);
     void setFixedSize(int cols, int lins);
 

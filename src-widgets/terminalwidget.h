@@ -15,6 +15,10 @@ class QTermWidget;
 class QMenu;
 class QPoint;
 
+namespace Konsole {
+class TerminalDisplay;
+}
+
 /*
  * One terminal tab.
  *
@@ -97,6 +101,17 @@ public:
     QPixmap previewPixmap(const QSize &size) const;
 
     /*
+     * Screenshots. Both report through screenshotTaken().
+     *
+     * takeScreenshot() captures the visible screen: the character grid plus
+     * its margin, without the scrollbar. startRegionScreenshot() lets the user
+     * drag out a rectangle first (see ScreenshotOverlay); cancelling it
+     * reports nothing.
+     */
+    void takeScreenshot();
+    void startRegionScreenshot();
+
+    /*
      * Content tracking.
      *
      * receivedData() fires from the pty, so it fires for hidden tabs too.
@@ -127,7 +142,12 @@ signals:
     void activityDetected();
     void silenceDetected();
 
+    void screenshotTaken(const QPixmap &image);
+
 private:
+    /* QTermWidget's display widget, which it doesn't expose. */
+    Konsole::TerminalDisplay *display() const;
+
     void onOutput();
     void showContextMenu(const QPoint &globalPos);
 

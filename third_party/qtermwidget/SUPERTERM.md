@@ -51,6 +51,10 @@ comment.
    advance of whatever glyph the font (or a fallback) has for them, which could
    misplace a fragment of box drawing in fonts lacking those glyphs.
 
+6. **`cellArea()` accessor.** Returns where the character grid sits in the
+   widget, which superterm needs to snap screenshot selections to cells.
+   Upstream keeps the margins and scrollbar offset private.
+
 ## Updating
 
 Diff this tree against the upstream tag it came from, re-apply the

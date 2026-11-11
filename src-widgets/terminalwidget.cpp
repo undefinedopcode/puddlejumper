@@ -7,6 +7,7 @@
 #include "terminalwidget.h"
 
 #include "colorscheme.h"
+#include "screenshotoverlay.h"
 
 #include <QAction>
 #include <QApplication>
@@ -25,6 +26,7 @@
 #include <unistd.h>   // getpgid
 
 #include <Emulation.h>
+#include <TerminalDisplay.h>
 #include <qtermwidget.h>
 
 TerminalWidget::TerminalWidget(int id, const Settings &settings,
@@ -333,15 +335,44 @@ QPixmap TerminalWidget::previewPixmap(const QSize &size) const
     // Widgets paint to a backing store, so grabbing is safe here -- unlike the
     // QML build, which needed useFBORendering:false to avoid blanking the
     // terminal on every grab.
-    const auto widgets = m_terminal->findChildren<QWidget *>();
-    for (QWidget *w : widgets) {
-        if (QString::fromLatin1(w->metaObject()->className())
-                .contains(QLatin1String("TerminalDisplay"))) {
-            return w->grab().scaled(size, Qt::KeepAspectRatio,
-                                    Qt::SmoothTransformation);
-        }
-    }
+    if (auto *d = display())
+        return d->grab().scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     return {};
+}
+
+Konsole::TerminalDisplay *TerminalWidget::display() const
+{
+    return m_terminal ? m_terminal->findChild<Konsole::TerminalDisplay *>() : nullptr;
+}
+
+void TerminalWidget::takeScreenshot()
+{
+    auto *d = display();
+    if (!d)
+        return;
+    // The grid plus the display's own margin on every side, so the text isn't
+    // flush against the edge. This excludes the scrollbar (which sits outside
+    // the margin) and the sliver of a partial cell at the right and bottom.
+    const int m = d->margin();
+    const QRect area = d->cellArea().adjusted(-m, -m, m, m).intersected(d->rect());
+    emit screenshotTaken(ScreenshotOverlay::crop(d->grab(), area));
+}
+
+void TerminalWidget::startRegionScreenshot()
+{
+    auto *d = display();
+    if (!d || d->findChild<ScreenshotOverlay *>())
+        return;   // already selecting
+    auto *overlay = new ScreenshotOverlay(d, d->cellArea(),
+                                          QSize(d->fontWidth(), d->fontHeight()));
+    connect(overlay, &ScreenshotOverlay::captured, this, [this](const QPixmap &image) {
+        focusTerminal();
+        emit screenshotTaken(image);
+    });
+    connect(overlay, &ScreenshotOverlay::cancelled, this, &TerminalWidget::focusTerminal);
+    overlay->show();
+    overlay->raise();
+    overlay->setFocus();
 }
 
 void TerminalWidget::showContextMenu(const QPoint &globalPos)
@@ -365,6 +396,12 @@ void TerminalWidget::showContextMenu(const QPoint &globalPos)
     QAction *clearAct = menu.addAction(tr("C&lear"), m_terminal, &QTermWidget::clear);
 
     menu.addSeparator();
+
+    menu.addAction(tr("Screenshot &Region…"), this,
+                   &TerminalWidget::startRegionScreenshot)
+        ->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+S")));
+    menu.addAction(tr("Screens&hot Terminal"), this, &TerminalWidget::takeScreenshot)
+        ->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+P")));
 
     // Write the full scrollback (not just the visible screen) to a file.
     // Writes in plain text — exactly what Konsole's "Save Output As" does.

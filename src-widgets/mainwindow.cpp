@@ -12,14 +12,21 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QClipboard>
 #include <QCloseEvent>
+#include <QDateTime>
+#include <QDir>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QIcon>
 #include <QLabel>
 #include <QListWidget>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSplitter>
+#include <QStandardPaths>
 #include <QStatusBar>
 #include <QTabBar>
 #include <QTabWidget>
@@ -248,6 +255,21 @@ void MainWindow::buildMenus()
             t->terminal()->toggleShowSearchBar();
     });
 
+    edit->addSeparator();
+    auto *shotRegionAct = edit->addAction(tr("Screenshot &Region…"));
+    shotRegionAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+S")));
+    connect(shotRegionAct, &QAction::triggered, this, [this]() {
+        if (auto *t = currentTerminal())
+            t->startRegionScreenshot();
+    });
+
+    auto *shotTermAct = edit->addAction(tr("Screens&hot Terminal"));
+    shotTermAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+P")));
+    connect(shotTermAct, &QAction::triggered, this, [this]() {
+        if (auto *t = currentTerminal())
+            t->takeScreenshot();
+    });
+
     auto *view = menuBar()->addMenu(tr("&View"));
 
     auto *zoomIn = view->addAction(tr("Zoom &In"));
@@ -293,12 +315,14 @@ void MainWindow::buildMenus()
     copyAct->setIcon(themeIcon({"edit-copy"}));
     pasteAct->setIcon(themeIcon({"edit-paste"}));
     findAct->setIcon(themeIcon({"edit-find", "system-search"}));
+    shotRegionAct->setIcon(themeIcon({"camera-photo", "applets-screenshooter"}));
+    shotTermAct->setIcon(themeIcon({"view-fullscreen"}));
     zoomOut->setIcon(themeIcon({"zoom-out"}));
     zoomIn->setIcon(themeIcon({"zoom-in"}));
     toggleLayout->setIcon(themeIcon({"sidebar-show", "sidebar-show-symbolic", "view-preview"}));
     settingsAct->setIcon(themeIcon({"configure", "preferences-system", "document-properties"}));
-    for (QAction *act : {newAct, closeAct, copyAct, pasteAct, findAct, zoomOut, zoomIn,
-                         zoomReset, toggleLayout, settingsAct})
+    for (QAction *act : {newAct, closeAct, copyAct, pasteAct, findAct, shotRegionAct,
+                         shotTermAct, zoomOut, zoomIn, zoomReset, toggleLayout, settingsAct})
         setToolTipWithShortcut(act);
 
     auto *bar = addToolBar(tr("Main Toolbar"));
@@ -318,6 +342,17 @@ void MainWindow::buildMenus()
     bar->addAction(copyAct);
     bar->addAction(pasteAct);
     bar->addAction(findAct);
+
+    // One screenshot button: a click selects a region, the arrow offers the
+    // whole terminal as well.
+    auto *shotMenu = new QMenu(this);
+    shotMenu->addAction(shotRegionAct);
+    shotMenu->addAction(shotTermAct);
+    auto *shotButton = new QToolButton(bar);
+    shotButton->setDefaultAction(shotRegionAct);
+    shotButton->setMenu(shotMenu);
+    shotButton->setPopupMode(QToolButton::MenuButtonPopup);
+    bar->addWidget(shotButton);
 
     // The current font size sits between the zoom buttons, and clicking it
     // resets the zoom. Not setDefaultAction(): that would replace the size with
@@ -356,7 +391,70 @@ void MainWindow::buildStatusBar()
     m_statusDir = new QLabel(this);
     m_statusInfo = new QLabel(this);
     statusBar()->addWidget(m_statusDir, 1);
+
+    m_screenshotNotice = new QLabel(this);
+    m_screenshotNotice->setTextFormat(Qt::RichText);
+    m_screenshotNotice->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
+    m_screenshotNotice->setFocusPolicy(Qt::NoFocus);
+    m_screenshotNotice->hide();
+    connect(m_screenshotNotice, &QLabel::linkActivated, this, &MainWindow::saveScreenshot);
+    statusBar()->addPermanentWidget(m_screenshotNotice);
+
+    m_screenshotNoticeTimer = new QTimer(this);
+    m_screenshotNoticeTimer->setSingleShot(true);
+    m_screenshotNoticeTimer->setInterval(10000);
+    connect(m_screenshotNoticeTimer, &QTimer::timeout, m_screenshotNotice, &QWidget::hide);
+
     statusBar()->addPermanentWidget(m_statusInfo);
+}
+
+void MainWindow::onScreenshot(const QPixmap &image)
+{
+    if (image.isNull())
+        return;
+    m_lastScreenshot = image;
+    QApplication::clipboard()->setImage(image.toImage());
+
+    const QSize px = image.size();   // device pixels, i.e. what gets saved
+    m_screenshotNotice->setText(
+        tr("Screenshot copied to clipboard (%1 × %2) · <a href=\"save\">Save…</a>")
+            .arg(px.width()).arg(px.height()));
+    m_screenshotNotice->show();
+    m_screenshotNoticeTimer->start();
+}
+
+void MainWindow::saveScreenshot()
+{
+    if (m_lastScreenshot.isNull())
+        return;
+    m_screenshotNoticeTimer->stop();   // don't vanish while the dialog is open
+
+    QString dir = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+    if (dir.isEmpty() || !QDir(dir).exists())
+        dir = QDir::homePath();
+    const QString suggested = dir + QStringLiteral("/superterm-")
+        + QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"))
+        + QStringLiteral(".png");
+
+    QString path = QFileDialog::getSaveFileName(
+        this, tr("Save Screenshot"), suggested,
+        tr("PNG images (*.png);;JPEG images (*.jpg *.jpeg)"));
+    if (path.isEmpty()) {
+        m_screenshotNoticeTimer->start();
+        return;
+    }
+    // QPixmap::save() picks the format from the suffix, so a bare name
+    // would fail; default those to PNG.
+    if (QFileInfo(path).suffix().isEmpty())
+        path += QStringLiteral(".png");
+    if (!m_lastScreenshot.save(path)) {
+        QMessageBox::warning(this, tr("Save Screenshot"),
+                             tr("Could not save the screenshot to %1.").arg(path));
+        m_screenshotNoticeTimer->start();
+        return;
+    }
+    m_screenshotNotice->setText(tr("Screenshot saved to %1").arg(path.toHtmlEscaped()));
+    m_screenshotNoticeTimer->start();
 }
 
 TerminalWidget *MainWindow::currentTerminal() const
@@ -425,6 +523,8 @@ void MainWindow::newTabWithProfile(const QString &profileId)
 
     // The context menu zoom requests apply to the shared Settings, so every
     // tab updates at once (and the choice is persisted).
+    connect(term, &TerminalWidget::screenshotTaken, this, &MainWindow::onScreenshot);
+
     connect(term, &TerminalWidget::zoomInRequested,    this, [this]() { zoomBy(+1); });
     connect(term, &TerminalWidget::zoomOutRequested,   this, [this]() { zoomBy(-1); });
     connect(term, &TerminalWidget::zoomResetRequested, this, [this]() {
