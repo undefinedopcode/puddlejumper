@@ -68,6 +68,18 @@ int main(int argc, char *argv[])
     app.setOrganizationName(QStringLiteral("superterm"));
     app.setDesktopFileName(QStringLiteral("superterm"));
 
+    // Window/taskbar icon. The SVG is embedded by qt_add_qml_module's RESOURCES
+    // block, so it resolves under the module's qrc prefix. Without this the app
+    // had no window icon at all, which is what left the taskbar entry showing
+    // the desktop file's fallback.
+    {
+        const QString iconPath = QStringLiteral(":/qt/qml/Superterm/icons/superterm.svg");
+        QIcon appIcon;
+        for (int size : {16, 24, 32, 48, 64, 128, 256})
+            appIcon.addFile(iconPath, QSize(size, size));
+        app.setWindowIcon(appIcon);
+    }
+
     // Controls style: separate from the colour scheme below.
     //
     // On a Plasma session the KDE platform theme supplies the palette to

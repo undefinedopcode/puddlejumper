@@ -18,3 +18,7 @@ compile_commands.json
 # Qt debug builds
 build-dbg/
 build-rel/
+
+# scratch build dirs
+build-clean/
+build-*/

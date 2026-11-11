@@ -1,12 +1,16 @@
 # SuperTerm
 
-A modern terminal built on **Qt Quick** and **[QMLTermWidget](https://github.com/Swordfish90/qmltermwidget)**.
+A modern terminal built on **Qt Widgets** and
+**[QTermWidget](https://github.com/lxqt/qtermwidget)**.
 
-Tabs, live colour-scheme switching, a monospace font picker, font zoom,
-opacity, an inline search bar,
-and a keyboard-driven UI — with the terminal emulation itself (VT102/xterm,
-Unicode, 256-colour, key bindings) handled by QMLTermWidget's Konsole-derived
-engine.
+Tabs, live colour-scheme switching, a monospace font picker, font zoom, working
+scrollback, cursor shape, a thumbnail sidebar with live previews, and a
+keyboard-driven UI — with the terminal emulation itself (VT102/xterm, Unicode,
+256-colour, key bindings) handled by QTermWidget's Konsole-derived engine.
+
+The UI chrome follows the platform's widget style, so it looks native on
+Plasma, GNOME, macOS and Windows alike; `--style Fusion` forces a consistent
+look instead.
 
 ## Screenshots
 
@@ -31,28 +35,27 @@ The window chrome, tab strip, status bar, and a live zsh prompt:
 | Qt | 6.5+ (developed against 6.12) |
 | CMake | 3.21+ |
 | Compiler | C++17 |
-| QMLTermWidget | 2.0 (`import QMLTermWidget 2.0`) |
+| qtermwidget6 | 2.x (developed against 2.4.0) |
 
-Install QMLTermWidget:
+Install qtermwidget:
 
 ```sh
 # Arch
-pacman -S qmltermwidget
+pacman -S qtermwidget
 
 # Debian / Ubuntu
-apt install qmltermwidget-qt6-dev
+apt install libqtermwidget6-dev
 
 # Fedora
-dnf install qmltermwidget-qt6
+dnf install qtermwidget-qt6-devel
 ```
 
-If your distro doesn't package it, build it from
-[Swordfish90/qmltermwidget](https://github.com/Swordfish90/qmltermwidget)
-(`qmake6 && make install`) and point CMake at the module directory:
+qtermwidget is packaged by most distributions. If yours does not package it,
+build [lxqt/qtermwidget](https://github.com/lxqt/qtermwidget) and point
+`PKG_CONFIG_PATH` at it.
 
-```sh
-cmake -S . -B build -DQMLTERMWIDGET_IMPORT_DIR=/usr/lib/qt6/qml
-```
+The legacy Qt Quick build needs the separate **QMLTermWidget** module instead;
+see the project layout section.
 
 ## Build and run
 
@@ -86,13 +89,20 @@ sections:
 
 | Section | Options |
 | --- | --- |
-| Appearance | colour scheme, opacity, tab layout |
-| Text | font family, size (8–32pt in 0.5pt steps), line spacing, bold/italic/antialias |
+| Appearance | colour scheme, tab layout |
+| Text | font family, size (8–32pt in 0.5pt steps), bold/italic/antialias |
 | Cursor | blinking |
 | Scrolling | scrollback depth, line-drawing (read-only) |
 
 Only fixed-pitch font families are offered, since the terminal cell grid
-depends on them. Changes apply to open tabs immediately.
+depends on them. Changes apply to open tabs immediately, scrollback depth
+included.
+
+Two QSettings keys from the QML build are still read and preserved but have no
+effect here: `appearance/lineSpacing` (`QTermWidget` has no setter, so the
+control was removed rather than left dead) and `appearance/opacity` (not
+surfaced by the widgets API). Keeping the keys means both builds share one
+config file.
 
 Persistence uses `QSettings`:
 
@@ -145,6 +155,12 @@ name themselves. Titles are not persisted; a tab reverts to `Terminal` on
 restart until its shell sets one again. An empty title is ignored rather than
 blanking the label.
 
+Titles arrive via `QTermWidget::titleChanged`.
+
+(The paragraph below describes the legacy Qt Quick build, where the tab model
+was also the pane model. It is kept because the reasoning is easy to repeat:
+see `docs/qtwidgets-port.md`.)
+
 Titles are held in a `ListModel`, not a plain array, and that is load-bearing:
 the terminal panes live in a `Repeater` keyed on the tab model, so replacing
 the model destroys and rebuilds every pane — killing the running shells.
@@ -162,42 +178,35 @@ settings dialog, or by setting `appearance/tabLayout`:
 - **thumbnails** — a left sidebar of cards, each with a live preview of that
   terminal.
 
-Previews come from `QQuickItem::grabToImage()` on the terminal itself, so they
-show real content. Two constraints worth knowing:
+Previews come from `QWidget::grab()` on the terminal's display widget, so they
+show real content. Widgets paint to a backing store, which makes repeated grabs
+safe — unlike the QML build, which needed `useFBORendering: false` to avoid
+blanking the terminal on every grab.
 
-- **Only the visible tab can be grabbed.** A hidden terminal has nothing
-  painted, so its card keeps the last image captured while it was on screen.
-  The current tab is re-captured every few seconds while the sidebar is open.
-- **The grab must go through a file.** `grabToImage()` returns a
-  `QQuickItemGrabResult` whose `.url` is an internal `itemgrabber:#N` value that
-  `Image` cannot load, and assigning the result object to `Image.source`
-  silently does nothing. Each refresh therefore writes a versioned PNG under
-  the cache directory (`~/.cache/superterm/superterm/thumbs/<pid>/`) and the
-  card loads that. Versioned names are required because `Image` caches by URL
-  and `file:` URLs ignore query strings.
-- **The terminal must not render to a framebuffer.** `grabToImage()` corrupts a
-  `QQuickPaintedItem` that renders to an FBO: after a grab the terminal stops
-  drawing and shows a blank pane. Full-screen programs suffer worst — `nano`
-  drew nothing at all in the thumbnail layout while working fine in the tab
-  layout, because its UI relies on cursor positioning and scroll regions rather
-  than rewriting lines, so nothing forced a repaint. `TerminalPane.qml` sets
-  `useFBORendering: false` for this reason; the cost is a little rendering
-  performance in exchange for grabs being safe.
+Two constraints worth knowing:
+
+- **A hidden tab must be shown before it can be grabbed.** A non-current
+  `QTabWidget` page never paints, so grabbing one yields a blank image; neither
+  `grab()` nor `render()` helps. The sidebar therefore rotates through tabs that
+  have produced output, briefly showing each and restoring your tab afterwards.
+- **The rotation is driven by output, not a blind timer.** `receivedData()` fires
+  from the pty even for hidden tabs, so the app knows which tab actually changed.
+  Idle tabs are not visited at all, and a tab that produced output while you were
+  not looking gets a `●` marker that clears when you select it.
 
 ### Box-drawing characters
 
 Box frames, table borders and block art are painted as **vectors**, not taken
 from the font (Konsole calls this "use own line drawing characters"). This is
 why they stay crisp and grid-aligned at any point size while ordinary glyphs
-may only look right at particular sizes. QMLTermWidget enables it
-unconditionally in `TerminalDisplay`'s constructor — `_drawLineChars(true)` —
-and exposes no property, slot or `Q_INVOKABLE` to change it, so the settings
-dialog shows it read-only. `setDrawLineChars()` is an inline method with no
-exported symbol, so it cannot be reached from outside the library either.
+may only look right at particular sizes.
+
+`QTermWidget::setDrawLineChars()` is public, but the terminal enables it
+unconditionally, so the settings dialog shows it read-only.
 
 The practical consequence: line art looks right regardless of your font size,
-and if ordinary text looks slightly off at a given size, adjusting **line
-spacing** or picking a different point size is the lever available.
+and if ordinary text looks slightly off at a given size, picking a different
+point size (half-point steps are supported) is the lever available.
 
 ## Keyboard shortcuts
 
@@ -216,20 +225,32 @@ spacing** or picking a different point size is the lever available.
 
 ## Project layout
 
+The application is the Qt Widgets build. The original Qt Quick implementation
+is kept buildable but is no longer installed.
+
 ```
-CMakeLists.txt          build definition
-src/main.cpp            QGuiApplication + QQmlApplicationEngine bootstrap
-src/settings_store.*    QSettings wrapper exposed to QML
-qml/Main.qml            window chrome, tab strip, status bar, shortcuts
-qml/TerminalPane.qml    wraps one QMLTermWidget + QMLTermSession
-qml/SearchBar.qml       inline find overlay
-qml/SettingsPanel.qml   centered modal settings, sectioned
-qml/ThumbnailSidebar.qml  alternative tab UI: left sidebar with live previews
-qml/Theme.qml           singleton: palette, metrics, colour-scheme list
-data/superterm.desktop  launcher entry
-icons/superterm.svg     app icon
+CMakeLists.txt            build definition
+src-widgets/main.cpp      QApplication bootstrap, style and icon
+src-widgets/mainwindow.*  tabs, menus, status bar, preview rotation
+src-widgets/terminalwidget.*  one QTermWidget plus appearance plumbing
+src-widgets/settingsdialog.*  modal settings, four sections
+src-widgets/thumbnailsidebar.*  left sidebar with live previews
+src-widgets/settings.*    QSettings-backed configuration
+data/superterm.desktop    launcher entry
+icons/superterm.svg       app icon
+
+qml/, src/                legacy Qt Quick build (optional, see below)
 ```
 
+### Building the legacy QML version
+
+```sh
+cmake -B build -DSUPERTERM_BUILD_QML=ON
+cmake --build build --target superterm-qml
+```
+
+It requires the separate QMLTermWidget QML module and is not installed. The two
+builds share the same config file, so settings carry across.
 ## Desktop integration
 
 **Colour scheme.** On a Plasma session the KDE platform theme supplies a
