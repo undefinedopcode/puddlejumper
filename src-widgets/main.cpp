@@ -33,28 +33,6 @@ int main(int argc, char *argv[])
     }
     QApplication::setWindowIcon(appIcon);
 
-    // TEMP: report what a taskbar would actually get.
-    if (qEnvironmentVariableIsSet("SUPERTERM_ICONPROBE")) {
-        qInfo() << "PROBE desktopFileName =" << QApplication::desktopFileName();
-        qInfo() << "PROBE windowIcon null?" << QApplication::windowIcon().isNull()
-                << "sizes =" << QApplication::windowIcon().availableSizes();
-        for (int s : {16, 22, 24, 32, 48, 64, 128, 256}) {
-            const QImage img =
-                QApplication::windowIcon().pixmap(QSize(s, s)).toImage();
-            QSet<QRgb> c;
-            for (int y = 0; y < img.height(); ++y)
-                for (int x = 0; x < img.width(); ++x)
-                    c.insert(img.pixel(x, y));
-            qInfo() << "PROBE size" << s << "actual" << img.size()
-                    << "colours" << c.size()
-                    << "alpha" << img.hasAlphaChannel();
-        }
-        // Compare with the theme lookup, which is what a taskbar may prefer.
-        qInfo() << "PROBE hasThemeIcon(superterm) =" << QIcon::hasThemeIcon("superterm")
-                << "theme =" << QIcon::themeName();
-        return 0;
-    }
-
     QCommandLineParser parser;
     parser.addHelpOption();
     QCommandLineOption styleOpt(
