@@ -298,18 +298,9 @@ QStringList ColorSchemeFile::allSchemeNames()
 
 QString ColorSchemeFile::systemSchemeDir()
 {
-    // Matches qtermwidget's COLORSCHEMES_DIR, which is where its bundled
-    // schemes live (distro-dependent: /usr/share/qtermwidget6/color-schemes).
-    const QStringList candidates = {
-        QStringLiteral("/usr/share/qtermwidget6/color-schemes"),
-        QStringLiteral("/usr/share/qtermwidget/color-schemes"),
-        QStringLiteral("/usr/local/share/qtermwidget6/color-schemes"),
-    };
-    for (const QString &c : candidates) {
-        if (QDir(c).exists())
-            return c;
-    }
-    return QString();
+    // Matches the vendored qtermwidget's COLORSCHEMES_DIR: its bundled schemes
+    // are compiled in as Qt resources (third_party/qtermwidget/CMakeLists.txt).
+    return QStringLiteral(":/qtermwidget/color-schemes");
 }
 
 QString ColorSchemeFile::findSchemeFile(const QString &name)

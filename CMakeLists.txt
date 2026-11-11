@@ -16,14 +16,16 @@ qt_standard_project_setup(REQUIRES 6.5)
 
 include(GNUInstallDirs)
 
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(QTERMWIDGET6 REQUIRED IMPORTED_TARGET qtermwidget6)
+# QTermWidget is vendored and patched (third_party/qtermwidget/SUPERTERM.md),
+# so the system qtermwidget6 package is not used.
+add_subdirectory(third_party/qtermwidget EXCLUDE_FROM_ALL)
 
 # ---------------------------------------------------------------------------
 # superterm — the application.
 #
-# Built on qtermwidget6 (Qt Widgets). This is the supported build; it is the
-# one that gets installed, and the one the desktop entry launches.
+# Built on a vendored copy of qtermwidget (Qt Widgets). This is the supported
+# build; it is the one that gets installed, and the one the desktop entry
+# launches.
 # ---------------------------------------------------------------------------
 qt_add_executable(superterm
     src-widgets/main.cpp
@@ -49,7 +51,7 @@ target_link_libraries(superterm PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
-    PkgConfig::QTERMWIDGET6
+    qtermwidget
 )
 
 set_target_properties(superterm PROPERTIES AUTOMOC ON)
@@ -90,7 +92,7 @@ target_link_libraries(probe-settingsdialog PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
-    PkgConfig::QTERMWIDGET6
+    qtermwidget
 )
 set_target_properties(probe-settingsdialog PROPERTIES AUTOMOC ON)
 # Probe sources live under src-widgets/dev, so give it access to the parent
@@ -116,7 +118,7 @@ if(SUPERTERM_BUILD_QML)
     # library. Locate its module directory at configure time; main.cpp puts it
     # on the engine's import path.
     #
-    # IMPORTANT: do NOT link the QML build against qtermwidget6. The plugin
+    # IMPORTANT: do NOT link the QML build against qtermwidget. The plugin
     # vendors its own copy of the Konsole/KPty sources, so linking the Widgets
     # library pulls in a second copy of those symbols: the app then renders
     # blank terminal content and aborts on exit ("corrupted double-linked
