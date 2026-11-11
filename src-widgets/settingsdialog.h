@@ -60,12 +60,38 @@ private:
     QString currentProfileId() const;
     void setProfileFormEnabled(bool on);
 
+    /*
+     * Open the colour scheme editor seeded from the current scheme, then make
+     * the saved scheme selectable and active.
+     */
+    void editColorScheme();
+
+    /*
+     * Rebuild the scheme combo from qtermwidget's list.
+     *
+     * Needed because availableColorSchemes() caches on first call: a scheme
+     * saved during this run is NOT returned by it, so the combo has to be told
+     * about new names explicitly.
+     */
+    void reloadSchemeBox(const QString &selectName = QString());
+
+    /*
+     * Repopulate the profile form's colour-scheme combo, keeping the current
+     * selection.
+     *
+     * Separate from reloadSchemeBox() because that one drives the global
+     * setting; this one must not, or refreshing the list would apply a scheme
+     * as a side effect.
+     */
+    void reloadProfileSchemeBox(const QString &selectName = QString());
+
     Settings &m_settings;
     ProfileStore &m_profiles;
     QListWidget *m_sections = nullptr;
     QStackedWidget *m_pages = nullptr;
 
     QComboBox *m_schemeBox = nullptr;
+    QPushButton *m_editSchemeBtn = nullptr;
     QSlider *m_fontSizeSlider = nullptr;
     QLabel *m_fontSizeLabel = nullptr;
     QComboBox *m_fontBox = nullptr;

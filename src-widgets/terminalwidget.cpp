@@ -6,12 +6,15 @@
 
 #include "terminalwidget.h"
 
+#include "colorscheme.h"
+
 #include <QAction>
 #include <QApplication>
 #include <QClipboard>
 #include <QDesktopServices>
 #include <QFileDialog>
 #include <QFile>
+#include <QFileInfo>
 #include <QFont>
 #include <QHash>
 #include <QMenu>
@@ -160,8 +163,42 @@ void TerminalWidget::applyAppearance()
      */
     const QString scheme = m_profile.colorScheme ? *m_profile.colorScheme
                                                  : a.colorScheme;
-    m_appliedColorScheme = scheme;
-    m_terminal->setColorScheme(scheme);
+
+    /*
+     * Settings may hold either a bare scheme name or a full path to a user
+     * scheme (that is what the editor stores, because a bare name only resolves
+     * if the process has already loaded it).
+     *
+     * Normalise to a path when one exists: QTermWidget::setColorScheme()
+     * silently falls back to the DEFAULT scheme for a name it does not know,
+     * which would look like "the scheme reverted" with no error. Profiles store
+     * bare names, so they need the same resolution.
+     */
+    QString resolved = scheme;
+    QString display = QFileInfo(scheme).baseName();
+    if (scheme.contains(QLatin1Char('/'))) {
+        if (!QFile::exists(scheme))
+            resolved = ColorSchemeFile::findSchemeFile(display);
+    } else {
+        const QString file = ColorSchemeFile::findSchemeFile(scheme);
+        if (!file.isEmpty())
+            resolved = file;
+    }
+    if (resolved.isEmpty())
+        resolved = scheme;
+
+    /*
+     * A live stand-in (used so an in-place scheme edit bypasses qtermwidget's
+     * basename cache) has a throwaway filename. Show the real scheme it stands
+     * in for, not "_live_1700000000000_1".
+     */
+    if (display.startsWith(QLatin1String("_live_")))
+        display = m_settings.liveSchemeRealName();
+    if (display.contains(QLatin1Char('/')))
+        display = QFileInfo(display).baseName();
+
+    m_appliedColorScheme = display;
+    m_terminal->setColorScheme(resolved);
 
     QFont font(m_profile.fontFamily ? *m_profile.fontFamily : a.fontFamily);
     // setPointSizeF is honoured: measured 13 / 13.5 / 14pt producing distinct

@@ -6,6 +6,10 @@
 
 #include "settings.h"
 
+#include "colorscheme.h"
+
+#include <QDir>
+#include <QFile>
 #include <QFontDatabase>
 
 namespace {
@@ -121,10 +125,68 @@ void Settings::load()
 void Settings::setColorScheme(const QString &v)
 {
     if (m_appearance.colorScheme == v) return;
+    /*
+     * Choosing a scheme by hand supersedes any in-place edit: the live override
+     * was only ever a stand-in for one specific scheme, and it is about to be
+     * replaced by the user's explicit choice.
+     */
+    if (!m_liveSchemePath.isEmpty()) {
+        ColorSchemeFile::removeLiveCopy(m_liveSchemePath);
+        m_liveSchemePath.clear();
+        m_liveSchemeRealName.clear();
+    }
     m_appearance.colorScheme = v;
     m_settings.setValue(kColorScheme, v);
     m_settings.sync();
     emit appearanceChanged();
+}
+
+void Settings::setLiveScheme(const QString &realScheme, const QString &livePath)
+{
+    if (livePath.isEmpty())
+        return;
+
+    // Drop a previous live copy; only one override can be in force.
+    if (!m_liveSchemePath.isEmpty() && m_liveSchemePath != livePath)
+        ColorSchemeFile::removeLiveCopy(m_liveSchemePath);
+
+    m_liveSchemePath = livePath;
+    m_liveSchemeRealName = realScheme;
+    m_appearance.colorScheme = livePath;
+
+    // Persist the REAL name, never the throwaway file: the live copy does not
+    // survive the process, and the next start should resolve back to the user's
+    // own scheme.
+    m_settings.setValue(kColorScheme, realScheme);
+    m_settings.sync();
+    emit appearanceChanged();
+}
+
+void Settings::finaliseLiveSchemes()
+{
+    if (m_liveSchemePath.isEmpty())
+        return;
+    const QString real = m_liveSchemeRealName;
+    const QString live = m_liveSchemePath;
+
+    m_liveSchemePath.clear();
+    m_liveSchemeRealName.clear();
+    m_appearance.colorScheme = real;
+
+    ColorSchemeFile::removeLiveCopy(live);
+}
+
+void Settings::removeLiveSchemeFiles()
+{
+    // Any _live_ file in the user dir is a leftover from a previous session
+    // (they are deleted as soon as they are superseded), so none should survive.
+    const QString dir = ColorSchemeFile::userSchemeDir();
+    if (dir.isEmpty())
+        return;
+    QDir d(dir);
+    for (const QString &f : d.entryList({QStringLiteral("_live_*.colorscheme")},
+                                        QDir::Files))
+        QFile::remove(dir + QLatin1Char('/') + f);
 }
 
 void Settings::setFontFamily(const QString &v)

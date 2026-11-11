@@ -33,7 +33,11 @@ struct TerminalProfile
 
     QString name;
 
-    /* Theme: colour scheme name, as listed by QTermWidget::availableColorSchemes(). */
+    /*
+     * Theme: colour scheme name. Stored as a bare name (the file's base name);
+     * TerminalWidget resolves it to a file on disk, which is what lets a
+     * user-saved scheme work here too.
+     */
     std::optional<QString> colorScheme;
 
     /* Text: font family and size in points. Unset inherits the global font. */

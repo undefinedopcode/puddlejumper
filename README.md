@@ -89,7 +89,7 @@ sections:
 
 | Section | Options |
 | --- | --- |
-| Appearance | colour scheme, tab layout, terminal margin, bidirectional text |
+| Appearance | colour scheme (and its editor), tab layout, terminal margin, bidirectional text |
 | Text | font family, size (8–32pt in 0.5pt steps), opacity, bold/italic/antialias |
 | Cursor | shape (block / underline / I-beam), blinking |
 | Scrolling | scrollback depth, scrollbar position, line-drawing, flow-control warning, output monitoring, quit confirmation |
@@ -275,6 +275,99 @@ Both live on top of QTermWidget's `setMonitorActivity()` / `setMonitorSilence()`
 where you're typing, "no output for N seconds" is the normal case rather than
 a signal.
 
+## Colour scheme editor
+
+**Settings → Appearance → Colour scheme → Edit…** opens an editor with a live
+preview and all 20 colours a Konsole-format scheme defines:
+
+| Group | Roles |
+| --- | --- |
+| Text and background | `Foreground`, `Background` |
+| ANSI colours | `Color0`–`Color7` (black, red, green, yellow, blue, magenta, cyan, white) |
+| ANSI colours (bright) | `Color0Intense`–`Color7Intense` |
+| — | `ForegroundIntense`, `BackgroundIntense` (used for bold text) |
+
+The last two are easy to miss, since the "intense" set looks like it should be
+only the eight ANSI colours: leaving them out makes bold text render black.
+
+**Your own schemes are edited in place; built-in ones are copied.** The editor
+seeds itself from the selected scheme's colours and decides from where that
+scheme came:
+
+- a scheme **you** saved (`~/.local/share/superterm/color-schemes/`) opens under
+  its own name and saving updates it — so adjusting the background of a theme
+  you built does not spawn `<name> copy`
+- a **built-in** scheme opens as `<scheme> copy`, so a bundled preset can never
+  be overwritten
+
+Renaming the copy in either mode saves under the new name instead. **Reset
+Colours** re-reads the original seed.
+
+Saved schemes land in:
+
+```
+~/.local/share/superterm/color-schemes/<name>.colorscheme
+```
+
+That directory is registered with qtermwidget at startup, so your schemes appear
+alongside the bundled ones everywhere a colour scheme is chosen — including the
+profile editor.
+
+### File format
+
+The editor writes the standard Konsole `.colorscheme` INI file, which you can
+also hand-edit:
+
+```ini
+[General]
+Description=Nord
+Opacity=1
+Wallpaper=
+
+[Background]
+Color=46,52,64
+Transparent=false
+```
+
+Two details in that format are worth knowing, because both fail *silently*:
+
+- **Colours must be written unquoted** as `r,g,b`. qtermwidget's parser rejects
+  the quoted form and falls back to black, so the editor writes the file
+  directly rather than through `QSettings` — which would see a comma value and
+  emit `Color="46,52,64"`.
+- **`[General]` is QSettings' implicit root group**, so its keys land at top
+  level. Reading it via `beginGroup("General")` yields nothing; qtermwidget
+  itself does this, which is why a scheme's description reads as empty. Only
+  the description is affected, so it is harmless — the editor reads the file
+  with its own parser and shows it correctly.
+
+qtermwidget caches its scheme list the first time it is asked, and it keys
+loaded schemes by file *basename*. Three consequences are handled in the code:
+every scheme dropdown is built from `ColorSchemeFile::allSchemeNames()`, which
+merges in the user scheme directory — the library's own list alone silently
+omits custom schemes; the dropdowns are rebuilt by hand after a save; and
+schemes are applied **by full path**. Applying a name the process has not loaded
+silently falls back to the *default* scheme rather than reporting an error.
+
+### Why editing in place writes a temporary file
+
+The basename keying has a further consequence: a scheme already loaded **cannot
+be reloaded**. `loadColorScheme()` discards a freshly parsed scheme whose name is
+known and `findColorScheme()` keeps returning the cached instance, so re-saving
+`MyTheme` would leave every open terminal showing the *old* colours until
+restart.
+
+To make an in-place edit take effect immediately, the editor applies a copy of
+the scheme under a throwaway name (`_live_<timestamp>_<n>.colorscheme`), which
+the cache has not seen. That is transparent:
+
+- the temporary file is deleted as soon as it is superseded, and any left behind
+  by a crash is cleaned up at startup
+- it never appears in a scheme dropdown
+- the config keeps storing your real scheme name, so the next launch resolves
+  back to `MyTheme`
+- the status bar shows the real name, not the throwaway one
+
 ## Profiles
 
 A **profile** is a named bundle of per-terminal overrides: a colour scheme, a
@@ -384,7 +477,10 @@ CMakeLists.txt            build definition
 src-widgets/main.cpp      QApplication bootstrap, style and icon
 src-widgets/mainwindow.*  tabs, menus, status bar, preview rotation
 src-widgets/terminalwidget.*  one QTermWidget plus appearance plumbing
-src-widgets/settingsdialog.*  modal settings, four sections
+src-widgets/settingsdialog.*  modal settings, five sections
+src-widgets/profiles.*    terminal profiles and their persistence
+src-widgets/colorscheme.* .colorscheme file read/write (20 roles)
+src-widgets/colorschemeeditor.*  scheme editor dialog with live preview
 src-widgets/thumbnailsidebar.*  left sidebar with live previews
 src-widgets/settings.*    QSettings-backed configuration
 data/superterm.desktop    launcher entry

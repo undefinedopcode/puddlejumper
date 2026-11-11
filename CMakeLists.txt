@@ -39,6 +39,10 @@ qt_add_executable(superterm
     src-widgets/settings.h
     src-widgets/profiles.cpp
     src-widgets/profiles.h
+    src-widgets/colorscheme.cpp
+    src-widgets/colorscheme.h
+    src-widgets/colorschemeeditor.cpp
+    src-widgets/colorschemeeditor.h
 )
 
 target_link_libraries(superterm PRIVATE
@@ -79,6 +83,8 @@ qt_add_executable(probe-settingsdialog
     src-widgets/settingsdialog.cpp src-widgets/settingsdialog.h
     src-widgets/settings.cpp src-widgets/settings.h
     src-widgets/profiles.cpp src-widgets/profiles.h
+    src-widgets/colorscheme.cpp src-widgets/colorscheme.h
+    src-widgets/colorschemeeditor.cpp src-widgets/colorschemeeditor.h
 )
 target_link_libraries(probe-settingsdialog PRIVATE
     Qt6::Core

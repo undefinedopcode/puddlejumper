@@ -6,12 +6,18 @@
 
 #include "mainwindow.h"
 
+#include "colorscheme.h"
+#include "settings.h"
+
 #include <QApplication>
 #include <QCommandLineParser>
 #include <QDebug>
+#include <QDir>
 #include <QIcon>
 #include <QStyle>
 #include <QStyleFactory>
+
+#include <qtermwidget.h>
 
 int main(int argc, char *argv[])
 {
@@ -22,6 +28,25 @@ int main(int argc, char *argv[])
     app.setApplicationDisplayName(QStringLiteral("SuperTerm"));
     app.setApplicationVersion(QStringLiteral("0.2.0"));
     app.setDesktopFileName(QStringLiteral("superterm"));
+
+    /*
+     * Register the user scheme directory before anything reads the scheme
+     * list. qtermwidget caches its scheme list the first time it is asked, so
+     * a directory registered later in the run would be missed until restart.
+     */
+    const QString userSchemes = ColorSchemeFile::userSchemeDir();
+    if (!userSchemes.isEmpty()) {
+        QDir().mkpath(userSchemes);
+        QTermWidget::addCustomColorSchemeDir(userSchemes);
+
+        /*
+         * Remove stand-in copies left behind by a previous session. They exist
+         * only so an in-place scheme edit can bypass qtermwidget's basename
+         * cache within one run, and are deleted as soon as they are superseded;
+         * anything still here is a leftover from a crash or a kill.
+         */
+        Settings::removeLiveSchemeFiles();
+    }
 
     // Window/taskbar icon. Embedded via qt_add_resources so it is present
     // whether the app runs from the build tree or an install prefix. Multi-size

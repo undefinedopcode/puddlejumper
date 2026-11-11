@@ -137,6 +137,35 @@ public:
     void setMonitorSilence(bool v);
     void setSilenceTimeout(int v);
 
+    /*
+     * Point the running session at a throwaway copy of a scheme, while keeping
+     * `realScheme` as the persisted choice.
+     *
+     * qtermwidget caches schemes by basename and cannot reload the same name,
+     * so an in-place edit has to be applied through a freshly-named copy. That
+     * copy is valid only for this process, so the config keeps the real name
+     * and finaliseLiveSchemes() puts it back before the next write.
+     */
+    void setLiveScheme(const QString &realScheme, const QString &livePath);
+
+    /* Is this path the live stand-in currently in force? */
+    bool isLiveScheme(const QString &path) const
+    {
+        return !m_liveSchemePath.isEmpty() && path == m_liveSchemePath;
+    }
+
+    /* The real scheme name the live stand-in is standing in for. */
+    QString liveSchemeRealName() const { return m_liveSchemeRealName; }
+
+    /*
+     * Swap the in-memory colour scheme back to the real name and drop the live
+     * mapping. A no-op when nothing was overridden.
+     */
+    void finaliseLiveSchemes();
+
+    /* Delete live copies belonging to this session, leaving the real schemes. */
+    static void removeLiveSchemeFiles();
+
     void saveWindowGeometry(const QByteArray &geometry, const QByteArray &state);
     QByteArray windowGeometry() const;
     QByteArray windowState() const;
@@ -157,4 +186,12 @@ private:
     QSettings m_settings;
     Appearance m_appearance;
     Scrolling m_scrolling;
+
+    /*
+     * Live scheme override for this process, set by setLiveScheme(): the
+     * throwaway file the terminals are actually using, and the real scheme it
+     * stands in for. Empty livePath means "no override".
+     */
+    QString m_liveSchemePath;
+    QString m_liveSchemeRealName;
 };

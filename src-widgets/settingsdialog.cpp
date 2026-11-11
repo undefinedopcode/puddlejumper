@@ -6,6 +6,8 @@
 
 #include "settingsdialog.h"
 
+#include "colorscheme.h"
+#include "colorschemeeditor.h"
 #include "profiles.h"
 #include "settings.h"
 
@@ -15,9 +17,11 @@
 #include <QDoubleSpinBox>
 #include <QFontDatabase>
 #include <QFormLayout>
+#include <QFileInfo>
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QFileInfo>
 #include <QGroupBox>
 #include <QLineEdit>
 #include <QListWidget>
@@ -138,11 +142,32 @@ QWidget *SettingsDialog::buildAppearancePage()
     form->setSpacing(10);
 
     m_schemeBox = new QComboBox(page);
-    m_schemeBox->addItems(QTermWidget::availableColorSchemes());
+    // allSchemeNames() rather than the raw list: it includes the user's saved
+    // schemes, which qtermwidget's cached list does not.
+    m_schemeBox->addItems(ColorSchemeFile::allSchemeNames());
     connect(m_schemeBox, &QComboBox::currentTextChanged, this, [this](const QString &v) {
         m_settings.setColorScheme(v);
     });
-    form->addRow(tr("Colour scheme"), m_schemeBox);
+
+    auto *schemeRow = new QWidget(page);
+    auto *schemeLayout = new QHBoxLayout(schemeRow);
+    schemeLayout->setContentsMargins(0, 0, 0, 0);
+    schemeLayout->setSpacing(6);
+    schemeLayout->addWidget(m_schemeBox, 1);
+    m_editSchemeBtn = new QPushButton(tr("&Edit…"), schemeRow);
+    m_editSchemeBtn->setToolTip(tr("Create a new scheme from a copy of this one"));
+    schemeLayout->addWidget(m_editSchemeBtn);
+    form->addRow(tr("Colour scheme"), schemeRow);
+
+    connect(m_editSchemeBtn, &QPushButton::clicked, this,
+            &SettingsDialog::editColorScheme);
+
+    auto *schemeHint = new QLabel(
+        tr("“Edit…” always starts from a copy, so the selected scheme is never "
+           "modified. Saved schemes appear in this list."), page);
+    schemeHint->setWordWrap(true);
+    schemeHint->setEnabled(false);
+    form->addRow(QString(), schemeHint);
 
     m_tabLayoutBox = new QComboBox(page);
     m_tabLayoutBox->addItem(tr("Tabs along the top"), QStringLiteral("standard"));
@@ -468,8 +493,6 @@ QWidget *SettingsDialog::buildProfilesPage()
 
     m_profileScheme = new QComboBox(m_profileFormBox);
     m_profileScheme->addItem(tr("Inherit"), QString());
-    for (const QString &s : QTermWidget::availableColorSchemes())
-        m_profileScheme->addItem(s, s);
     form->addRow(tr("Colour scheme"), m_profileScheme);
 
     m_profileFont = new QComboBox(m_profileFormBox);
@@ -586,6 +609,7 @@ QWidget *SettingsDialog::buildProfilesPage()
         rebuildProfileList();
     });
 
+    reloadProfileSchemeBox();
     rebuildProfileList();
     return page;
 }
@@ -721,6 +745,127 @@ void SettingsDialog::commitProfileForm()
                                        : std::optional<QString>(dir);
 
     m_profiles.update(p);
+}
+
+void SettingsDialog::editColorScheme()
+{
+    const QString seed = m_schemeBox->currentText();
+    ColorSchemeEditor editor(seed, this);
+    if (editor.exec() != QDialog::Accepted)
+        return;
+
+    const QString name = editor.savedName();
+    const QString path = editor.savedPath();
+    if (name.isEmpty() || path.isEmpty())
+        return;
+
+    /*
+     * The scheme manager caches its list the first time it is asked, so a
+     * scheme written during this run is not in availableColorSchemes(). Load it
+     * explicitly so applying it by path below finds a real table rather than
+     * silently falling back to the default scheme.
+     */
+    ColorSchemeFile().load(path);
+
+    reloadSchemeBox(name);
+
+    /*
+     * Select the scheme. The combo drives Settings::setColorScheme, which
+     * TerminalWidget::applyAppearance() passes to QTermWidget::setColorScheme.
+     *
+     * A bare name is only resolved when the manager already knows it; an
+     * unknown name silently falls back to the DEFAULT scheme with no error, so
+     * applying by full path is the only reliable option here.
+     */
+    const QString dir = ColorSchemeFile::userSchemeDir();
+    if (!dir.isEmpty())
+        QTermWidget::addCustomColorSchemeDir(dir);
+
+    /*
+     * An overwrite needs special handling. qtermwidget has the scheme cached
+     * under this basename and cannot reload it: the freshly written file is
+     * ignored (loadColorScheme() deletes the new parse, findColorScheme()
+     * returns the stale instance), so simply re-applying it would leave the
+     * terminal showing the OLD colours.
+     *
+     * Applying a throwaway copy with a fresh basename bypasses the cache. The
+     * live path is then what the session uses; Settings remembers the real name
+     * so the next start resolves back to the user's own scheme (see
+     * Settings::finaliseLiveSchemes()).
+     */
+    if (editor.overwroteExisting()) {
+        ColorSchemeFile live;
+        if (live.load(path)) {
+            const QString livePath = live.saveLiveCopy();
+            if (!livePath.isEmpty()) {
+                m_settings.setLiveScheme(name, livePath);
+                return;
+            }
+        }
+        // Fall through to the plain apply if the live copy could not be made.
+    }
+
+    m_settings.setColorScheme(path);
+}
+
+void SettingsDialog::reloadSchemeBox(const QString &selectName)
+{
+    if (!m_schemeBox)
+        return;
+
+    // Rebuild rather than append: the order should be stable, and a
+    // deleted/renamed scheme must not linger. allSchemeNames() merges the
+    // user's saved schemes, which the cached library list omits.
+    const QSignalBlocker block(m_schemeBox);
+    m_schemeBox->clear();
+    m_schemeBox->addItems(ColorSchemeFile::allSchemeNames());
+
+    // Prefer the requested scheme; fall back to whatever is currently active.
+    QString target = selectName;
+    if (target.isEmpty())
+        target = m_settings.appearance().colorScheme;
+    // Settings may hold a full path: either a scheme the editor saved (the
+    // combo lists bare names) or a live stand-in for an in-place edit, whose
+    // basename is a throwaway. For a live path the real scheme is the mapping's
+    // other half, so ask Settings for that instead.
+    if (m_settings.isLiveScheme(target))
+        target = m_settings.liveSchemeRealName();
+    if (target.contains(QLatin1Char('/')))
+        target = QFileInfo(target).baseName();
+
+    const int index = m_schemeBox->findText(target, Qt::MatchFixedString);
+    if (index >= 0)
+        m_schemeBox->setCurrentIndex(index);
+
+    // The profile form lists the same schemes, so it needs the new one too.
+    reloadProfileSchemeBox();
+}
+
+void SettingsDialog::reloadProfileSchemeBox(const QString &selectName)
+{
+    if (!m_profileScheme)
+        return;
+
+    // Blocked: the combo's currentIndexChanged handler commits the profile, so
+    // repopulating it must not look like a user edit.
+    const QSignalBlocker block(m_profileScheme);
+
+    QString target = selectName;
+    if (target.isEmpty())
+        target = m_profileScheme->currentData().toString();
+    // A profile may hold a full path if it was set by hand; the list is names.
+    if (target.contains(QLatin1Char('/')))
+        target = QFileInfo(target).baseName();
+
+    m_profileScheme->clear();
+    m_profileScheme->addItem(tr("Inherit"), QString());
+    for (const QString &s : ColorSchemeFile::allSchemeNames())
+        m_profileScheme->addItem(s, s);
+
+    int index = m_profileScheme->findData(target);
+    if (index < 0)
+        index = 0;   // Keep the selection visible; the profile is unchanged.
+    m_profileScheme->setCurrentIndex(index);
 }
 
 void SettingsDialog::syncFromSettings()

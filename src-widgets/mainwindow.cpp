@@ -660,6 +660,9 @@ void MainWindow::closeEvent(QCloseEvent *event)
         event->ignore();
         return;
     }
+    // Drop any in-place-edit stand-in and put the real scheme name back, so the
+    // stored config never points at a throwaway file.
+    m_settings.finaliseLiveSchemes();
     m_settings.saveWindowGeometry(saveGeometry(), saveState());
     QMainWindow::closeEvent(event);
 }
