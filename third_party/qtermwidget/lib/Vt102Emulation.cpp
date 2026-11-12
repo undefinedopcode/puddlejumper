@@ -260,7 +260,16 @@ void Vt102Emulation::initTokenizer()
 #define esp( )     (p ==  4  && s[3] == ' ')
 #define Xpe        (tokenBufferPos >= 2 && tokenBuffer[1] == ']')
 #define Xte        (Xpe      && (cc ==  7 || (prevCC == 27 && cc == 92) )) // 27, 92 => "\e\\" (ST, String Terminator)
-#define ces(C)     (cc < 256 && (charClass[cc] & (C)) == (C) && !Xte)
+// superterm: the other string sequences, which upstream doesn't parse and so
+// printed their contents as text: DCS (ESC P), SOS (ESC X), PM (ESC ^), APC
+// (ESC _) and screen's window title (ESC k, which shells emit under tmux and
+// tmux control mode passes on). Their contents are skipped up to the String
+// Terminator (or BEL, as for OSC).
+#define Xse        (tokenBufferPos >= 2 && tokenBuffer[0] == ESC && \
+                    (tokenBuffer[1] == 'P' || tokenBuffer[1] == 'X' || tokenBuffer[1] == '^' || \
+                     tokenBuffer[1] == '_' || tokenBuffer[1] == 'k'))
+#define Xst        (Xse      && (cc ==  7 || (prevCC == 27 && cc == 92) ))
+#define ces(C)     (cc < 256 && (charClass[cc] & (C)) == (C) && !Xte && !Xst)
 
 #define CNTL(c) ((c)-'@')
 #define ESC 27
@@ -276,7 +285,7 @@ void Vt102Emulation::receiveChar(wchar_t cc)
   {
     // ignore control characters in the text part of Xpe (aka OSC) "ESC]"
     // escape sequences; this matches what XTERM docs say
-    if (Xpe) {
+    if (Xpe || Xse) {
         prevCC = cc;
         return;
     }
@@ -306,6 +315,8 @@ void Vt102Emulation::receiveChar(wchar_t cc)
     if (les(2,1,GRP)) { return; }
     if (Xte         ) { processWindowAttributeChange(); resetTokenizer(); return; }
     if (Xpe         ) { prevCC = cc; return; }
+    if (Xst         ) { resetTokenizer(); return; }
+    if (Xse         ) { prevCC = cc; return; }
     if (lec(3,2,'?')) { return; }
     if (lec(3,2,'>')) { return; }
     if (lec(3,2,'!')) { return; }

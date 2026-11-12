@@ -77,6 +77,15 @@ with a `superterm:` comment.
    underline, faint, wide characters and the cursor, but no blinking,
    selection or specially drawn line characters.
 
+9. **String sequences are skipped, not printed.** Upstream's tokenizer parses
+   OSC (`ESC ]`) but not the other sequences that carry a string up to the
+   String Terminator: DCS (`ESC P`), SOS (`ESC X`), PM (`ESC ^`), APC (`ESC _`)
+   and screen's window title (`ESC k`). It printed their contents as text.
+   Under tmux, oh-my-zsh and others set the window name with `ESC k`<name>`ESC
+   \` before every command, and tmux control mode passes pane output on as it
+   is, so the command's name appeared in the output. All five are now consumed
+   up to `ESC \` (or BEL, as OSC allows) and ignored.
+
 ## Updating
 
 Diff this tree against the upstream tag it came from, re-apply the
