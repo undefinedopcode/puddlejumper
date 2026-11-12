@@ -67,6 +67,18 @@ public:
      */
     void startTerminalTeletype() override;
 
+    /**
+     * superterm: for a terminal started with startTerminalTeletype() whose
+     * output comes from elsewhere (tmux control mode). feedData() hands bytes
+     * straight to the emulator; keystrokes still come out of sendData().
+     * setFixedTerminalSize() pins the screen to the size the source dictates
+     * (0 x 0 to follow the widget again). setAnswerTerminalQueries(false)
+     * stops the emulator replying to queries the source has already answered.
+     */
+    void feedData(const QByteArray &data);
+    void setFixedTerminalSize(int columns, int lines);
+    void setAnswerTerminalQueries(bool answer);
+
     int getShellPID() override;
 
     /**

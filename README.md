@@ -3,8 +3,9 @@
 A modern terminal built on **Qt Widgets** and
 **[QTermWidget](https://github.com/lxqt/qtermwidget)**.
 
-Tabs, live colour-scheme switching, a monospace font picker, font zoom, working
-scrollback, cursor shape, a thumbnail sidebar with live previews, and a
+Tabs and split panes, native tmux integration (tmux windows as tabs, panes as
+panes), live colour-scheme switching, a monospace font picker, font zoom,
+working scrollback, cursor shape, a thumbnail sidebar with live previews, and a
 keyboard-driven UI — with the terminal emulation itself (VT102/xterm, Unicode,
 256-colour, key bindings) handled by QTermWidget's Konsole-derived engine.
 
@@ -59,6 +60,7 @@ Environment overrides, handy for testing:
 
 ```sh
 SUPERTERM_SHELL=/bin/fish SUPERTERM_SHELL_ARGS="-l" ./build/superterm
+SUPERTERM_TMUX="tmux -L test" ./build/superterm   # a separate tmux server
 ```
 
 ### Install
@@ -440,7 +442,8 @@ renames, which is what lets open tabs keep pointing at them.
 ## Toolbar
 
 A toolbar under the menu bar carries the common actions: new tab (the arrow
-beside it opens the profile list), close tab, copy, paste, find, screenshot
+beside it opens the profile list), close tab, split right and split down, copy,
+paste, find, screenshot
 (the arrow offers the whole terminal), zoom out and
 in, the thumbnail sidebar toggle, and settings at the far end. The current font
 size sits between the zoom buttons; click it to reset the zoom.
@@ -451,6 +454,70 @@ per action because Breeze and Adwaita name some differently. If the theme has
 none of them, the button shows its name instead. **View → Show Toolbar** (or
 right-clicking the toolbar) hides it, and its visibility and position are kept
 between sessions.
+
+## Split panes
+
+A tab can hold several terminals side by side or stacked. **View → Split
+Right** (`Ctrl+Shift+E`) and **Split Down** (`Ctrl+Shift+O`), also on the
+toolbar and the right-click menu, put a new terminal beside the current one,
+with the same profile and starting in the directory the current shell is in.
+Splits nest, and the handles between panes can be dragged.
+
+The pane with keyboard focus is framed in the highlight colour; it is what
+copy, paste, find, screenshots and the status bar refer to. Click a pane to
+focus it, or cycle with **Next Pane** (`Ctrl+Shift+N`) and **Previous Pane**
+(`Ctrl+Shift+M`). **Close Pane** (`Ctrl+Shift+X`) closes one, and so does its
+shell exiting; closing the last pane closes the tab. The quit warning checks
+every pane, not just the visible one, and a split tab's thumbnail shows the
+whole arrangement.
+
+## tmux
+
+The **tmux** menu attaches to tmux sessions in **control mode**, the way
+iTerm2 does: each tmux window becomes a tab and each pane a pane, drawn by
+superterm rather than by tmux. So scrollback, search, copy, screenshots,
+thumbnails and the font all work natively, while the programs live in tmux.
+Detach, or quit superterm, and they keep running; attach again (from here or
+any tmux client) and everything is where it was, history included.
+
+The menu lists this machine's sessions (choosing one attaches), plus:
+
+- **New Session…** creates one (or attaches, if the name exists).
+- **Connect to Host…** does the same on another machine over ssh. ssh has to
+  log in without a password prompt (a key or an agent), since there is no
+  terminal to type one into.
+- **Detach** closes the session's tabs here and leaves it running.
+
+In a tmux tab, the usual actions are carried out by tmux: New Tab creates a
+tmux window, Split Right/Down split the pane, Close Pane and Close Tab kill the
+pane or window, and dragging a split handle resizes the pane. Switching tabs
+or panes switches tmux's current window and pane too, so another client sees
+the same. **File → New Tab with Profile** still opens a local tab. tmux's own
+prefix key isn't involved: keys go straight to the program in the pane.
+
+How it works:
+
+- superterm runs `tmux -C` over plain pipes and speaks its line protocol:
+  replies to commands, plus notifications such as `%output`,
+  `%layout-change` and `%window-add`. Pane output is fed straight into a
+  terminal that has no process of its own; keystrokes go back with
+  `send-keys -H`.
+- tmux decides the layout in character cells. superterm tells tmux how many
+  cells fit (`refresh-client -C`) and sizes every pane and split handle to
+  whole cells, so each pane shows exactly the grid tmux gave it. That is why
+  tmux panes have no scrollbar or per-pane margin: the tab is padded instead.
+  Scrolling back works with the wheel and keys.
+- On attaching, each pane's history and screen come from `capture-pane`, and
+  a full-screen program (an editor, a pager) is put back on the alternate
+  screen.
+- With tmux 3.2 or later, flow control is on: if superterm falls behind a
+  flood of output, tmux pauses that pane, and superterm redraws it from a
+  capture when it catches up.
+- Both of tmux's layout formats are understood: the classic one in
+  `%layout-change`, and the JSON one tmux 3.8 uses in format variables.
+
+Tested against tmux 3.8. Connecting over ssh uses the same code path but has
+only been tried locally.
 
 ## Taking screenshots
 
@@ -478,6 +545,9 @@ real pixel size rather than the logical one.
 | --- | --- |
 | `Ctrl+Shift+T` | New tab |
 | `Ctrl+Shift+W` | Close tab |
+| `Ctrl+Shift+E` / `Ctrl+Shift+O` | Split right / down |
+| `Ctrl+Shift+X` | Close pane |
+| `Ctrl+Shift+N` / `Ctrl+Shift+M` | Next / previous pane |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
 | `Ctrl+Shift+F` | Find in terminal |
 | `Ctrl+Shift+S` | Screenshot a region (drag to select) |
@@ -492,7 +562,7 @@ real pixel size rather than the logical one.
 | `Escape` | Close search or settings |
 
 Right-clicking inside a terminal opens a context menu with copy, paste, find,
-clear, screenshot, save-output-to-file, and zoom actions, so those are discoverable without
+clear, split, close-pane, screenshot, save-output-to-file, and zoom actions, so those are discoverable without
 memorising the shortcuts.
 
 Plain `Ctrl`+letter combinations are deliberately **not** bound to app actions.
@@ -515,8 +585,11 @@ is kept buildable but is no longer installed.
 CMakeLists.txt            build definition
 src-widgets/main.cpp      QApplication bootstrap, style and icon
 src-widgets/mainwindow.*  tabs, menus, toolbar, status bar, preview rotation
-src-widgets/terminalwidget.*  one QTermWidget plus appearance plumbing
-src-widgets/settingsdialog.*  modal settings, five sections
+src-widgets/terminaltab.*  one tab: a tree of panes in splitters
+src-widgets/terminalwidget.*  one pane: a QTermWidget plus appearance plumbing
+src-widgets/tmuxcontrol.*  tmux control-mode protocol client
+src-widgets/tmuxsession.*  a tmux session's windows and panes as tabs and panes
+src-widgets/settingsdialog.*  modal settings, four sections
 src-widgets/profiles.*    terminal profiles and their persistence
 src-widgets/colorscheme.* .colorscheme file read/write (20 roles)
 src-widgets/colorschemeeditor.*  scheme editor dialog with live preview

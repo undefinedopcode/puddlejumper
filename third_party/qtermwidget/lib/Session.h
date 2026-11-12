@@ -380,6 +380,20 @@ public:
      */
     int getPtySlaveFd() const;
 
+    /**
+     * superterm: feed output from an external source (tmux control mode)
+     * straight to the emulation, as if the pty had produced it. Avoids the
+     * pty's line discipline, which would turn "\n" into "\r\n".
+     */
+    void receiveExternalData(const char *buffer, int len) { onReceiveBlock(buffer, len); }
+
+    /**
+     * superterm: pin the emulation's screen to columns x lines, whatever the
+     * size of the attached views, for a screen whose size is decided
+     * elsewhere (a tmux pane). 0 x 0 returns to following the views.
+     */
+    void setFixedTerminalSize(int columns, int lines);
+
 public slots:
 
     /**
@@ -525,6 +539,9 @@ private:
 
     void updateTerminalSize();
     WId windowId() const;
+
+    int _fixedColumns = 0;   // superterm: see setFixedTerminalSize()
+    int _fixedLines = 0;
 
     int            _uniqueIdentifier;
 

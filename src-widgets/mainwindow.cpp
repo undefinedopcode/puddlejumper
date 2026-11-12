@@ -7,9 +7,12 @@
 #include "mainwindow.h"
 
 #include "settingsdialog.h"
+#include "terminaltab.h"
 #include "terminalwidget.h"
 #include "themeicon.h"
 #include "thumbnailsidebar.h"
+#include "tmuxcontrol.h"
+#include "tmuxsession.h"
 
 #include <QAction>
 #include <QApplication>
@@ -19,6 +22,11 @@
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
+#include <QFormLayout>
+#include <QInputDialog>
+#include <QLineEdit>
+#include <QProcess>
+#include <QDialogButtonBox>
 #include <QIcon>
 #include <QLabel>
 #include <QListWidget>
@@ -45,6 +53,25 @@ namespace {
  * Toolbar buttons are icon-only, so the tooltip is the only place a button's
  * name and shortcut appear. Qt doesn't add the shortcut itself.
  */
+/*
+ * How to run tmux. SUPERTERM_TMUX overrides it, e.g. "tmux -L test" to use a
+ * separate server (handy for testing without touching real sessions).
+ */
+QStringList tmuxProgram()
+{
+    const QString env = QString::fromLocal8Bit(qgetenv("SUPERTERM_TMUX")).trimmed();
+    const QStringList cmd = env.isEmpty() ? QStringList() : QProcess::splitCommand(env);
+    return cmd.isEmpty() ? QStringList{QStringLiteral("tmux")} : cmd;
+}
+
+/* Quote for a POSIX shell (the remote one, for ssh). */
+QString shellQuote(const QString &arg)
+{
+    QString out = arg;
+    out.replace(QLatin1Char('\''), QStringLiteral("'\\''"));
+    return QLatin1Char('\'') + out + QLatin1Char('\'');
+}
+
 void setToolTipWithShortcut(QAction *act)
 {
     QString text = act->text();
@@ -76,10 +103,8 @@ MainWindow::MainWindow(QWidget *parent)
     connect(&m_settings, &Settings::appearanceChanged,
             this, &MainWindow::applyAppearanceToAll);
     connect(&m_settings, &Settings::scrollingChanged, this, [this]() {
-        for (int i = 0; i < m_tabs->count(); ++i) {
-            if (auto *t = terminalAt(i))
-                t->applyScrolling();
-        }
+        for (TerminalWidget *t : allPanes())
+            t->applyScrolling();
     });
 
     // Any profile edit: rebuild the menu and refresh live tabs that are still
@@ -134,9 +159,16 @@ void MainWindow::buildLayout()
         // Selecting a tab counts as having seen it, so clear its "new output"
         // marker (and the underlying dirty flag) straight away rather than
         // waiting for the next preview capture.
-        if (auto *term = terminalAt(index)) {
-            term->clearNewOutput();
+        if (auto *tab = tabAt(index)) {
+            // Keep tmux's current window in step, so another client attaching
+            // sees the same one. Not for the preview rotation's brief visits.
+            if (auto *session = tmuxSessionFor(tab); session && !m_capturingPreview)
+                session->selectWindow(tab);
+            tab->clearNewOutput();
             m_sidebar->setBusy(index, false);
+            if (!m_capturingPreview && tab->activePane())
+                tab->activePane()->focusTerminal();
+            syncTabFromActivePane(tab);
         }
         updateStatus();
         captureNextPreview();
@@ -256,6 +288,9 @@ void MainWindow::buildMenus()
     });
 
     auto *view = menuBar()->addMenu(tr("&View"));
+    // Filled each time it opens, since tmux sessions come and go outside.
+    m_tmuxMenu = menuBar()->addMenu(tr("t&mux"));
+    connect(m_tmuxMenu, &QMenu::aboutToShow, this, &MainWindow::rebuildTmuxMenu);
 
     auto *zoomIn = view->addAction(tr("Zoom &In"));
     zoomIn->setShortcut(QKeySequence(QStringLiteral("Ctrl+=")));
@@ -269,6 +304,38 @@ void MainWindow::buildMenus()
     zoomReset->setShortcut(QKeySequence(QStringLiteral("Ctrl+0")));
     connect(zoomReset, &QAction::triggered, this, [this]() {
         m_settings.setFontSize(13.0);
+    });
+
+    view->addSeparator();
+    auto *splitRightAct = view->addAction(tr("Split &Right"));
+    splitRightAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+E")));
+    connect(splitRightAct, &QAction::triggered, this, [this]() {
+        if (auto *t = currentTerminal())
+            splitPane(t, Qt::Horizontal);
+    });
+    auto *splitDownAct = view->addAction(tr("Split &Down"));
+    splitDownAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+O")));
+    connect(splitDownAct, &QAction::triggered, this, [this]() {
+        if (auto *t = currentTerminal())
+            splitPane(t, Qt::Vertical);
+    });
+    auto *closePaneAct = view->addAction(tr("Close Pa&ne"));
+    closePaneAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+X")));
+    connect(closePaneAct, &QAction::triggered, this, [this]() {
+        if (auto *t = currentTerminal())
+            closePane(t);
+    });
+    auto *nextPaneAct = view->addAction(tr("Ne&xt Pane"));
+    nextPaneAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+N")));
+    connect(nextPaneAct, &QAction::triggered, this, [this]() {
+        if (auto *tab = currentTab())
+            tab->cyclePane(+1);
+    });
+    auto *prevPaneAct = view->addAction(tr("Pre&vious Pane"));
+    prevPaneAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+M")));
+    connect(prevPaneAct, &QAction::triggered, this, [this]() {
+        if (auto *tab = currentTab())
+            tab->cyclePane(-1);
     });
 
     view->addSeparator();
@@ -297,6 +364,9 @@ void MainWindow::buildMenus()
      */
     newAct->setIcon(themeIcon({"tab-new", "list-add"}));
     closeAct->setIcon(themeIcon({"tab-close", "window-close"}));
+    splitRightAct->setIcon(themeIcon({"view-split-left-right"}));
+    splitDownAct->setIcon(themeIcon({"view-split-top-bottom"}));
+    closePaneAct->setIcon(themeIcon({"view-close", "window-close"}));
     copyAct->setIcon(themeIcon({"edit-copy"}));
     pasteAct->setIcon(themeIcon({"edit-paste"}));
     findAct->setIcon(themeIcon({"edit-find", "system-search"}));
@@ -306,8 +376,10 @@ void MainWindow::buildMenus()
     zoomIn->setIcon(themeIcon({"zoom-in"}));
     toggleLayout->setIcon(themeIcon({"sidebar-show", "sidebar-show-symbolic", "view-preview"}));
     settingsAct->setIcon(themeIcon({"configure", "preferences-system", "document-properties"}));
-    for (QAction *act : {newAct, closeAct, copyAct, pasteAct, findAct, shotRegionAct,
-                         shotTermAct, zoomOut, zoomIn, zoomReset, toggleLayout, settingsAct})
+    for (QAction *act : {newAct, closeAct, splitRightAct, splitDownAct, closePaneAct,
+                         nextPaneAct, prevPaneAct, copyAct, pasteAct, findAct,
+                         shotRegionAct, shotTermAct, zoomOut, zoomIn, zoomReset,
+                         toggleLayout, settingsAct})
         setToolTipWithShortcut(act);
 
     auto *bar = addToolBar(tr("Main Toolbar"));
@@ -322,6 +394,10 @@ void MainWindow::buildMenus()
     newButton->setPopupMode(QToolButton::MenuButtonPopup);
     bar->addWidget(newButton);
     bar->addAction(closeAct);
+
+    bar->addSeparator();
+    bar->addAction(splitRightAct);
+    bar->addAction(splitDownAct);
 
     bar->addSeparator();
     bar->addAction(copyAct);
@@ -442,74 +518,150 @@ void MainWindow::saveScreenshot()
     m_screenshotNoticeTimer->start();
 }
 
-TerminalWidget *MainWindow::currentTerminal() const
+TerminalTab *MainWindow::currentTab() const
 {
-    return qobject_cast<TerminalWidget *>(m_tabs->currentWidget());
+    return qobject_cast<TerminalTab *>(m_tabs->currentWidget());
 }
 
-TerminalWidget *MainWindow::terminalAt(int index) const
+TerminalTab *MainWindow::tabAt(int index) const
 {
     if (index < 0 || index >= m_tabs->count())
         return nullptr;
-    return qobject_cast<TerminalWidget *>(m_tabs->widget(index));
+    return qobject_cast<TerminalTab *>(m_tabs->widget(index));
 }
 
-void MainWindow::newTab()
+TerminalWidget *MainWindow::currentTerminal() const
 {
-    newTabWithProfile(QString());
+    auto *tab = currentTab();
+    return tab ? tab->activePane() : nullptr;
 }
 
-void MainWindow::newTabWithProfile(const QString &profileId)
+TerminalTab *MainWindow::tabOf(const QWidget *pane) const
 {
-    // An empty or dangling id means "the default profile". profileById()
-    // already falls back, so this cannot fail to find something to open with.
-    const TerminalProfile profile =
-        profileId.isEmpty() ? m_profiles.defaultProfile()
-                            : m_profiles.profileById(profileId);
+    for (const QWidget *w = pane; w; w = w->parentWidget()) {
+        if (auto *tab = qobject_cast<TerminalTab *>(const_cast<QWidget *>(w)))
+            return tab;
+    }
+    return nullptr;
+}
 
-    auto *term = new TerminalWidget(m_nextTabId++, m_settings, profile, this);
-    term->applyAppearance();
-    term->applyScrolling();
+int MainWindow::tabIndexOf(const QWidget *pane) const
+{
+    auto *tab = tabOf(pane);
+    return tab ? m_tabs->indexOf(tab) : -1;
+}
 
-    const int index = m_tabs->addTab(term, tr("Terminal"));
-    // The tab tooltip carries the profile, which is the only cue in the
-    // standard layout that a tab is not just "another terminal".
-    m_tabs->setTabToolTip(index, tr("%1 — %2").arg(profile.name, tr("Terminal")));
-    m_tabs->setCurrentIndex(index);
-    term->focusTerminal();
+QList<TerminalWidget *> MainWindow::allPanes() const
+{
+    QList<TerminalWidget *> out;
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        if (auto *tab = tabAt(i))
+            out += tab->panes();
+    }
+    return out;
+}
 
-    connect(term, &TerminalWidget::titleChanged, this, [this, term](const QString &title) {
-        const int i = m_tabs->indexOf(term);
-        if (i < 0)
-            return;
+TerminalWidget *MainWindow::makePane(const TerminalProfile &profile,
+                                     const QString &directory)
+{
+    TerminalProfile p = profile;
+    if (!directory.isEmpty())
+        p.workingDirectory = directory;
+    auto *pane = new TerminalWidget(m_nextTabId++, m_settings, p, this);
+    pane->applyAppearance();
+    pane->applyScrolling();
+    return pane;
+}
+
+int MainWindow::addTab(TerminalTab *tab, const QString &text, const QString &toolTip)
+{
+    const int index = m_tabs->addTab(tab, text);
+    m_tabs->setTabToolTip(index, toolTip);
+    wireTab(tab);
+    for (TerminalWidget *pane : tab->panes())
+        wirePane(pane);
+    syncTabTitles();
+    return index;
+}
+
+void MainWindow::wireTab(TerminalTab *tab)
+{
+    connect(tab, &TerminalTab::paneAdded, this, &MainWindow::wirePane);
+    connect(tab, &TerminalTab::activePaneChanged, this, [this, tab]() {
+        syncTabFromActivePane(tab);
+        if (tab == currentTab())
+            updateStatus();
+    });
+    // The last pane closed (its shell exited, or Close Pane): the tab goes too.
+    connect(tab, &TerminalTab::empty, this, [this, tab]() { removeTab(tab); });
+}
+
+void MainWindow::syncTabFromActivePane(TerminalTab *tab)
+{
+    const int i = m_tabs->indexOf(tab);
+    TerminalWidget *pane = tab ? tab->activePane() : nullptr;
+    if (i < 0 || !pane)
+        return;
+    const QString title = pane->sessionTitle();
+
+    // A tmux tab is named after its window, as in tmux itself; the active
+    // pane's title goes in the tooltip and window title.
+    if (auto *session = tmuxSessionFor(tab)) {
+        const QString name = session->windowName(tab);
+        m_tabs->setTabText(i, name);
+        m_sidebar->setTitle(i, name);
+        m_tabs->setTabToolTip(i, title.isEmpty()
+                                     ? tr("tmux %1 — %2").arg(session->label(), name)
+                                     : tr("tmux %1 — %2\n%3").arg(session->label(), name, title));
+        if (tab == currentTab())
+            setWindowTitle(tr("%1 — tmux %2 — SuperTerm")
+                               .arg(title.isEmpty() ? name : title, session->label()));
+        return;
+    }
+
+    if (!title.isEmpty()) {
         m_tabs->setTabText(i, title);
         m_tabs->setTabToolTip(i, title);
         m_sidebar->setTitle(i, title);
-        if (term == currentTerminal())
-            setWindowTitle(tr("%1 — SuperTerm").arg(title));
+    }
+    if (tab == currentTab())
+        setWindowTitle(title.isEmpty() ? QStringLiteral("SuperTerm")
+                                       : tr("%1 — SuperTerm").arg(title));
+}
+
+void MainWindow::wirePane(TerminalWidget *term)
+{
+    // A pane's title names its tab while it is the tab's active pane.
+    connect(term, &TerminalWidget::titleChanged, this, [this, term]() {
+        auto *tab = tabOf(term);
+        if (tab && tab->activePane() == term)
+            syncTabFromActivePane(tab);
     });
 
     connect(term, &TerminalWidget::sessionFinished, this, [this, term]() {
-        const int i = m_tabs->indexOf(term);
-        if (i >= 0)
-            closeTab(i);
+        closePane(term);
+    });
+
+    connect(term, &TerminalWidget::splitRequested, this, [this, term](Qt::Orientation o) {
+        splitPane(term, o);
+    });
+    connect(term, &TerminalWidget::closePaneRequested, this, [this, term]() {
+        closePane(term);
     });
 
     // Mark a tab as having new output when it is not the one on screen. This is
     // the visible "something changed here" cue, and it also tells the preview
     // rotation which tab is worth re-capturing.
     connect(term, &TerminalWidget::outputArrived, this, [this, term]() {
-        const int i = m_tabs->indexOf(term);
-        if (i < 0)
-            return;
-        if (i != m_tabs->currentIndex())
+        const int i = tabIndexOf(term);
+        if (i >= 0 && i != m_tabs->currentIndex())
             m_sidebar->setBusy(i, true);
     });
 
-    // The context menu zoom requests apply to the shared Settings, so every
-    // tab updates at once (and the choice is persisted).
     connect(term, &TerminalWidget::screenshotTaken, this, &MainWindow::onScreenshot);
 
+    // The context menu zoom requests apply to the shared Settings, so every
+    // tab updates at once (and the choice is persisted).
     connect(term, &TerminalWidget::zoomInRequested,    this, [this]() { zoomBy(+1); });
     connect(term, &TerminalWidget::zoomOutRequested,   this, [this]() { zoomBy(-1); });
     connect(term, &TerminalWidget::zoomResetRequested, this, [this]() {
@@ -521,25 +673,46 @@ void MainWindow::newTabWithProfile(const QString &profileId)
     // select, which is exactly the affordance "come back when the build is
     // done" wants. The signals only fire while the matching setting is on.
     auto markIfBackground = [this, term]() {
-        const int i = m_tabs->indexOf(term);
+        const int i = tabIndexOf(term);
         if (i >= 0 && i != m_tabs->currentIndex())
             m_sidebar->setBusy(i, true);
     };
     connect(term, &TerminalWidget::activityDetected, this, markIfBackground);
     connect(term, &TerminalWidget::silenceDetected,  this, markIfBackground);
-
-    syncTabTitles();
-    captureNextPreview();
 }
 
-void MainWindow::closeTab(int index)
+void MainWindow::splitPane(TerminalWidget *pane, Qt::Orientation orientation)
 {
-    if (index < 0 || index >= m_tabs->count())
+    if (auto *session = tmuxSessionFor(pane)) {
+        session->splitPane(pane, orientation);
         return;
+    }
+    auto *tab = tabOf(pane);
+    if (!tab)
+        return;
+    // The new pane opens with the same profile, in the directory the shell
+    // beside it is in now -- usually what you want next to you.
+    tab->splitPane(pane, orientation,
+                   makePane(pane->profile(), pane->currentDirectory()));
+}
 
-    QWidget *w = m_tabs->widget(index);
+void MainWindow::closePane(TerminalWidget *pane)
+{
+    if (auto *session = tmuxSessionFor(pane)) {
+        session->killPane(pane);   // the layout change removes it
+        return;
+    }
+    if (auto *tab = tabOf(pane))
+        tab->removePane(pane);   // the last pane takes the tab with it (empty())
+}
+
+void MainWindow::removeTab(TerminalTab *tab)
+{
+    const int index = m_tabs->indexOf(tab);
+    if (index < 0)
+        return;
     m_tabs->removeTab(index);
-    w->deleteLater();
+    tab->deleteLater();
 
     if (m_tabs->count() == 0) {
         newTab();
@@ -549,12 +722,270 @@ void MainWindow::closeTab(int index)
     updateStatus();
 }
 
+void MainWindow::newTab()
+{
+    // On a tmux tab, a new tab is a new tmux window; New Tab with Profile
+    // always opens a local one.
+    if (auto *session = tmuxSessionFor(currentTab())) {
+        session->newWindow();
+        return;
+    }
+    newTabWithProfile(QString());
+}
+
+TmuxSession *MainWindow::tmuxSessionFor(const TerminalTab *tab) const
+{
+    for (TmuxSession *s : m_tmuxSessions) {
+        if (s->ownsTab(tab))
+            return s;
+    }
+    return nullptr;
+}
+
+TmuxSession *MainWindow::tmuxSessionFor(const TerminalWidget *pane) const
+{
+    for (TmuxSession *s : m_tmuxSessions) {
+        if (s->ownsPane(pane))
+            return s;
+    }
+    return nullptr;
+}
+
+void MainWindow::rebuildTmuxMenu()
+{
+    m_tmuxMenu->clear();
+
+    // Sessions on this machine. A quick synchronous query: tmux answers in
+    // milliseconds, and the menu has to know before it opens.
+    QProcess list;
+    const QStringList program = tmuxProgram();
+    list.start(program.first(), program.mid(1) + QStringList{
+        QStringLiteral("list-sessions"), QStringLiteral("-F"),
+        QStringLiteral("#{session_name}\t#{session_windows}\t#{session_attached}")});
+    const bool started = list.waitForStarted(2000);
+    if (started)
+        list.waitForFinished(2000);
+
+    if (!started) {
+        m_tmuxMenu->addAction(tr("tmux is not installed"))->setEnabled(false);
+        return;
+    }
+
+    const QList<QByteArray> lines = list.readAllStandardOutput().split('\n');
+    int listed = 0;
+    for (const QByteArray &line : lines) {
+        const QList<QByteArray> f = line.split('\t');
+        if (f.size() < 3)
+            continue;
+        const QString name = QString::fromUtf8(f.at(0));
+        const int windows = f.at(1).toInt();
+        bool ours = false;
+        for (TmuxSession *s : std::as_const(m_tmuxSessions))
+            ours = ours || s->label() == name;
+        QString text = tr("%1  (%n window(s))", nullptr, windows).arg(name);
+        if (ours)
+            text += tr(" — open here");
+        else if (f.at(2).toInt() > 0)
+            text += tr(" — attached elsewhere");
+        QAction *act = m_tmuxMenu->addAction(text);
+        if (ours) {
+            // Already shown: go to it rather than attaching twice.
+            connect(act, &QAction::triggered, this, [this, name]() {
+                for (TmuxSession *s : std::as_const(m_tmuxSessions)) {
+                    if (s->label() == name && !s->tabs().isEmpty())
+                        m_tabs->setCurrentWidget(s->tabs().first());
+                }
+            });
+        } else {
+            connect(act, &QAction::triggered, this, [this, name]() {
+                attachTmux(name, tmuxProgram() + QStringList{
+                    QStringLiteral("-u"), QStringLiteral("-C"), QStringLiteral("attach-session"),
+                    QStringLiteral("-t"), name});
+            });
+        }
+        ++listed;
+    }
+    if (listed == 0)
+        m_tmuxMenu->addAction(tr("No sessions running"))->setEnabled(false);
+
+    m_tmuxMenu->addSeparator();
+    m_tmuxMenu->addAction(themeIcon({"list-add"}), tr("&New Session…"),
+                          this, &MainWindow::newTmuxSession);
+    m_tmuxMenu->addAction(themeIcon({"network-connect", "network-server"}),
+                          tr("&Connect to Host…"), this, &MainWindow::connectTmuxHost);
+
+    m_tmuxMenu->addSeparator();
+    TmuxSession *current = tmuxSessionFor(currentTab());
+    QAction *detach = m_tmuxMenu->addAction(
+        current ? tr("&Detach from “%1”").arg(current->label()) : tr("&Detach"));
+    detach->setEnabled(current != nullptr);
+    detach->setToolTip(tr("Close its tabs here; tmux keeps the session running"));
+    connect(detach, &QAction::triggered, this, [this]() {
+        if (auto *s = tmuxSessionFor(currentTab()))
+            s->detach();
+    });
+}
+
+void MainWindow::newTmuxSession()
+{
+    // Suggest a name tmux doesn't have yet.
+    QStringList taken;
+    {
+        QProcess list;
+        const QStringList program = tmuxProgram();
+        list.start(program.first(), program.mid(1) + QStringList{
+            QStringLiteral("list-sessions"), QStringLiteral("-F"), QStringLiteral("#{session_name}")});
+        if (list.waitForFinished(2000))
+            taken = QString::fromUtf8(list.readAllStandardOutput()).split(QLatin1Char('\n'));
+    }
+    QString suggestion = QStringLiteral("main");
+    for (int n = 2; taken.contains(suggestion); ++n)
+        suggestion = QStringLiteral("main%1").arg(n);
+
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, tr("New tmux Session"), tr("Session name:"),
+                                               QLineEdit::Normal, suggestion, &ok).trimmed();
+    if (!ok || name.isEmpty())
+        return;
+    // -A: if it exists after all, attach to it.
+    attachTmux(name, tmuxProgram() + QStringList{
+        QStringLiteral("-u"), QStringLiteral("-C"), QStringLiteral("new-session"),
+        QStringLiteral("-A"), QStringLiteral("-s"), name});
+}
+
+void MainWindow::connectTmuxHost()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Connect to tmux on a Host"));
+    auto *form = new QFormLayout(&dialog);
+    auto *host = new QLineEdit(&dialog);
+    host->setPlaceholderText(tr("user@host"));
+    auto *session = new QLineEdit(QStringLiteral("main"), &dialog);
+    form->addRow(tr("Host"), host);
+    form->addRow(tr("Session"), session);
+    auto *hint = new QLabel(tr("Connects with ssh, which must log in without a "
+                               "password prompt (a key or an agent). The session "
+                               "is created if it doesn't exist."), &dialog);
+    hint->setWordWrap(true);
+    form->addRow(hint);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText(tr("Connect"));
+    form->addRow(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    const QString h = host->text().trimmed();
+    const QString name = session->text().trimmed().isEmpty() ? QStringLiteral("main")
+                                                              : session->text().trimmed();
+    if (h.isEmpty())
+        return;
+    // -T: no remote terminal; control mode speaks over plain pipes. BatchMode
+    // makes ssh fail rather than wait for a password nobody can type.
+    attachTmux(QStringLiteral("%1: %2").arg(h, name), {
+        QStringLiteral("ssh"), QStringLiteral("-T"), QStringLiteral("-o"),
+        QStringLiteral("BatchMode=yes"), h,
+        QStringLiteral("tmux -u -C new-session -A -s ") + shellQuote(name)});
+}
+
+void MainWindow::attachTmux(const QString &label, const QStringList &command)
+{
+    for (TmuxSession *s : std::as_const(m_tmuxSessions)) {
+        if (s->label() == label) {
+            if (!s->tabs().isEmpty())
+                m_tabs->setCurrentWidget(s->tabs().first());
+            return;
+        }
+    }
+
+    auto *session = new TmuxSession(label, command, m_settings,
+                                    m_profiles.defaultProfile(), this);
+    m_tmuxSessions << session;
+    auto shownAny = std::make_shared<bool>(false);
+
+    connect(session, &TmuxSession::tabAdded, this,
+            [this, session, shownAny](TerminalTab *tab, const QString &name) {
+        const int index = addTab(tab, name, tr("tmux %1 — %2").arg(session->label(), name));
+        if (!*shownAny) {
+            *shownAny = true;
+            m_tabs->setCurrentIndex(index);
+        }
+    });
+    connect(session, &TmuxSession::tabRenamed, this, [this](TerminalTab *tab, const QString &) {
+        syncTabFromActivePane(tab);
+    });
+    connect(session, &TmuxSession::tabActivated, this, [this](TerminalTab *tab) {
+        if (!m_capturingPreview && m_tabs->indexOf(tab) >= 0)
+            m_tabs->setCurrentWidget(tab);
+    });
+    connect(session, &TmuxSession::tabRemoved, this, &MainWindow::removeTab);
+    connect(session, &TmuxSession::ended, this,
+            [this, session, shownAny](const QString &reason) {
+        m_tmuxSessions.removeOne(session);
+        session->deleteLater();
+        if (!*shownAny) {
+            QMessageBox::warning(this, tr("tmux"),
+                                 tr("Could not attach to tmux session “%1”.").arg(session->label())
+                                     + (reason.isEmpty() ? QString() : QStringLiteral("\n\n") + reason));
+            return;
+        }
+        // tmux says "detached" for most endings, so whether we asked is what
+        // tells a detach from the session (or the connection) going away.
+        QString message;
+        if (session->detachRequested())
+            message = tr("Detached from tmux session “%1”").arg(session->label());
+        else if (reason.isEmpty() || reason == QLatin1String("detached"))
+            message = tr("tmux session “%1” ended").arg(session->label());
+        else
+            message = tr("tmux session “%1” ended: %2").arg(session->label(), reason);
+        statusBar()->showMessage(message, 6000);
+    });
+
+    // The size tabs will have, so the session starts at the right size rather
+    // than redrawing once its first tab is shown.
+    if (QWidget *page = m_tabs->currentWidget()) {
+        const int m = m_settings.appearance().terminalMargin;
+        session->setClientArea(page->size() - QSize(2 * m, 2 * m));
+    }
+    session->start();
+}
+
+void MainWindow::newTabWithProfile(const QString &profileId)
+{
+    // An empty or dangling id means "the default profile". profileById()
+    // already falls back, so this cannot fail to find something to open with.
+    const TerminalProfile profile =
+        profileId.isEmpty() ? m_profiles.defaultProfile()
+                            : m_profiles.profileById(profileId);
+
+    auto *term = makePane(profile);
+    auto *tab = new TerminalTab(term);
+
+    // The tab tooltip carries the profile, which is the only cue in the
+    // standard layout that a tab is not just "another terminal".
+    const int index = addTab(tab, tr("Terminal"),
+                             tr("%1 — %2").arg(profile.name, tr("Terminal")));
+    m_tabs->setCurrentIndex(index);
+    term->focusTerminal();
+    captureNextPreview();
+}
+
+void MainWindow::closeTab(int index)
+{
+    auto *tab = tabAt(index);
+    if (auto *session = tmuxSessionFor(tab)) {
+        session->killWindow(tab);  // the tab goes when tmux says the window has
+        return;
+    }
+    if (tab)
+        removeTab(tab);
+}
+
 void MainWindow::applyAppearanceToAll()
 {
-    for (int i = 0; i < m_tabs->count(); ++i) {
-        if (auto *t = terminalAt(i))
-            t->applyAppearance();
-    }
+    for (TerminalWidget *t : allPanes())
+        t->applyAppearance();
     updateTabLayout();
 }
 
@@ -609,11 +1040,11 @@ void MainWindow::captureNextPreview()
 
     // Second half of a capture: the target has now had a chance to paint.
     if (m_capturingPreview) {
-        if (auto *term = terminalAt(m_previewTarget)) {
-            const QPixmap pm = term->previewPixmap(QSize(150, 90));
+        if (auto *tab = tabAt(m_previewTarget)) {
+            const QPixmap pm = tab->previewPixmap(QSize(150, 90));
             if (!pm.isNull())
                 m_sidebar->setPreview(m_previewTarget, pm);
-            term->clearNewOutput();
+            tab->clearNewOutput();
         }
         if (m_restoreTab >= 0 && m_restoreTab < m_tabs->count())
             m_tabs->setCurrentIndex(m_restoreTab);
@@ -627,7 +1058,7 @@ void MainWindow::captureNextPreview()
     int target = -1;
     for (int offset = 0; offset < m_tabs->count(); ++offset) {
         const int i = (m_nextPreviewTab + offset) % m_tabs->count();
-        auto *t = terminalAt(i);
+        auto *t = tabAt(i);
         if (t && t->hasNewOutput()) {
             target = i;
             break;
@@ -637,11 +1068,11 @@ void MainWindow::captureNextPreview()
     if (target < 0) {
         // Nothing dirty: nothing worth switching to. Re-grab the visible tab
         // only, since its image can be stale after a resize or a theme change.
-        if (auto *term = currentTerminal()) {
-            const QPixmap pm = term->previewPixmap(QSize(150, 90));
+        if (auto *tab = currentTab()) {
+            const QPixmap pm = tab->previewPixmap(QSize(150, 90));
             if (!pm.isNull())
                 m_sidebar->setPreview(m_tabs->currentIndex(), pm);
-            term->clearNewOutput();
+            tab->clearNewOutput();
         }
         return;
     }
@@ -651,11 +1082,11 @@ void MainWindow::captureNextPreview()
 
     if (m_previewTarget == m_tabs->currentIndex()) {
         // Already visible; grab straight away without switching.
-        if (auto *term = terminalAt(m_previewTarget)) {
-            const QPixmap pm = term->previewPixmap(QSize(150, 90));
+        if (auto *tab = tabAt(m_previewTarget)) {
+            const QPixmap pm = tab->previewPixmap(QSize(150, 90));
             if (!pm.isNull())
                 m_sidebar->setPreview(m_previewTarget, pm);
-            term->clearNewOutput();
+            tab->clearNewOutput();
         }
         m_previewTarget = -1;
         return;
@@ -675,7 +1106,11 @@ void MainWindow::updateStatus()
         return;
     }
     const QString title = term->sessionTitle();
-    m_statusDir->setText(title);
+    if (auto *session = tmuxSessionFor(term))
+        m_statusDir->setText(tr("tmux %1  ·  %2").arg(
+            session->label(), title.isEmpty() ? session->windowName(tabOf(term)) : title));
+    else
+        m_statusDir->setText(title);
 
     auto *t = term->terminal();
     // Report the tab's *effective* scheme, which a profile may have overridden.
@@ -699,13 +1134,12 @@ bool MainWindow::confirmQuitIfBusy()
 
     // Collect the terminals that would lose work. Tab order, so the list
     // matches what the user sees in the tab strip / sidebar.
-    struct Busy { int index; QString program; };
+    // Every pane counts, not just each tab's active one.
+    struct Busy { TerminalWidget *pane; QString program; };
     QVector<Busy> busy;
-    for (int i = 0; i < m_tabs->count(); ++i) {
-        if (auto *t = terminalAt(i)) {
-            if (t->hasRunningProcess())
-                busy.append({ i, t->foregroundProgramName() });
-        }
+    for (TerminalWidget *t : allPanes()) {
+        if (t->hasRunningProcess())
+            busy.append({ t, t->foregroundProgramName() });
     }
     if (busy.isEmpty())
         return true;
@@ -720,8 +1154,7 @@ bool MainWindow::confirmQuitIfBusy()
     for (const Busy &b : busy) {
         QString label = b.program.isEmpty() ? tr("a program")
                                             : b.program;
-        auto *t = terminalAt(b.index);
-        const QString title = t ? t->sessionTitle().trimmed() : QString();
+        const QString title = b.pane->sessionTitle().trimmed();
         if (!title.isEmpty())
             label += QStringLiteral(" (%1)").arg(title);
         names << label;
@@ -780,20 +1213,15 @@ void MainWindow::refreshProfiles()
      * whatever is in the tab. A tab whose profile was deleted keeps the
      * settings it resolved with, which is the least surprising outcome.
      */
-    for (int i = 0; i < m_tabs->count(); ++i) {
-        auto *t = terminalAt(i);
-        if (!t)
-            continue;
+    for (TerminalWidget *t : allPanes()) {
+        if (t->isExternal())
+            continue;   // tmux panes follow their session, not a profile
         const TerminalProfile current = m_profiles.profileById(t->profileId());
         // profileById() falls back to the default for a dangling id; do not
         // silently reassign a deleted tab to the default profile.
         if (current.id != t->profileId())
             continue;
         t->setProfile(current);
-        // Keep the tooltip's profile name current after a rename.
-        if (!t->sessionTitle().isEmpty())
-            m_tabs->setTabToolTip(i, tr("%1 — %2").arg(current.name,
-                                                       t->sessionTitle()));
     }
 }
 

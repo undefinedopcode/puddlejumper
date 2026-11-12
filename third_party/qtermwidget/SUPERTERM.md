@@ -17,8 +17,9 @@ and colour schemes in as Qt resources under `:/qtermwidget/`. Translations
 
 ## Patches
 
-All are in `lib/TerminalDisplay.cpp` / `.h`, each marked with a `superterm:`
-comment.
+Patches 1–6 are in `lib/TerminalDisplay.cpp` / `.h`; patch 7 also touches
+`qtermwidget`, `Session`, `Emulation` and `Vt102Emulation`. Each is marked
+with a `superterm:` comment.
 
 1. **Block elements and Powerline separators are drawn as geometry.**
    U+2580–U+259F (halves, eighths, shades, quadrants) are filled to exact cell
@@ -54,6 +55,17 @@ comment.
 6. **`cellArea()` accessor.** Returns where the character grid sits in the
    widget, which superterm needs to snap screenshot selections to cells.
    Upstream keeps the margins and scrollbar offset private.
+
+7. **Driving a terminal from outside**, for tmux control mode.
+   `QTermWidget::feedData()` hands output straight to the emulator (the
+   teletype mode's pty would otherwise translate `\n` to `\r\n`);
+   `setFixedTerminalSize()` pins the screen to the pane size tmux decides,
+   rather than whatever fits the widget; and `setAnswerTerminalQueries(false)`
+   stops the emulator replying to device-attribute and cursor-position queries
+   that tmux has already answered, which would otherwise arrive as typed input.
+   With the size fixed, a view that resizes (a hidden tab being shown) is told
+   to redraw by `Session::updateTerminalSize()`; normally the screen resizing
+   is what prompts that, and without it the view kept a stale image.
 
 ## Updating
 

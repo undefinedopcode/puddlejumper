@@ -1,0 +1,141 @@
+/*
+ * superterm — Qt Widgets port.
+ *
+ * Distributed under the terms of the GNU General Public License v2 or later.
+ */
+
+#pragma once
+
+#include "terminalwidget.h"
+
+#include <QPointer>
+#include <QVector>
+#include <QWidget>
+
+#include <functional>
+
+class QSplitter;
+class QVBoxLayout;
+
+/*
+ * A layout of panes in cells, as tmux describes a window: a leaf is a pane,
+ * a branch arranges its children side by side (Qt::Horizontal) or stacked
+ * (Qt::Vertical). Sizes are in character cells; siblings are separated by one
+ * cell, which is where the splitter handle goes.
+ */
+struct PaneLayout
+{
+    int paneId = -1;                                // leaves only
+    int columns = 0;
+    int lines = 0;
+    Qt::Orientation orientation = Qt::Horizontal;   // branches only
+    QVector<PaneLayout> children;
+
+    bool isLeaf() const { return children.isEmpty(); }
+};
+
+/*
+ * One tab: a tree of terminal panes in nested splitters.
+ *
+ * A tab starts with one pane and splits from there. The active pane is the
+ * one with keyboard focus (or the last one that had it); it is what the
+ * window's actions act on, and the only one framed in the highlight colour.
+ *
+ * tmux tabs are laid out by tmux instead, through applyLayout(), which sizes
+ * every pane and handle to whole character cells so each pane shows exactly
+ * the grid tmux gave it.
+ */
+class TerminalTab : public QWidget
+{
+    Q_OBJECT
+
+public:
+    explicit TerminalTab(TerminalWidget *firstPane, QWidget *parent = nullptr);
+
+    TerminalWidget *activePane() const { return m_active; }
+    /* In layout order: left to right, top to bottom. */
+    QList<TerminalWidget *> panes() const;
+    bool contains(const TerminalWidget *pane) const;
+
+    /* Put pane beside `at` (to the right, or below), and make it active. */
+    void splitPane(TerminalWidget *at, Qt::Orientation orientation, TerminalWidget *pane);
+    /* Take a pane out and delete it. empty() fires when it was the last. */
+    void removePane(TerminalWidget *pane);
+
+    void setActivePane(TerminalWidget *pane, bool giveFocus = true);
+    /* Move the focus to the next (+1) or previous (-1) pane. */
+    void cyclePane(int step);
+
+    /*
+     * Lay the tab out as `layout` says. Leaves are resolved with paneFor(),
+     * which returns an existing pane or makes a new one; panes the layout no
+     * longer mentions are deleted. Each pane is sized to cell * its cells plus
+     * its chrome, and each handle to one cell minus the chrome, so the pixels
+     * add up exactly. Panes also get their screen size pinned to the layout's.
+     */
+    void applyLayout(const PaneLayout &layout,
+                     const std::function<TerminalWidget *(int paneId)> &paneFor,
+                     const QSize &cell, const QSize &chrome);
+
+    /*
+     * Space round the whole layout, filled with the terminal background. tmux
+     * tabs use it in place of each pane's own margin (see TerminalWidget's
+     * applyAppearance()).
+     */
+    void setPadding(int pixels);
+    /* The size a layout has to fit in: the tab less its padding. */
+    QSize layoutArea() const;
+
+    /* Frame panes even when there is only one, so a pane's chrome is the same
+     * whether or not its window is split. tmux tabs need that for exact sizing. */
+    void setAlwaysFramed(bool on);
+
+    bool hasNewOutput() const;
+    void clearNewOutput();
+    QPixmap previewPixmap(const QSize &size) const;
+
+    /* The terminal background, for padding and splitter handles. */
+    QColor backgroundColour() const;
+
+signals:
+    void activePaneChanged(TerminalWidget *pane);
+    void paneAdded(TerminalWidget *pane);
+    void empty();
+    void layoutAreaResized();
+    /*
+     * The user dragged a splitter handle. `before` is a pane in the part
+     * before the handle, and `pixels` that part's new extent along the
+     * splitter. tmux tabs turn this into resize-pane; local tabs ignore it.
+     */
+    void splitterDragged(TerminalWidget *before, Qt::Orientation orientation, int pixels);
+
+protected:
+    void resizeEvent(QResizeEvent *event) override;
+    void paintEvent(QPaintEvent *event) override;
+
+private:
+    QSplitter *makeSplitter(Qt::Orientation orientation);
+    /* Put `to` where `from` is in the tree (a splitter slot or the root). */
+    void replaceInTree(QWidget *from, QWidget *to);
+    /* Drop a splitter left with one child, putting the child in its place. */
+    void collapse(QSplitter *splitter);
+    void collectPanes(QWidget *node, QList<TerminalWidget *> &out) const;
+    TerminalWidget *firstPaneIn(QWidget *node) const;
+    TerminalWidget *paneContaining(QWidget *widget) const;
+    void updateFrames();
+    void watchPane(TerminalWidget *pane);
+
+    QWidget *buildLayout(const PaneLayout &node,
+                         const std::function<TerminalWidget *(int paneId)> &paneFor,
+                         QList<TerminalWidget *> &used);
+    void sizeLayout(QWidget *node, const PaneLayout &layout,
+                    const QSize &cell, const QSize &chrome);
+
+    QVBoxLayout *m_layout = nullptr;
+    QWidget *m_root = nullptr;      // a TerminalWidget or a QSplitter
+    QPointer<TerminalWidget> m_active;
+    bool m_alwaysFramed = false;
+    int m_padding = 0;
+    QString m_layoutShape;          // applyLayout(): structure of the last layout
+    bool m_applyingLayout = false;
+};

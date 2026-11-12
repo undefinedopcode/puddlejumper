@@ -270,6 +270,19 @@ public slots:
    */
   void receiveData(const char* buffer,int len);
 
+public:
+  /**
+   * superterm: whether the emulation answers terminal queries (device
+   * attributes, cursor position and status reports). Off when the output comes
+   * from a multiplexer (tmux control mode) that has already answered them for
+   * the program; answering again would type the replies in as input.
+   * Keyboard, mouse and focus input are unaffected.
+   */
+  void setAnswerQueries(bool answer) { _answerQueries = answer; }
+  bool answerQueries() const { return _answerQueries; }
+
+public slots:
+
 signals:
 
   /**
@@ -492,6 +505,7 @@ private slots:
 private:
   bool _usesMouse;
   bool _bracketedPasteMode;
+  bool _answerQueries = true;   // superterm
   QTimer _bulkTimer1{this};
   QTimer _bulkTimer2{this};
   QStringDecoder _toUtf16;

@@ -33,6 +33,8 @@ qt_add_executable(superterm
     src-widgets/mainwindow.h
     src-widgets/settingsdialog.cpp
     src-widgets/settingsdialog.h
+    src-widgets/terminaltab.cpp
+    src-widgets/terminaltab.h
     src-widgets/terminalwidget.cpp
     src-widgets/terminalwidget.h
     src-widgets/thumbnailsidebar.cpp
@@ -48,6 +50,10 @@ qt_add_executable(superterm
     src-widgets/screenshotoverlay.cpp
     src-widgets/screenshotoverlay.h
     src-widgets/themeicon.h
+    src-widgets/tmuxcontrol.cpp
+    src-widgets/tmuxcontrol.h
+    src-widgets/tmuxsession.cpp
+    src-widgets/tmuxsession.h
 )
 
 target_link_libraries(superterm PRIVATE

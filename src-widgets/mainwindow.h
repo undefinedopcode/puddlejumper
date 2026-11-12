@@ -18,7 +18,9 @@ class QSplitter;
 class QLabel;
 class QMenu;
 class QTimer;
+class TerminalTab;
 class TerminalWidget;
+class TmuxSession;
 class SettingsDialog;
 class ThumbnailSidebar;
 
@@ -53,8 +55,44 @@ private slots:
     void captureNextPreview();
 
 private:
+    /* The active pane of the current tab: what window actions act on. */
     TerminalWidget *currentTerminal() const;
-    TerminalWidget *terminalAt(int index) const;
+    TerminalTab *currentTab() const;
+    TerminalTab *tabAt(int index) const;
+    /* The tab holding `pane`, and its index (-1 if none). */
+    TerminalTab *tabOf(const QWidget *pane) const;
+    int tabIndexOf(const QWidget *pane) const;
+    /* Every pane in every tab. */
+    QList<TerminalWidget *> allPanes() const;
+
+    /* A new local pane; `directory` overrides the profile's start directory. */
+    TerminalWidget *makePane(const TerminalProfile &profile,
+                             const QString &directory = QString());
+    /* Add a tab to the window and hook up its signals and its first panes. */
+    int addTab(TerminalTab *tab, const QString &text, const QString &toolTip);
+    void wireTab(TerminalTab *tab);
+    void wirePane(TerminalWidget *pane);
+    /* Tab text, tooltip and window title from the tab's active pane. */
+    void syncTabFromActivePane(TerminalTab *tab);
+
+    /*
+     * tmux. A session attached in control mode shows its windows as tabs and
+     * its panes as panes; actions on those become tmux commands. These find
+     * the session behind a tab or pane (null for local ones).
+     */
+    TmuxSession *tmuxSessionFor(const TerminalTab *tab) const;
+    TmuxSession *tmuxSessionFor(const TerminalWidget *pane) const;
+    /* Fill the tmux menu: this machine's sessions, then the other actions. */
+    void rebuildTmuxMenu();
+    /* Attach to (or create) a session through `command`, a control-mode client. */
+    void attachTmux(const QString &label, const QStringList &command);
+    void newTmuxSession();
+    void connectTmuxHost();
+
+    void splitPane(TerminalWidget *pane, Qt::Orientation orientation);
+    void closePane(TerminalWidget *pane);
+    /* Take a tab out of the window (its panes are gone or going). */
+    void removeTab(TerminalTab *tab);
     void syncTabTitles();
     void buildMenus();
     void buildStatusBar();
@@ -100,6 +138,8 @@ private:
     QPixmap m_lastScreenshot;
     QTimer *m_previewTimer = nullptr;
     QMenu *m_newTabWithProfileMenu = nullptr;
+    QMenu *m_tmuxMenu = nullptr;
+    QList<TmuxSession *> m_tmuxSessions;
 
     /*
      * Preview rotation.

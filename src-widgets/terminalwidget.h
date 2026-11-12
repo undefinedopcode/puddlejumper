@@ -37,8 +37,24 @@ class TerminalWidget : public QWidget
     Q_OBJECT
 
 public:
+    /*
+     * Where the terminal's input and output go. A Local terminal runs a shell
+     * in a pty. An External one has no process: its output arrives through
+     * feed() and its keystrokes leave through externalInput(). tmux control
+     * mode panes are External.
+     */
+    enum class Backend { Local, External };
+
+    /*
+     * The frame round a pane in a split tab: none when a tab has one pane,
+     * otherwise a thin border in the highlight colour for the active pane and
+     * in the background colour for the rest.
+     */
+    enum class PaneFrame { None, Active, Inactive };
+
     TerminalWidget(int id, const Settings &settings,
-                   const TerminalProfile &profile, QWidget *parent = nullptr);
+                   const TerminalProfile &profile, QWidget *parent = nullptr,
+                   Backend backend = Backend::Local);
 
     int id() const { return m_id; }
 
@@ -80,6 +96,29 @@ public:
 
     void sendText(const QString &text);
     void focusTerminal();
+
+    bool isExternal() const { return m_backend == Backend::External; }
+
+    /* External terminals: output to display, and the screen size to keep. */
+    void feed(const QByteArray &data);
+    void setScreenSize(int columns, int lines);
+
+    /* One character cell, in pixels. */
+    QSize cellSize() const;
+    /*
+     * Pixels this widget adds round its character grid: frame, margins and
+     * scrollbar. Width W pixels hold (W - chromeSize().width()) / cell width
+     * columns.
+     */
+    QSize chromeSize() const;
+
+    void setPaneFrame(PaneFrame frame);
+    PaneFrame paneFrame() const { return m_frame; }
+    /* Width of the frame on each side of a framed pane. */
+    static int paneBorder();
+
+    /* The shell's current directory, for opening a split there. Local only. */
+    QString currentDirectory() const;
 
     /*
      * Foreground process state, for the quit warning.
@@ -144,6 +183,16 @@ signals:
 
     void screenshotTaken(const QPixmap &image);
 
+    /* External terminals: bytes typed (or mouse reports) to deliver. */
+    void externalInput(const QByteArray &data);
+
+    /* From the context menu; the owner decides what a split means. */
+    void splitRequested(Qt::Orientation orientation);
+    void closePaneRequested();
+
+protected:
+    void paintEvent(QPaintEvent *event) override;
+
 private:
     /* QTermWidget's display widget, which it doesn't expose. */
     Konsole::TerminalDisplay *display() const;
@@ -152,6 +201,8 @@ private:
     void showContextMenu(const QPoint &globalPos);
 
     int m_id = 0;
+    Backend m_backend = Backend::Local;
+    PaneFrame m_frame = PaneFrame::None;
     const Settings &m_settings;
     TerminalProfile m_profile;
     QTermWidget *m_terminal = nullptr;

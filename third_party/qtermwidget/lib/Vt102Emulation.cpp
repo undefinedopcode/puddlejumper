@@ -938,6 +938,7 @@ void Vt102Emulation::sendString(const char* s , int length)
 
 void Vt102Emulation::reportCursorPosition()
 {
+  if (!answerQueries()) return; // superterm: see Emulation::setAnswerQueries()
   const size_t sz = 20;
   char tmp[sz];
   const size_t r = snprintf(tmp, sz, "\033[%d;%dR",_currentScreen->getCursorY()+1,_currentScreen->getCursorX()+1);
@@ -949,6 +950,7 @@ void Vt102Emulation::reportCursorPosition()
 
 void Vt102Emulation::reportTerminalType()
 {
+  if (!answerQueries()) return; // superterm: see Emulation::setAnswerQueries()
   // Primary device attribute response (Request was: ^[[0c or ^[[c (from TT321 Users Guide))
   // VT220:  ^[[?63;1;2;3;6;7;8c   (list deps on emul. capabilities)
   // VT100:  ^[[?1;2c
@@ -962,6 +964,7 @@ void Vt102Emulation::reportTerminalType()
 
 void Vt102Emulation::reportSecondaryAttributes()
 {
+  if (!answerQueries()) return; // superterm: see Emulation::setAnswerQueries()
   // Secondary device attribute response (Request was: ^[[>0c or ^[[>c)
   if (getMode(MODE_Ansi))
     sendString("\033[>0;115;0c"); // Why 115?  ;)
@@ -973,6 +976,7 @@ void Vt102Emulation::reportSecondaryAttributes()
 void Vt102Emulation::reportTerminalParms(int p)
 // DECREPTPARM
 {
+  if (!answerQueries()) return; // superterm: see Emulation::setAnswerQueries()
   const size_t sz = 100;
   char tmp[sz];
   const size_t r = snprintf(tmp, sz, "\033[%d;1;1;112;112;1;0x",p); // not really true.
@@ -984,6 +988,7 @@ void Vt102Emulation::reportTerminalParms(int p)
 
 void Vt102Emulation::reportStatus()
 {
+  if (!answerQueries()) return; // superterm: see Emulation::setAnswerQueries()
   sendString("\033[0n"); //VT100. Device status report. 0 = Ready.
 }
 
@@ -991,6 +996,7 @@ void Vt102Emulation::reportStatus()
 // Responds to an ANSI mode query (CSI Pd $ p) with: CSI Pd ; Pm $ y
 void Vt102Emulation::reportAnsiMode(int mode, int status)
 {
+  if (!answerQueries()) return; // superterm: see Emulation::setAnswerQueries()
     const size_t sz = 32;
     char tmp[sz];
     const size_t r = snprintf(tmp, sz, "\033[%d;%d$y", mode, status);
@@ -1003,6 +1009,7 @@ void Vt102Emulation::reportAnsiMode(int mode, int status)
 // Responds to a DEC private mode query (CSI ? Pd $ p) with: CSI ? Pd ; Pm $ y
 void Vt102Emulation::reportDecMode(int mode, int status)
 {
+  if (!answerQueries()) return; // superterm: see Emulation::setAnswerQueries()
     const size_t sz = 32;
     char tmp[sz];
     const size_t r = snprintf(tmp, sz, "\033[?%d;%d$y", mode, status);
@@ -1014,6 +1021,7 @@ void Vt102Emulation::reportDecMode(int mode, int status)
 
 void Vt102Emulation::reportAnswerBack()
 {
+  if (!answerQueries()) return; // superterm: see Emulation::setAnswerQueries()
   // FIXME - Test this with VTTEST
   // This is really obsolete VT100 stuff.
   const char* ANSWER_BACK = "";

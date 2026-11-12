@@ -277,6 +277,21 @@ void QTermWidget::startShellProgram()
     m_impl->m_session->run();
 }
 
+void QTermWidget::feedData(const QByteArray &data)
+{
+    m_impl->m_session->receiveExternalData(data.constData(), int(data.size()));
+}
+
+void QTermWidget::setFixedTerminalSize(int columns, int lines)
+{
+    m_impl->m_session->setFixedTerminalSize(columns, lines);
+}
+
+void QTermWidget::setAnswerTerminalQueries(bool answer)
+{
+    m_impl->m_session->emulation()->setAnswerQueries(answer);
+}
+
 void QTermWidget::startTerminalTeletype()
 {
     if ( m_impl->m_session->isRunning() ) {

@@ -39,6 +39,7 @@
 
 #include "Pty.h"
 //#include "kptyprocess.h"
+#include "ScreenWindow.h"
 #include "TerminalDisplay.h"
 #include "ShellCommand.h"
 #include "Vt102Emulation.h"
@@ -512,8 +513,27 @@ void Session::onEmulationSizeChange(QSize size)
     setSize(size);
 }
 
+void Session::setFixedTerminalSize(int columns, int lines)
+{
+    _fixedColumns = qMax(0, columns);
+    _fixedLines = qMax(0, lines);
+    updateTerminalSize();
+}
+
 void Session::updateTerminalSize()
 {
+    if (_fixedColumns > 0 && _fixedLines > 0) {
+        _emulation->setImageSize(_fixedLines, _fixedColumns);
+        // A view that changed size needs redrawing, and with the screen size
+        // fixed nothing else will say so: normally the screen resizing is what
+        // makes the views fetch a fresh image.
+        for (TerminalDisplay *view : std::as_const(_views)) {
+            if (view->screenWindow())
+                view->screenWindow()->notifyOutputChanged();
+        }
+        return;
+    }
+
     QListIterator<TerminalDisplay *> viewIter(_views);
 
     int minLines = -1;

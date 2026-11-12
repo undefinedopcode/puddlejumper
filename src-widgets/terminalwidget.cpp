@@ -19,6 +19,9 @@
 #include <QFont>
 #include <QHash>
 #include <QMenu>
+#include <QPainter>
+#include <QScrollBar>
+#include <QStyle>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -29,10 +32,17 @@
 #include <TerminalDisplay.h>
 #include <qtermwidget.h>
 
+namespace {
+// Width of the frame round a pane in a split tab.
+constexpr int kPaneBorder = 2;
+} // namespace
+
 TerminalWidget::TerminalWidget(int id, const Settings &settings,
-                               const TerminalProfile &profile, QWidget *parent)
+                               const TerminalProfile &profile, QWidget *parent,
+                               Backend backend)
     : QWidget(parent)
     , m_id(id)
+    , m_backend(backend)
     , m_settings(settings)
     , m_profile(profile)
 {
@@ -95,6 +105,18 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings,
     applyMonitoring();
     connect(&m_settings, &Settings::monitoringChanged,
             this, &TerminalWidget::applyMonitoring);
+
+    if (m_backend == Backend::External) {
+        // No process: whoever owns this terminal feeds its output and takes
+        // its keystrokes. The source (tmux) has already answered any terminal
+        // queries in the output, so the emulator must not answer again.
+        m_terminal->setAnswerTerminalQueries(false);
+        m_terminal->startTerminalTeletype();
+        connect(m_terminal, &QTermWidget::sendData, this, [this](const char *data, int len) {
+            emit externalInput(QByteArray(data, len));
+        });
+        return;
+    }
 
     // Optional shell override, useful for testing:
     //   SUPERTERM_SHELL=/bin/fish superterm
@@ -223,8 +245,10 @@ void TerminalWidget::applyAppearance()
     };
     m_terminal->setKeyboardCursorShape(kShapes[qBound(0, a.cursorShape, 2)]);
 
-    // Breathing room around the terminal grid.
-    m_terminal->setMargin(a.terminalMargin);
+    // Breathing room around the terminal grid. Not for external panes: their
+    // size must map exactly onto the cells their source (tmux) lays out, so
+    // the tab pads round the whole layout instead.
+    m_terminal->setMargin(isExternal() ? 0 : a.terminalMargin);
 
     // Bidirectional text rendering (Konsole's "bidi").
     m_terminal->setBidiEnabled(a.bidi);
@@ -254,8 +278,11 @@ void TerminalWidget::applyScrolling()
         { QStringLiteral("left"),  QTermWidgetInterface::ScrollBarLeft  },
         { QStringLiteral("right"), QTermWidgetInterface::ScrollBarRight },
     };
+    // External panes have none, for the same reason as their margin (see
+    // applyAppearance()); scrolling back still works with the wheel and keys.
     m_terminal->setScrollBarPosition(
-        kPos.value(s.scrollbarPosition, QTermWidgetInterface::ScrollBarRight));
+        isExternal() ? QTermWidgetInterface::NoScrollBar
+                     : kPos.value(s.scrollbarPosition, QTermWidgetInterface::ScrollBarRight));
 
     // When XON/XOFF freezes the display, say so instead of looking hung.
     m_terminal->setFlowControlEnabled(true);
@@ -275,6 +302,76 @@ void TerminalWidget::applyMonitoring()
     m_terminal->setMonitorActivity(s.monitorActivity);
     m_terminal->setMonitorSilence(s.monitorSilence);
     m_terminal->setSilenceTimeout(s.silenceTimeout);
+}
+
+void TerminalWidget::feed(const QByteArray &data)
+{
+    if (!m_terminal || !isExternal())
+        return;
+    m_terminal->feedData(data);
+}
+
+void TerminalWidget::setScreenSize(int columns, int lines)
+{
+    if (m_terminal && isExternal())
+        m_terminal->setFixedTerminalSize(columns, lines);
+}
+
+QSize TerminalWidget::cellSize() const
+{
+    auto *d = display();
+    return d ? QSize(d->fontWidth(), d->fontHeight()) : QSize(8, 16);
+}
+
+QSize TerminalWidget::chromeSize() const
+{
+    const int frame = (m_frame == PaneFrame::None) ? 0 : 2 * kPaneBorder;
+    auto *d = display();
+    const int margin = d ? 2 * d->margin() : 0;
+    // The scrollbar takes width only where the style doesn't overlay it.
+    int scrollbar = 0;
+    if (d) {
+        if (auto *bar = d->findChild<QScrollBar *>(); bar && bar->isVisibleTo(d)
+            && !bar->style()->styleHint(QStyle::SH_ScrollBar_Transient, nullptr, bar))
+            scrollbar = bar->width();
+    }
+    return {frame + margin + scrollbar, frame + margin};
+}
+
+int TerminalWidget::paneBorder()
+{
+    return kPaneBorder;
+}
+
+void TerminalWidget::setPaneFrame(PaneFrame frame)
+{
+    if (m_frame == frame)
+        return;
+    m_frame = frame;
+    const int m = (frame == PaneFrame::None) ? 0 : kPaneBorder;
+    layout()->setContentsMargins(m, m, m, m);
+    update();
+}
+
+void TerminalWidget::paintEvent(QPaintEvent *)
+{
+    if (m_frame == PaneFrame::None)
+        return;
+    // The terminal covers everything but the frame, so filling the whole
+    // widget only shows in the border.
+    QPainter p(this);
+    QColor colour = palette().color(QPalette::Highlight);
+    if (m_frame == PaneFrame::Inactive)
+        colour = display() ? display()->palette().color(QPalette::Window)
+                           : palette().color(QPalette::Window);
+    p.fillRect(rect(), colour);
+}
+
+QString TerminalWidget::currentDirectory() const
+{
+    if (!m_terminal || isExternal())
+        return QString();
+    return m_terminal->workingDirectory();
 }
 
 void TerminalWidget::sendText(const QString &text)
@@ -302,7 +399,9 @@ void TerminalWidget::focusTerminal()
  */
 bool TerminalWidget::hasRunningProcess() const
 {
-    if (!m_terminal)
+    // An external terminal's programs live elsewhere (in tmux), and survive
+    // superterm quitting.
+    if (!m_terminal || isExternal())
         return false;
 
     const int shellPid = m_terminal->getShellPID();
@@ -400,6 +499,14 @@ void TerminalWidget::showContextMenu(const QPoint &globalPos)
     findAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+F")));
 
     QAction *clearAct = menu.addAction(tr("C&lear"), m_terminal, &QTermWidget::clear);
+
+    menu.addSeparator();
+    menu.addAction(tr("Split &Right"), this, [this]() { emit splitRequested(Qt::Horizontal); })
+        ->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+E")));
+    menu.addAction(tr("Split &Down"), this, [this]() { emit splitRequested(Qt::Vertical); })
+        ->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+O")));
+    menu.addAction(tr("Close Pa&ne"), this, &TerminalWidget::closePaneRequested)
+        ->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+X")));
 
     menu.addSeparator();
 
