@@ -8,6 +8,7 @@
 
 #include <QByteArray>
 #include <QList>
+#include <QLoggingCategory>
 #include <QObject>
 #include <QProcess>
 #include <QQueue>
@@ -16,6 +17,10 @@
 #include <functional>
 
 struct PaneLayout;
+
+/* Connections coming and going ("superterm.tmux"); goes to the journal when
+ * superterm is started from the desktop. */
+Q_DECLARE_LOGGING_CATEGORY(lcTmux)
 
 /*
  * A tmux control-mode client: the protocol, without any idea of windows or

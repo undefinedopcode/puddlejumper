@@ -503,7 +503,9 @@ The menu lists this machine's sessions (choosing one attaches), plus:
 
 In a tmux tab, the usual actions are carried out by tmux: New Tab creates a
 tmux window, Split Right/Down split the pane, Close Pane and Close Tab kill the
-pane or window, and dragging a split handle resizes the pane. Switching tabs
+pane or window, and dragging a split handle resizes the pane. Closing the
+session's last window would end the session, so superterm asks first and
+offers to detach instead (the default). Switching tabs
 or panes switches tmux's current window and pane too, so another client sees
 the same. **File → New Tab with Profile** still opens a local tab. tmux's own
 prefix key isn't involved: keys go straight to the program in the pane.

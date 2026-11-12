@@ -828,6 +828,8 @@ void MainWindow::splitPane(TerminalWidget *pane, Qt::Orientation orientation)
 void MainWindow::closePane(TerminalWidget *pane)
 {
     if (auto *session = tmuxSessionFor(pane)) {
+        if (!confirmTmuxClose(session, tabOf(pane)))
+            return;
         session->killPane(pane);   // the layout change removes it
         return;
     }
@@ -910,28 +912,22 @@ void MainWindow::rebuildTmuxMenu()
         const int windows = f.at(1).toInt();
         bool ours = false;
         for (TmuxSession *s : std::as_const(m_tmuxSessions))
-            ours = ours || s->label() == name;
+            ours = ours || (s->label() == name && !s->tabs().isEmpty());
         QString text = tr("%1  (%n window(s))", nullptr, windows).arg(name);
         if (ours)
             text += tr(" — open here");
         else if (f.at(2).toInt() > 0)
             text += tr(" — attached elsewhere");
         QAction *act = m_tmuxMenu->addAction(text);
-        if (ours) {
-            // Already shown: go to it rather than attaching twice.
-            connect(act, &QAction::triggered, this, [this, name]() {
-                for (TmuxSession *s : std::as_const(m_tmuxSessions)) {
-                    if (s->label() == name && !s->tabs().isEmpty())
-                        m_tabs->setCurrentWidget(s->tabs().first());
-                }
-            });
-        } else {
-            connect(act, &QAction::triggered, this, [this, name]() {
-                attachTmux(name, tmuxProgram() + QStringList{
-                    QStringLiteral("-u"), QStringLiteral("-C"), QStringLiteral("attach-session"),
-                    QStringLiteral("-t"), name});
-            });
-        }
+        // Decided when chosen, not now: a global menu (Plasma's, over D-Bus)
+        // can show a copy of this menu from before a detach or attach.
+        // attachTmux() goes to the session's tabs if it is open here already.
+        connect(act, &QAction::triggered, this, [this, name]() {
+            qCInfo(lcTmux) << "menu: open" << name;
+            attachTmux(name, tmuxProgram() + QStringList{
+                QStringLiteral("-u"), QStringLiteral("-C"), QStringLiteral("attach-session"),
+                QStringLiteral("-t"), name});
+        });
         ++listed;
     }
     if (listed == 0)
@@ -1021,11 +1017,19 @@ void MainWindow::connectTmuxHost()
 void MainWindow::attachTmux(const QString &label, const QStringList &command)
 {
     for (TmuxSession *s : std::as_const(m_tmuxSessions)) {
-        if (s->label() == label) {
-            if (!s->tabs().isEmpty())
-                m_tabs->setCurrentWidget(s->tabs().first());
+        if (s->label() != label)
+            continue;
+        qCInfo(lcTmux) << "attach" << label << "already open with" << s->tabs().size() << "tabs";
+        if (!s->tabs().isEmpty()) {
+            m_tabs->setCurrentWidget(s->tabs().first());
             return;
         }
+        // Still connected but showing nothing, so attaching again would
+        // otherwise do nothing at all: drop it (detaching) and start afresh.
+        m_tmuxSessions.removeOne(s);
+        disconnect(s, nullptr, this, nullptr);
+        s->deleteLater();
+        break;
     }
 
     auto *session = new TmuxSession(label, command, m_settings,
@@ -1039,6 +1043,7 @@ void MainWindow::attachTmux(const QString &label, const QStringList &command)
         if (!*shownAny) {
             *shownAny = true;
             m_tabs->setCurrentIndex(index);
+            rebuildTmuxMenu();   // for a global menu, which may not ask again
         }
     });
     connect(session, &TmuxSession::tabRenamed, this, [this](TerminalTab *tab, const QString &) {
@@ -1051,8 +1056,10 @@ void MainWindow::attachTmux(const QString &label, const QStringList &command)
     connect(session, &TmuxSession::tabRemoved, this, &MainWindow::removeTab);
     connect(session, &TmuxSession::ended, this,
             [this, session, shownAny](const QString &reason) {
+        qCInfo(lcTmux) << "session" << session->label() << "ended:" << reason;
         m_tmuxSessions.removeOne(session);
         session->deleteLater();
+        rebuildTmuxMenu();
         if (!*shownAny) {
             QMessageBox::warning(this, tr("tmux"),
                                  tr("Could not attach to tmux session “%1”.").arg(session->label())
@@ -1103,11 +1110,41 @@ void MainWindow::closeTab(int index)
 {
     auto *tab = tabAt(index);
     if (auto *session = tmuxSessionFor(tab)) {
+        if (!confirmTmuxClose(session, tab))
+            return;
         session->killWindow(tab);  // the tab goes when tmux says the window has
         return;
     }
     if (tab)
         removeTab(tab);
+}
+
+bool MainWindow::confirmTmuxClose(TmuxSession *session, TerminalTab *tab)
+{
+    // Closing a session's last window ends the session, as in tmux, which is
+    // rarely what closing a tab here means: offer to detach instead.
+    // Closing a pane only matters when it is that window's last one.
+    if (session->tabs().size() != 1 || !tab || tab->panes().size() != 1)
+        return true;
+
+    QMessageBox box(QMessageBox::Question, tr("Close tmux Session?"),
+                    tr("“%1” is the last window of tmux session “%2”. Closing it "
+                       "ends the session.")
+                        .arg(session->windowName(tab), session->label()),
+                    QMessageBox::NoButton, this);
+    box.setInformativeText(tr("Detach to keep the session running, so you can attach "
+                              "to it again from the tmux menu."));
+    QPushButton *detach = box.addButton(tr("&Detach"), QMessageBox::AcceptRole);
+    QPushButton *end = box.addButton(tr("&End Session"), QMessageBox::DestructiveRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(detach);
+    box.exec();
+    qCInfo(lcTmux) << "closing last window of" << session->label() << "->"
+                   << (box.clickedButton() ? box.clickedButton()->text() : QString());
+
+    if (box.clickedButton() == detach)
+        session->detach();
+    return box.clickedButton() == end;
 }
 
 void MainWindow::applyAppearanceToAll()

@@ -80,6 +80,9 @@ private:
      */
     TmuxSession *tmuxSessionFor(const TerminalTab *tab) const;
     TmuxSession *tmuxSessionFor(const TerminalWidget *pane) const;
+    /* Before closing a tmux tab or pane: false to leave it open (cancelled,
+     * or detached instead because it would end the session). */
+    bool confirmTmuxClose(TmuxSession *session, TerminalTab *tab);
     /* Fill the tmux menu: this machine's sessions, then the other actions. */
     void rebuildTmuxMenu();
     /* Attach to (or create) a session through `command`, a control-mode client. */

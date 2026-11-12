@@ -12,6 +12,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
+Q_LOGGING_CATEGORY(lcTmux, "superterm.tmux")
+
 namespace {
 
 /* "%12" or "@3" or "$1" -> 12 / 3 / 1; -1 if malformed. */
@@ -147,13 +149,15 @@ void TmuxControl::start(const QStringList &command)
     m_process->setProcessChannelMode(QProcess::SeparateChannels);
     connect(m_process, &QProcess::readyReadStandardOutput, this, &TmuxControl::readOutput);
     connect(m_process, &QProcess::errorOccurred, this, [this](QProcess::ProcessError error) {
+        qCInfo(lcTmux) << "process error" << error << m_process->errorString();
         if (error == QProcess::FailedToStart && !m_exited) {
             m_exited = true;
             emit exited(tr("Could not run %1: %2")
                             .arg(m_process->program(), m_process->errorString()));
         }
     });
-    connect(m_process, &QProcess::finished, this, [this](int code, QProcess::ExitStatus) {
+    connect(m_process, &QProcess::finished, this, [this](int code, QProcess::ExitStatus status) {
+        qCInfo(lcTmux) << "exited: code" << code << status << "reason" << m_exitReason;
         if (m_exited)
             return;
         m_exited = true;
@@ -172,6 +176,7 @@ void TmuxControl::start(const QStringList &command)
         emit exited(reason);
     });
 
+    qCInfo(lcTmux) << "starting" << command;
     m_process->start(command.first(), command.mid(1));
 }
 
@@ -193,6 +198,7 @@ void TmuxControl::command(const QString &cmd, Reply reply)
 
 void TmuxControl::detach()
 {
+    qCInfo(lcTmux) << "detaching; running:" << isRunning();
     if (!isRunning())
         return;
     m_process->write("detach-client\n");
@@ -304,6 +310,7 @@ void TmuxControl::finishBlock(bool ok)
     if (!m_blockIsOurs) {
         // The startup command's reply: the client is attached.
         if (!m_ready) {
+            qCInfo(lcTmux) << "attached";
             m_ready = true;
             emit ready();
         }
