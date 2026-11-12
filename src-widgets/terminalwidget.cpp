@@ -433,16 +433,30 @@ QString TerminalWidget::foregroundProgramName() const
     return QString::fromUtf8(comm.readAll()).trimmed();
 }
 
-QPixmap TerminalWidget::previewPixmap(const QSize &size) const
+QSize TerminalWidget::screenPixelSize() const
 {
-    if (!m_terminal)
+    return m_terminal ? m_terminal->screenPixelSize() : QSize();
+}
+
+QPixmap TerminalWidget::previewPixmap(const QSize &size, qreal devicePixelRatio) const
+{
+    const QSize natural = screenPixelSize();
+    if (natural.isEmpty() || size.isEmpty())
         return {};
-    // Widgets paint to a backing store, so grabbing is safe here -- unlike the
-    // QML build, which needed useFBORendering:false to avoid blanking the
-    // terminal on every grab.
-    if (auto *d = display())
-        return d->grab().scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-    return {};
+    // Drawn from the emulator's screen, not grabbed from the display, so a
+    // hidden pane previews as well as a visible one. Drawing at twice the
+    // final size and scaling down smoothly gives cleaner small text than
+    // drawing tiny glyphs directly.
+    const qreal scale = qMin(qreal(size.width()) / natural.width(),
+                             qreal(size.height()) / natural.height());
+    const QImage image = m_terminal->renderScreen(qMin(1.0, 2 * scale * devicePixelRatio));
+    if (image.isNull())
+        return {};
+    QPixmap out = QPixmap::fromImage(image.scaled(
+        (QSizeF(natural) * scale * devicePixelRatio).toSize(), Qt::KeepAspectRatio,
+        Qt::SmoothTransformation));
+    out.setDevicePixelRatio(devicePixelRatio);
+    return out;
 }
 
 Konsole::TerminalDisplay *TerminalWidget::display() const

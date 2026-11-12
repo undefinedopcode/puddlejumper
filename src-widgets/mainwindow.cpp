@@ -19,6 +19,8 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QDateTime>
+#include <QEvent>
+#include <QResizeEvent>
 #include <QDir>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -34,7 +36,9 @@
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPushButton>
+#include <QPainter>
 #include <QSplitter>
+#include <QSplitterHandle>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTabBar>
@@ -72,6 +76,78 @@ QString shellQuote(const QString &arg)
     return QLatin1Char('\'') + out + QLatin1Char('\'');
 }
 
+constexpr int kDefaultSidebarWidth = 220;
+
+/*
+ * The handle between the sidebar and the terminals: painted in the sidebar's
+ * own colour, with a faint line on hover so it can be found. Double-click
+ * puts the sidebar back to its default width.
+ */
+class SidebarHandle : public QSplitterHandle
+{
+public:
+    SidebarHandle(Qt::Orientation orientation, QSplitter *parent,
+                  const ThumbnailSidebar *sidebar, std::function<void()> reset)
+        : QSplitterHandle(orientation, parent), m_sidebar(sidebar), m_reset(std::move(reset))
+    {
+        setAttribute(Qt::WA_Hover);
+        setToolTip(QObject::tr("Drag to resize, or to the edge to hide; double-click to reset"));
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        const QColor bg = m_sidebar->background();
+        p.fillRect(rect(), bg);
+        if (underMouse()) {
+            QColor line = m_sidebar->palette().color(QPalette::WindowText);
+            line.setAlphaF(0.35);
+            p.fillRect(QRect(width() / 2 - 1, 0, 2, height()), line);
+        }
+    }
+    bool event(QEvent *e) override
+    {
+        if (e->type() == QEvent::HoverEnter || e->type() == QEvent::HoverLeave)
+            update();
+        return QSplitterHandle::event(e);
+    }
+    void mouseDoubleClickEvent(QMouseEvent *) override { m_reset(); }
+
+private:
+    const ThumbnailSidebar *m_sidebar;
+    std::function<void()> m_reset;
+};
+
+class SidebarSplitter : public QSplitter
+{
+public:
+    SidebarSplitter(QWidget *parent, std::function<const ThumbnailSidebar *()> sidebar,
+                    std::function<void()> reset)
+        : QSplitter(Qt::Horizontal, parent), m_sidebar(std::move(sidebar)), m_reset(std::move(reset)) {}
+
+protected:
+    QSplitterHandle *createHandle() override
+    {
+        return new SidebarHandle(orientation(), this, m_sidebar(), m_reset);
+    }
+
+private:
+    std::function<const ThumbnailSidebar *()> m_sidebar;
+    std::function<void()> m_reset;
+};
+
+/* "~/src/x" rather than "/home/me/src/x". */
+QString tildePath(const QString &path)
+{
+    const QString home = QDir::homePath();
+    if (path == home)
+        return QStringLiteral("~");
+    if (path.startsWith(home + QLatin1Char('/')))
+        return QLatin1Char('~') + path.mid(home.size());
+    return path;
+}
+
 void setToolTipWithShortcut(QAction *act)
 {
     QString text = act->text();
@@ -93,11 +169,12 @@ MainWindow::MainWindow(QWidget *parent)
     buildMenus();
     buildStatusBar();
 
-    // Live previews. Only the visible terminal can be grabbed meaningfully, so
-    // this refreshes the current tab and leaves the others on their last image.
+    // Live previews: a few times a second, redraw the cards of tabs that
+    // have had output since. Previews are drawn from the panes' screens, so
+    // hidden tabs update as well as the visible one, and idle tabs cost nothing.
     m_previewTimer = new QTimer(this);
-    m_previewTimer->setInterval(2500);
-    connect(m_previewTimer, &QTimer::timeout, this, &MainWindow::captureNextPreview);
+    m_previewTimer->setInterval(250);
+    connect(m_previewTimer, &QTimer::timeout, this, [this]() { refreshPreviews(false); });
     m_previewTimer->start();
 
     connect(&m_settings, &Settings::appearanceChanged,
@@ -127,8 +204,10 @@ MainWindow::MainWindow(QWidget *parent)
 
 void MainWindow::buildLayout()
 {
-    m_splitter = new QSplitter(Qt::Horizontal, this);
-    m_splitter->setChildrenCollapsible(false);
+    m_splitter = new SidebarSplitter(
+        this, [this]() { return m_sidebar; },
+        [this]() { setSidebarWidth(kDefaultSidebarWidth); });
+    m_splitter->setHandleWidth(5);
 
     m_sidebar = new ThumbnailSidebar(m_splitter);
 
@@ -138,40 +217,53 @@ void MainWindow::buildLayout()
     m_tabs->setDocumentMode(true);
     m_tabs->setElideMode(Qt::ElideRight);
     m_tabs->tabBar()->setExpanding(false);
+    // Its size gives the previews their shape.
+    m_tabs->installEventFilter(this);
 
     m_splitter->addWidget(m_sidebar);
     m_splitter->addWidget(m_tabs);
     setCentralWidget(m_splitter);
 
-    // Pin the splitter to the sidebar's own width.
-    //
-    // A QSplitter keeps its remembered handle position and hands the sidebar
-    // that width even when the sidebar wants less, leaving a dead strip before
-    // the terminal (that strip is why dragging the handle appeared to "fix"
-    // it). Sizes must be set after both children are in place.
+    // The terminals take any change in window width; the sidebar keeps its
+    // own, which is remembered. Dragging it into the edge hides it, like
+    // View > Thumbnail Sidebar.
     m_splitter->setStretchFactor(0, 0);
     m_splitter->setStretchFactor(1, 1);
-    m_splitter->setSizes({m_sidebar->sizeHint().width(), 1});
+    m_splitter->setCollapsible(0, true);
+    m_splitter->setCollapsible(1, false);
+    const int saved = m_settings.sidebarWidth();
+    setSidebarWidth(saved > 0 ? saved : kDefaultSidebarWidth);
+    connect(m_splitter, &QSplitter::splitterMoved, this, [this]() {
+        const int width = m_splitter->sizes().value(0);
+        if (width == 0) {
+            m_settings.setTabLayout(QStringLiteral("standard"));
+            return;
+        }
+        m_settings.setSidebarWidth(width);
+    });
 
     connect(m_tabs, &QTabWidget::tabCloseRequested, this, &MainWindow::closeTab);
     connect(m_tabs, &QTabWidget::currentChanged, this, [this](int index) {
         m_sidebar->setCurrentIndex(index);
-        // Selecting a tab counts as having seen it, so clear its "new output"
-        // marker (and the underlying dirty flag) straight away rather than
-        // waiting for the next preview capture.
         if (auto *tab = tabAt(index)) {
             // Keep tmux's current window in step, so another client attaching
-            // sees the same one. Not for the preview rotation's brief visits.
-            if (auto *session = tmuxSessionFor(tab); session && !m_capturingPreview)
+            // sees the same one.
+            if (auto *session = tmuxSessionFor(tab))
                 session->selectWindow(tab);
-            tab->clearNewOutput();
+            // Selecting a tab counts as having seen its output.
             m_sidebar->setBusy(index, false);
-            if (!m_capturingPreview && tab->activePane())
+            if (tab->activePane())
                 tab->activePane()->focusTerminal();
             syncTabFromActivePane(tab);
         }
+        updateSidebarColours();
         updateStatus();
-        captureNextPreview();
+    });
+    // A tab dragged along the tab bar: move its card too. (A card dragged in
+    // the sidebar moves the tab, below, and the card is already in place.)
+    connect(m_tabs->tabBar(), &QTabBar::tabMoved, this, [this](int from, int to) {
+        if (!m_movingFromSidebar)
+            m_sidebar->moveCard(from, to);
     });
 
     connect(m_sidebar, &ThumbnailSidebar::tabActivated, this, [this](int index) {
@@ -179,6 +271,37 @@ void MainWindow::buildLayout()
             m_tabs->setCurrentIndex(index);
     });
     connect(m_sidebar, &ThumbnailSidebar::tabClosed, this, &MainWindow::closeTab);
+    connect(m_sidebar, &ThumbnailSidebar::tabMoved, this, [this](int from, int to) {
+        m_movingFromSidebar = true;
+        m_tabs->tabBar()->moveTab(from, to);
+        m_movingFromSidebar = false;
+    });
+    connect(m_sidebar, &ThumbnailSidebar::newTabRequested, this, &MainWindow::newTab);
+    connect(m_sidebar, &ThumbnailSidebar::contextMenuRequested,
+            this, &MainWindow::showTabMenu);
+    connect(m_sidebar, &ThumbnailSidebar::previewSizeChanged,
+            this, [this]() { refreshPreviews(true); });
+}
+
+void MainWindow::setSidebarWidth(int width)
+{
+    const int total = qMax(m_splitter->width(), width + 200);
+    m_splitter->setSizes({width, total - width});
+    m_settings.setSidebarWidth(width);
+}
+
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == m_tabs && event->type() == QEvent::Resize) {
+        // Cards take the terminal area's shape: the tab widget less its tab
+        // bar. (The pages haven't been resized yet when this runs.)
+        QSize area = static_cast<QResizeEvent *>(event)->size();
+        if (m_tabs->tabBar()->isVisible())
+            area.rheight() -= m_tabs->tabBar()->sizeHint().height();
+        if (area.width() > 0 && area.height() > 0)
+            m_sidebar->setPreviewAspect(qreal(area.height()) / area.width());
+    }
+    return QMainWindow::eventFilter(watched, event);
 }
 
 void MainWindow::buildMenus()
@@ -216,6 +339,9 @@ void MainWindow::buildMenus()
     auto *closeAct = file->addAction(tr("&Close Tab"));
     closeAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+W")));
     connect(closeAct, &QAction::triggered, this, [this]() { closeTab(m_tabs->currentIndex()); });
+
+    auto *renameAct = file->addAction(tr("&Rename Tab…"));
+    connect(renameAct, &QAction::triggered, this, [this]() { renameTab(m_tabs->currentIndex()); });
 
     auto *nextAct = file->addAction(tr("&Next Tab"));
     nextAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Tab")));
@@ -619,11 +745,14 @@ void MainWindow::syncTabFromActivePane(TerminalTab *tab)
         return;
     }
 
-    if (!title.isEmpty()) {
-        m_tabs->setTabText(i, title);
-        m_tabs->setTabToolTip(i, title);
-        m_sidebar->setTitle(i, title);
-    }
+    // A name the user gave the tab wins over whatever the shell calls it.
+    const QString name = !tab->customTitle().isEmpty() ? tab->customTitle()
+                         : !title.isEmpty()            ? title
+                                                       : tr("Terminal");
+    m_tabs->setTabText(i, name);
+    m_tabs->setTabToolTip(i, title.isEmpty() || title == name
+                                 ? name : QStringLiteral("%1\n%2").arg(name, title));
+    m_sidebar->setTitle(i, name);
     if (tab == currentTab())
         setWindowTitle(title.isEmpty() ? QStringLiteral("SuperTerm")
                                        : tr("%1 — SuperTerm").arg(title));
@@ -916,7 +1045,7 @@ void MainWindow::attachTmux(const QString &label, const QStringList &command)
         syncTabFromActivePane(tab);
     });
     connect(session, &TmuxSession::tabActivated, this, [this](TerminalTab *tab) {
-        if (!m_capturingPreview && m_tabs->indexOf(tab) >= 0)
+        if (m_tabs->indexOf(tab) >= 0)
             m_tabs->setCurrentWidget(tab);
     });
     connect(session, &TmuxSession::tabRemoved, this, &MainWindow::removeTab);
@@ -968,7 +1097,6 @@ void MainWindow::newTabWithProfile(const QString &profileId)
                              tr("%1 — %2").arg(profile.name, tr("Terminal")));
     m_tabs->setCurrentIndex(index);
     term->focusTerminal();
-    captureNextPreview();
 }
 
 void MainWindow::closeTab(int index)
@@ -999,8 +1127,13 @@ void MainWindow::updateTabLayout()
     m_tabs->tabBar()->setVisible(!thumbs);
 
     if (thumbs) {
+        // Back from being dragged shut (or never sized): give it its width.
+        if (m_splitter->sizes().value(0) < m_sidebar->minimumWidth()) {
+            const int saved = m_settings.sidebarWidth();
+            setSidebarWidth(saved >= m_sidebar->minimumWidth() ? saved : kDefaultSidebarWidth);
+        }
+        updateSidebarColours();
         syncTabTitles();
-        captureNextPreview();
     }
 }
 
@@ -1011,90 +1144,111 @@ void MainWindow::syncTabTitles()
     for (int i = 0; i < m_tabs->count(); ++i)
         titles << m_tabs->tabText(i);
     m_sidebar->syncTabs(titles, m_tabs->currentIndex());
+    refreshPreviews(true);
 }
 
-/*
- * Capture a preview for a tab whose output has changed.
- *
- * Two measured facts drive this:
- *
- * 1. A QTabWidget page that is not current never paints, and an unpainted
- *    widget grabs as a blank pixmap (a hidden page also reports 100x30 until
- *    laid out). Neither grab() nor render() helps; switching is required.
- * 2. receivedData() fires from the pty even for hidden tabs, so we know which
- *    tab actually changed without looking at it.
- *
- * Together: the rotation only visits tabs that have produced output since their
- * last capture. An idle set of tabs costs nothing, and the visible tab stays
- * put unless something changed.
- *
- * A capture spans two ticks -- show the tab, then grab it -- because a
- * same-tick grab yields a blank image; the paint has not happened yet.
- */
-void MainWindow::captureNextPreview()
+void MainWindow::refreshPreviews(bool all)
 {
     if (m_settings.appearance().tabLayout != QStringLiteral("thumbnails"))
         return;
-    if (m_tabs->count() == 0)
+    const QSize size = m_sidebar->previewSize();
+    const qreal dpr = devicePixelRatioF();
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        auto *tab = tabAt(i);
+        if (!tab || (!all && !tab->hasNewOutput()))
+            continue;
+        tab->clearNewOutput();
+        m_sidebar->setPreview(i, tab->previewPixmap(size, dpr));
+        updateCardDetails(i);
+    }
+}
+
+void MainWindow::updateCardDetails(int index)
+{
+    auto *tab = tabAt(index);
+    TerminalWidget *pane = tab ? tab->activePane() : nullptr;
+    if (!pane)
         return;
 
-    // Second half of a capture: the target has now had a chance to paint.
-    if (m_capturingPreview) {
-        if (auto *tab = tabAt(m_previewTarget)) {
-            const QPixmap pm = tab->previewPixmap(QSize(150, 90));
-            if (!pm.isNull())
-                m_sidebar->setPreview(m_previewTarget, pm);
-            tab->clearNewOutput();
-        }
-        if (m_restoreTab >= 0 && m_restoreTab < m_tabs->count())
-            m_tabs->setCurrentIndex(m_restoreTab);
-        m_capturingPreview = false;
-        m_previewTarget = -1;
-        m_restoreTab = -1;
-        return;
-    }
-
-    // Prefer a tab whose output changed since its last capture.
-    int target = -1;
-    for (int offset = 0; offset < m_tabs->count(); ++offset) {
-        const int i = (m_nextPreviewTab + offset) % m_tabs->count();
-        auto *t = tabAt(i);
-        if (t && t->hasNewOutput()) {
-            target = i;
-            break;
-        }
-    }
-
-    if (target < 0) {
-        // Nothing dirty: nothing worth switching to. Re-grab the visible tab
-        // only, since its image can be stale after a resize or a theme change.
-        if (auto *tab = currentTab()) {
-            const QPixmap pm = tab->previewPixmap(QSize(150, 90));
-            if (!pm.isNull())
-                m_sidebar->setPreview(m_tabs->currentIndex(), pm);
-            tab->clearNewOutput();
-        }
+    // tmux cards say which session they belong to; the second line is the
+    // active pane's title when that says more than the window's name.
+    if (auto *session = tmuxSessionFor(tab)) {
+        m_sidebar->setBadge(index, tr("tmux %1").arg(session->label()));
+        const QString title = pane->sessionTitle();
+        m_sidebar->setSubtitle(index, title == session->windowName(tab) ? QString() : title);
         return;
     }
 
-    m_nextPreviewTab = (target + 1) % m_tabs->count();
-    m_previewTarget = target;
+    // Local: what's running (when it isn't just the shell) and where.
+    m_sidebar->setBadge(index, QString());
+    QStringList parts;
+    if (pane->hasRunningProcess()) {
+        const QString program = pane->foregroundProgramName();
+        if (!program.isEmpty())
+            parts << program;
+    }
+    const QString dir = pane->currentDirectory();
+    if (!dir.isEmpty())
+        parts << tildePath(dir);
+    if (tab->panes().size() > 1)
+        parts << tr("%n panes", nullptr, int(tab->panes().size()));
+    m_sidebar->setSubtitle(index, parts.join(QStringLiteral("  ·  ")));
+}
 
-    if (m_previewTarget == m_tabs->currentIndex()) {
-        // Already visible; grab straight away without switching.
-        if (auto *tab = tabAt(m_previewTarget)) {
-            const QPixmap pm = tab->previewPixmap(QSize(150, 90));
-            if (!pm.isNull())
-                m_sidebar->setPreview(m_previewTarget, pm);
-            tab->clearNewOutput();
-        }
-        m_previewTarget = -1;
+void MainWindow::updateSidebarColours()
+{
+    if (auto *tab = currentTab())
+        m_sidebar->setColours(tab->backgroundColour(), tab->foregroundColour());
+    m_splitter->handle(1)->update();
+}
+
+void MainWindow::showTabMenu(int index, const QPoint &globalPos)
+{
+    QMenu menu(this);
+    if (index >= 0) {
+        menu.addAction(tr("&Rename…"), this, [this, index]() { renameTab(index); });
+        menu.addSeparator();
+        menu.addAction(themeIcon({"tab-close", "window-close"}), tr("&Close Tab"), this,
+                       [this, index]() { closeTab(index); });
+        QAction *others = menu.addAction(tr("Close &Other Tabs"), this, [this, index]() {
+            QWidget *keep = m_tabs->widget(index);
+            for (int i = m_tabs->count() - 1; i >= 0; --i) {
+                if (m_tabs->widget(i) != keep)
+                    closeTab(i);
+            }
+        });
+        others->setEnabled(m_tabs->count() > 1);
+        menu.addSeparator();
+    }
+    menu.addAction(themeIcon({"tab-new", "list-add"}), tr("&New Tab"), this, &MainWindow::newTab);
+    menu.exec(globalPos);
+}
+
+void MainWindow::renameTab(int index)
+{
+    auto *tab = tabAt(index);
+    if (!tab)
+        return;
+    auto *session = tmuxSessionFor(tab);
+    bool ok = false;
+    const QString name = QInputDialog::getText(
+        this, tr("Rename Tab"),
+        session ? tr("tmux window name:")
+                : tr("Tab name (leave empty to follow the terminal's title):"),
+        QLineEdit::Normal,
+        session ? session->windowName(tab)
+                : (tab->customTitle().isEmpty() ? m_tabs->tabText(index) : tab->customTitle()),
+        &ok).trimmed();
+    if (!ok)
+        return;
+    if (session) {
+        // tmux renames it and says so; the tab follows from that.
+        if (!name.isEmpty())
+            session->renameWindow(tab, name);
         return;
     }
-
-    m_restoreTab = m_tabs->currentIndex();
-    m_capturingPreview = true;
-    m_tabs->setCurrentIndex(m_previewTarget);
+    tab->setCustomTitle(name);
+    syncTabFromActivePane(tab);
 }
 
 void MainWindow::updateStatus()

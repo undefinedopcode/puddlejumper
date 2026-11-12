@@ -181,6 +181,9 @@ public:
     void saveWindowGeometry(const QByteArray &geometry, const QByteArray &state);
     QByteArray windowGeometry() const;
     QByteArray windowState() const;
+    /* The thumbnail sidebar's width in pixels; 0 when never set. */
+    int sidebarWidth() const;
+    void setSidebarWidth(int pixels);
 
 signals:
     void appearanceChanged();

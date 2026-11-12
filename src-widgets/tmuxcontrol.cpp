@@ -199,6 +199,22 @@ void TmuxControl::detach()
     m_process->closeWriteChannel();
 }
 
+QString TmuxControl::quote(const QString &arg)
+{
+    // Double quotes, in which tmux takes \ as an escape and expands $ (so both
+    // are escaped, along with the quote itself).
+    QString out;
+    out.reserve(arg.size() + 2);
+    out += QLatin1Char('"');
+    for (const QChar c : arg) {
+        if (c == QLatin1Char('"') || c == QLatin1Char('\\') || c == QLatin1Char('$'))
+            out += QLatin1Char('\\');
+        out += c;
+    }
+    out += QLatin1Char('"');
+    return out;
+}
+
 QByteArray TmuxControl::unescape(const QByteArray &text)
 {
     QByteArray out;

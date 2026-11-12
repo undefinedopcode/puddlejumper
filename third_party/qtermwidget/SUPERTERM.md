@@ -67,6 +67,16 @@ with a `superterm:` comment.
    to redraw by `Session::updateTerminalSize()`; normally the screen resizing
    is what prompts that, and without it the view kept a stale image.
 
+8. **Rendering the screen without the widget**, for the sidebar's previews.
+   `QTermWidget::renderScreen()` paints the current screen (primary or
+   alternate, its visible page) from the emulator's character image into a
+   `QImage` at any scale, with the display's font and colours, and
+   `screenPixelSize()` gives its natural size. A hidden tab's display never
+   paints, so `grab()` returned nothing for it; this works whatever the
+   widget's state. It is a simplified painter: colours, bold, italic,
+   underline, faint, wide characters and the cursor, but no blinking,
+   selection or specially drawn line characters.
+
 ## Updating
 
 Diff this tree against the upstream tag it came from, re-apply the

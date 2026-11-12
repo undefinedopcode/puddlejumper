@@ -68,6 +68,7 @@ public:
     void splitPane(TerminalWidget *pane, Qt::Orientation orientation);
     void killPane(TerminalWidget *pane);
     void killWindow(TerminalTab *tab);
+    void renameWindow(TerminalTab *tab, const QString &name);
     void selectWindow(TerminalTab *tab);
 
     /* The pixels a tab's layout has; becomes the client size in cells. */

@@ -47,6 +47,8 @@ public:
     /* Detach: tmux keeps the session, this client exits. */
     void detach();
 
+    /* Quote an argument for a tmux command line. */
+    static QString quote(const QString &arg);
     /* Undo %output's escaping: \ooo octal for control bytes and backslash. */
     static QByteArray unescape(const QByteArray &text);
     /* Parse a window layout, classic ("b25d,80x24,0,0{40x24,0,0,1,39x24,41,0,2}")

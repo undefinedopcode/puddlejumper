@@ -17,6 +17,7 @@
 */
 
 #include <QLayout>
+#include <QPainter>
 #include <QBoxLayout>
 #include <QtDebug>
 #include <QFileInfo>
@@ -290,6 +291,128 @@ void QTermWidget::setFixedTerminalSize(int columns, int lines)
 void QTermWidget::setAnswerTerminalQueries(bool answer)
 {
     m_impl->m_session->emulation()->setAnswerQueries(answer);
+}
+
+QSize QTermWidget::screenPixelSize() const
+{
+    TerminalDisplay *display = m_impl->m_terminalDisplay;
+    const ScreenWindow *window = display->screenWindow();
+    if (!window || !window->screen())
+        return {};
+    return QSize(window->screen()->getColumns() * display->fontWidth(),
+                 window->screen()->getLines() * display->fontHeight());
+}
+
+QImage QTermWidget::renderScreen(qreal scale, qreal devicePixelRatio) const
+{
+    TerminalDisplay *display = m_impl->m_terminalDisplay;
+    const ScreenWindow *window = display->screenWindow();
+    if (!window || !window->screen() || scale <= 0)
+        return {};
+    // The display's window always points at the current screen (primary or
+    // alternate); read its bottom page, which is what the terminal shows when
+    // it isn't scrolled back.
+    const Screen *screen = window->screen();
+    const int columns = screen->getColumns();
+    const int lines = screen->getLines();
+    const int cw = display->fontWidth();
+    const int ch = display->fontHeight();
+    if (columns <= 0 || lines <= 0 || cw <= 0 || ch <= 0)
+        return {};
+
+    QVector<Character> image(columns * lines);
+    const int top = screen->getHistLines();
+    screen->getImage(image.data(), int(image.size()), top, top + lines - 1);
+    const ColorEntry *colours = display->colorTable();
+    const QColor background = colours[DEFAULT_BACK_COLOR].color;
+
+    const QSize pixels = (QSizeF(columns * cw, lines * ch) * scale * devicePixelRatio)
+                             .toSize().expandedTo(QSize(1, 1));
+    QImage out(pixels, QImage::Format_ARGB32_Premultiplied);
+    out.setDevicePixelRatio(devicePixelRatio);
+    out.fill(background);
+
+    QPainter painter(&out);
+    painter.setRenderHint(QPainter::TextAntialiasing);
+    painter.scale(scale, scale);
+
+    // Every glyph advances exactly one cell, so a run of text stays on the grid.
+    QFont font = display->getVTFont();
+    font.setKerning(false);
+    const QFontMetricsF metrics(font);
+    font.setLetterSpacing(QFont::AbsoluteSpacing,
+                          cw - metrics.horizontalAdvance(QLatin1Char('M')));
+    const qreal baseline = (ch - (metrics.ascent() + metrics.descent())) / 2 + metrics.ascent();
+
+    auto text = [](const Character &c) {
+        if (c.rendition & RE_EXTENDED_CHAR) {
+            ushort length = 0;
+            const uint *chars = ExtendedCharTable::instance.lookupExtendedChar(c.character, length);
+            return chars ? QString::fromUcs4(reinterpret_cast<const char32_t *>(chars), length)
+                         : QString();
+        }
+        const char32_t u = char32_t(c.character);
+        return QString::fromUcs4(&u, 1);
+    };
+
+    for (int y = 0; y < lines; ++y) {
+        const Character *row = image.constData() + y * columns;
+        const qreal top = y * ch;
+
+        for (int x = 0; x < columns;) {
+            int end = x + 1;
+            while (end < columns && row[end].backgroundColor == row[x].backgroundColor)
+                ++end;
+            const QColor bg = row[x].backgroundColor.color(colours);
+            if (bg != background)
+                painter.fillRect(QRectF(x * cw, top, (end - x) * cw, ch), bg);
+            x = end;
+        }
+
+        for (int x = 0; x < columns;) {
+            const Character &c = row[x];
+            if (c.rendition & RE_CURSOR) {
+                painter.setPen(QPen(c.foregroundColor.color(colours), 1));
+                painter.setBrush(Qt::NoBrush);
+                painter.drawRect(QRectF(x * cw + 0.5, top + 0.5, cw - 1, ch - 1));
+            }
+            if (c.character == 0 || c.isSpace() || (c.rendition & RE_CONCEAL)) {
+                ++x;
+                continue;
+            }
+            // A wide character (the next cell is its second half) goes alone;
+            // otherwise gather the run of characters drawn in the same style.
+            QString run = text(c);
+            int end = x + 1;
+            const bool wide = end < columns && row[end].character == 0;
+            if (!wide) {
+                while (end < columns && row[end].character != 0
+                       && !(end + 1 < columns && row[end + 1].character == 0)
+                       && row[end].foregroundColor == c.foregroundColor
+                       && row[end].rendition == c.rendition) {
+                    run += text(row[end]);
+                    ++end;
+                }
+            }
+
+            QFont f = font;
+            f.setBold(c.rendition & RE_BOLD);
+            f.setItalic(c.rendition & RE_ITALIC);
+            f.setUnderline(c.rendition & RE_UNDERLINE);
+            f.setStrikeOut(c.rendition & RE_STRIKEOUT);
+            f.setOverline(c.rendition & RE_OVERLINE);
+            QColor fg = c.foregroundColor.color(colours);
+            if (c.rendition & RE_FAINT)
+                fg = QColor::fromRgbF((fg.redF() + background.redF()) / 2,
+                                      (fg.greenF() + background.greenF()) / 2,
+                                      (fg.blueF() + background.blueF()) / 2);
+            painter.setFont(f);
+            painter.setPen(fg);
+            painter.drawText(QPointF(x * cw, top + baseline), run);
+            x = end;
+        }
+    }
+    return out;
 }
 
 void QTermWidget::startTerminalTeletype()

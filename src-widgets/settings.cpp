@@ -39,6 +39,7 @@ constexpr auto kConfirmMultilinePaste = "input/confirmMultilinePaste";
 constexpr auto kTrimPastedNewlines    = "input/trimPastedTrailingNewlines";
 constexpr auto kGeometry    = "window/qtGeometry";
 constexpr auto kWinState    = "window/qtState";
+constexpr auto kSidebarWidth = "window/sidebarWidth";
 
 // First installed family from the preferred list; the terminal needs a
 // fixed-pitch face or its cell grid breaks.
@@ -413,4 +414,14 @@ QByteArray Settings::windowGeometry() const
 QByteArray Settings::windowState() const
 {
     return m_settings.value(kWinState).toByteArray();
+}
+
+int Settings::sidebarWidth() const
+{
+    return m_settings.value(kSidebarWidth, 0).toInt();
+}
+
+void Settings::setSidebarWidth(int pixels)
+{
+    m_settings.setValue(kSidebarWidth, pixels);
 }

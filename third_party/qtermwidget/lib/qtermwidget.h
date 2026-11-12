@@ -20,6 +20,7 @@
 #ifndef _Q_TERM_WIDGET
 #define _Q_TERM_WIDGET
 
+#include <QImage>
 #include <QTranslator>
 #include <QWidget>
 #include "Emulation.h"
@@ -78,6 +79,16 @@ public:
     void feedData(const QByteArray &data);
     void setFixedTerminalSize(int columns, int lines);
     void setAnswerTerminalQueries(bool answer);
+
+    /**
+     * superterm: a picture of the screen (its visible lines, not scrollback),
+     * drawn from the emulator's character image rather than the display
+     * widget, so it works while the widget is hidden or has never been shown.
+     * screenPixelSize() is its natural size: columns x font width by lines x
+     * font height. renderScreen() draws it at `scale` of that, for previews.
+     */
+    QSize screenPixelSize() const;
+    QImage renderScreen(qreal scale, qreal devicePixelRatio = 1.0) const;
 
     int getShellPID() override;
 

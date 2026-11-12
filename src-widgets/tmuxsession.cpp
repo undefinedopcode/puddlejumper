@@ -534,6 +534,14 @@ void TmuxSession::killWindow(TerminalTab *tab)
         m_control->command(QStringLiteral("kill-window -t ") + windowTarget(wid));
 }
 
+void TmuxSession::renameWindow(TerminalTab *tab, const QString &name)
+{
+    const int wid = windowId(tab);
+    if (wid >= 0)
+        m_control->command(QStringLiteral("rename-window -t ") + windowTarget(wid)
+                           + QLatin1Char(' ') + TmuxControl::quote(name));
+}
+
 void TmuxSession::selectWindow(TerminalTab *tab)
 {
     const int wid = windowId(tab);

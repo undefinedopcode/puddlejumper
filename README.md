@@ -210,28 +210,41 @@ alone.
 
 ### Tab layouts
 
-Two tab presentations, switchable from the button beside the settings gear, the
-settings dialog, or by setting `appearance/tabLayout`:
+Two tab presentations, switchable with the toolbar's sidebar button or View >
+Thumbnail Sidebar (`Ctrl+Shift+B`), in the settings dialog, or by setting
+`appearance/tabLayout`:
 
 - **standard** — tabs along the top (the default).
 - **thumbnails** — a left sidebar of cards, each with a live preview of that
   terminal.
 
-Previews come from `QWidget::grab()` on the terminal's display widget, so they
-show real content. Widgets paint to a backing store, which makes repeated grabs
-safe — unlike the QML build, which needed `useFBORendering: false` to avoid
-blanking the terminal on every grab.
+Each card shows a live preview of the tab, its title, and a second line saying
+what it is: the program running (when it isn't just the shell), the directory,
+and how many panes, or for tmux the active pane's title, with a `tmux <session>`
+badge on the preview. A dot marks a tab that has had output you haven't seen.
 
-Two constraints worth knowing:
+- **Click** a card to switch to it; **drag** cards to reorder the tabs (the tab
+  bar follows, and the other way round); **middle-click**, or the ✕ that
+  appears on hover, closes it. Right-click for **Rename…**, **Close Tab**,
+  **Close Other Tabs** and **New Tab**. **New Tab** is also at the foot of the
+  list.
+- **File > Rename Tab…** names a tab in either layout. Leave it empty to follow
+  the terminal's title again; on a tmux tab it renames the tmux window.
+- **The sidebar's width** is set by dragging its edge and is remembered; cards
+  and previews scale with it, keeping the terminal area's shape. Dragging it into
+  the window edge hides it (as `Ctrl+Shift+B` does), and double-clicking the edge
+  resets the width.
+- **Colours come from the terminal scheme**: the sidebar is the current tab's
+  background lifted slightly, so it reads as part of the terminal.
 
-- **A hidden tab must be shown before it can be grabbed.** A non-current
-  `QTabWidget` page never paints, so grabbing one yields a blank image; neither
-  `grab()` nor `render()` helps. The sidebar therefore rotates through tabs that
-  have produced output, briefly showing each and restoring your tab afterwards.
-- **The rotation is driven by output, not a blind timer.** `receivedData()` fires
-  from the pty even for hidden tabs, so the app knows which tab actually changed.
-  Idle tabs are not visited at all, and a tab that produced output while you were
-  not looking gets a `●` marker that clears when you select it.
+Previews are drawn from each pane's screen contents — the emulator's character
+image — not grabbed from the widget (patch 8 in
+`third_party/qtermwidget/SUPERTERM.md`). A hidden `QTabWidget` page never
+paints, so grabbing it gives nothing; drawing from the screen works for hidden
+tabs as well as the visible one, with no need to bring them to the front. A
+split tab previews as its arrangement of panes. Every 250 ms, the tabs that have
+had output since their last preview are redrawn (about 2 ms for a full screen);
+idle tabs cost nothing.
 
 ### Box-drawing, block and Powerline characters
 
@@ -594,7 +607,7 @@ src-widgets/profiles.*    terminal profiles and their persistence
 src-widgets/colorscheme.* .colorscheme file read/write (20 roles)
 src-widgets/colorschemeeditor.*  scheme editor dialog with live preview
 src-widgets/screenshotoverlay.*  drag-to-select region screenshots
-src-widgets/thumbnailsidebar.*  left sidebar with live previews
+src-widgets/thumbnailsidebar.*  left sidebar of tab cards with live previews
 src-widgets/settings.*    QSettings-backed configuration
 third_party/qtermwidget/  vendored, patched QTermWidget (see SUPERTERM.md)
 data/superterm.desktop    launcher entry

@@ -40,6 +40,7 @@ public:
 
 protected:
     void closeEvent(QCloseEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private slots:
     /* Open a tab using the default profile. */
@@ -50,9 +51,6 @@ private slots:
     void applyAppearanceToAll();
     void updateStatus();
     void updateTabLayout();
-
-    /* Capture one tab's preview, rotating through all tabs over time. */
-    void captureNextPreview();
 
 private:
     /* The active pane of the current tab: what window actions act on. */
@@ -94,6 +92,20 @@ private:
     /* Take a tab out of the window (its panes are gone or going). */
     void removeTab(TerminalTab *tab);
     void syncTabTitles();
+
+    /*
+     * Sidebar cards. Previews are redrawn for tabs that have had output since
+     * their last one, or for all of them (after a resize, a reorder, a new
+     * look); the card's second line and badge are refreshed with them.
+     */
+    void refreshPreviews(bool all);
+    void updateCardDetails(int index);
+    /* The sidebar takes its colours from the current tab's scheme. */
+    void updateSidebarColours();
+    void setSidebarWidth(int width);
+    void showTabMenu(int index, const QPoint &globalPos);
+    /* Name a tab; a tmux tab's window is renamed in tmux. */
+    void renameTab(int index);
     void buildMenus();
     void buildStatusBar();
     void buildLayout();
@@ -141,20 +153,7 @@ private:
     QMenu *m_tmuxMenu = nullptr;
     QList<TmuxSession *> m_tmuxSessions;
 
-    /*
-     * Preview rotation.
-     *
-     * A widget only has pixels once it has painted, and a hidden QTabWidget
-     * page never paints: grabbing one yields a blank image (measured -- a
-     * hidden page also collapses to 100x30 until laid out). To preview
-     * inactive tabs the app briefly brings each one to the front, lets it
-     * paint, grabs it, and restores the user's tab. The dwell is short enough
-     * to be visually negligible but must span an event-loop turn.
-     */
-    int m_previewTarget = -1;      // tab currently being captured
-    int m_restoreTab = -1;         // tab to return to afterwards
-    bool m_capturingPreview = false;
-    int m_nextPreviewTab = 0;      // rotation cursor
+    bool m_movingFromSidebar = false;   // a card drag is moving a tab
 
     int m_nextTabId = 1;
 };

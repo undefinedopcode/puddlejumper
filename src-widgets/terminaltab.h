@@ -14,6 +14,7 @@
 
 #include <functional>
 
+class QPainter;
 class QSplitter;
 class QVBoxLayout;
 
@@ -92,10 +93,21 @@ public:
 
     bool hasNewOutput() const;
     void clearNewOutput();
-    QPixmap previewPixmap(const QSize &size) const;
+    /*
+     * A picture of the tab exactly `size` (logical pixels): each pane's screen
+     * in its share of the box, drawn from the panes' screens so it works while
+     * the tab is hidden.
+     */
+    QPixmap previewPixmap(const QSize &size, qreal devicePixelRatio = 1.0) const;
 
     /* The terminal background, for padding and splitter handles. */
     QColor backgroundColour() const;
+    /* The terminal's default text colour. */
+    QColor foregroundColour() const;
+
+    /* A name the user gave the tab, shown instead of its title; empty if none. */
+    QString customTitle() const { return m_customTitle; }
+    void setCustomTitle(const QString &title) { m_customTitle = title; }
 
 signals:
     void activePaneChanged(TerminalWidget *pane);
@@ -123,6 +135,8 @@ private:
     TerminalWidget *firstPaneIn(QWidget *node) const;
     TerminalWidget *paneContaining(QWidget *widget) const;
     void updateFrames();
+    void paintPreview(QPainter &painter, QWidget *node, const QRect &box,
+                      qreal devicePixelRatio) const;
     void watchPane(TerminalWidget *pane);
 
     QWidget *buildLayout(const PaneLayout &node,
@@ -138,4 +152,5 @@ private:
     int m_padding = 0;
     QString m_layoutShape;          // applyLayout(): structure of the last layout
     bool m_applyingLayout = false;
+    QString m_customTitle;
 };

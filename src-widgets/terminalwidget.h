@@ -136,8 +136,13 @@ public:
     /* Name of the foreground program ("" when it cannot be determined). */
     QString foregroundProgramName() const;
 
-    /* A live preview of the terminal as painted. Empty if unavailable. */
-    QPixmap previewPixmap(const QSize &size) const;
+    /* The screen's size in pixels at the current font: columns x lines cells. */
+    QSize screenPixelSize() const;
+    /*
+     * A picture of the screen, as large as fits in `size` (logical pixels)
+     * keeping its shape. Works while the pane is hidden. Empty if unavailable.
+     */
+    QPixmap previewPixmap(const QSize &size, qreal devicePixelRatio = 1.0) const;
 
     /*
      * Screenshots. Both report through screenshotTaken().

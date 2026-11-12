@@ -335,15 +335,83 @@ void TerminalTab::clearNewOutput()
         pane->clearNewOutput();
 }
 
-QPixmap TerminalTab::previewPixmap(const QSize &size) const
+QColor TerminalTab::foregroundColour() const
 {
-    // A single pane previews its display alone, as before splits existed; a
-    // split tab previews the whole arrangement.
-    const QList<TerminalWidget *> all = panes();
-    if (all.size() == 1)
-        return all.first()->previewPixmap(size);
-    return const_cast<TerminalTab *>(this)->grab().scaled(
-        size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    TerminalWidget *pane = m_active ? m_active.data() : firstPaneIn(m_root);
+    if (pane) {
+        if (auto *display = pane->findChild<Konsole::TerminalDisplay *>())
+            return display->colorTable()[DEFAULT_FORE_COLOR].color;
+    }
+    return palette().color(QPalette::WindowText);
+}
+
+QPixmap TerminalTab::previewPixmap(const QSize &size, qreal devicePixelRatio) const
+{
+    if (size.isEmpty() || !m_root)
+        return {};
+    QPixmap out((QSizeF(size) * devicePixelRatio).toSize());
+    out.setDevicePixelRatio(devicePixelRatio);
+    out.fill(backgroundColour());
+    QPainter painter(&out);
+    // Each pane's screen goes in its share of the box, top-left as on screen,
+    // so a split tab previews as its arrangement. Drawn from the panes' screens,
+    // which works for a hidden tab: no need to bring it to the front.
+    paintPreview(painter, m_root, QRect(QPoint(0, 0), size), devicePixelRatio);
+    return out;
+}
+
+void TerminalTab::paintPreview(QPainter &painter, QWidget *node, const QRect &box,
+                               qreal devicePixelRatio) const
+{
+    if (box.width() < 2 || box.height() < 2)
+        return;
+    if (auto *pane = qobject_cast<TerminalWidget *>(node)) {
+        const QPixmap pm = pane->previewPixmap(box.size(), devicePixelRatio);
+        if (!pm.isNull())
+            painter.drawPixmap(box.topLeft(), pm);
+        return;
+    }
+    auto *splitter = qobject_cast<QSplitter *>(node);
+    if (!splitter || splitter->count() == 0)
+        return;
+
+    // Share the box as the splitter shares its space. A splitter in a tab that
+    // has never been shown may not have sizes yet; split it evenly then.
+    const bool across = splitter->orientation() == Qt::Horizontal;
+    QList<int> sizes = splitter->sizes();
+    qint64 total = 0;
+    for (int s : sizes)
+        total += qMax(0, s);
+    if (total <= 0) {
+        sizes = QList<int>(splitter->count(), 1);
+        total = splitter->count();
+    }
+
+    constexpr int gap = 2;
+    const int extent = (across ? box.width() : box.height()) - gap * (splitter->count() - 1);
+    const QColor line = [this] {
+        QColor c = foregroundColour();
+        c.setAlphaF(0.25);
+        return c;
+    }();
+    int pos = across ? box.left() : box.top();
+    qint64 done = 0;
+    for (int i = 0; i < splitter->count(); ++i) {
+        const int start = pos;
+        done += qMax(0, sizes.value(i));
+        const int end = (across ? box.left() : box.top()) + int(extent * done / total)
+                        + gap * i;
+        const QRect part = across ? QRect(start, box.top(), end - start, box.height())
+                                  : QRect(box.left(), start, box.width(), end - start);
+        paintPreview(painter, splitter->widget(i), part, devicePixelRatio);
+        pos = end;
+        if (i + 1 < splitter->count()) {
+            const QRect divider = across ? QRect(pos, box.top(), gap, box.height())
+                                         : QRect(box.left(), pos, box.width(), gap);
+            painter.fillRect(divider, line);
+            pos += gap;
+        }
+    }
 }
 
 void TerminalTab::resizeEvent(QResizeEvent *event)
