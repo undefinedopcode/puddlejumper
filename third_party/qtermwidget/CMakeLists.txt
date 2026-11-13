@@ -72,6 +72,12 @@ if(HAVE_UPDWTMPX)
     target_compile_definitions(qtermwidget PRIVATE HAVE_UPDWTMPX)
 endif()
 
+# macOS has only the utmpx API; the legacy utmp functions kpty.cpp falls back
+# to (setutent, getutline, ...) don't exist there.
+if(APPLE)
+    target_compile_definitions(qtermwidget PRIVATE HAVE_UTMPX)
+endif()
+
 # Data lives in Qt resources (see below). There are no compiled translations:
 # upstream's are only for the search bar, which superterm doesn't use, so
 # TRANSLATIONS_DIR points at an empty resource path and loading quietly finds

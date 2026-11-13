@@ -6,6 +6,7 @@
 
 #include "mainwindow.h"
 
+#include "procinfo.h"
 #include "settingsdialog.h"
 #include "terminaltab.h"
 #include "terminalwidget.h"
@@ -2406,7 +2407,7 @@ void MainWindow::saveWorkspaceAs()
 
     // Each tab as a window: its panes' directories, and what each is running
     // as the command to start it with. A tmux pane's come from tmux and, for
-    // a server on this machine, /proc.
+    // a server on this machine, the process table.
     const auto describe = [this](TerminalWidget *pane) {
         QString dir = pane->currentDirectory();
         QStringList args = pane->foregroundCommandLine();
@@ -2422,23 +2423,11 @@ void MainWindow::saveWorkspaceAs()
             const QStringList f = QString::fromLocal8Bit(p.readAllStandardOutput()).trimmed()
                                       .split(QLatin1Char('\t'));
             dir = f.value(1);
-            // The pane's foreground process group, from its shell's stat.
-            QFile stat(QStringLiteral("/proc/%1/stat").arg(f.value(0)));
-            if (stat.open(QIODevice::ReadOnly)) {
-                const QString line = QString::fromLocal8Bit(stat.readAll());
-                const QStringList fields = line.mid(line.lastIndexOf(QLatin1Char(')')) + 2)
-                                               .split(QLatin1Char(' '));
-                const QString foreground = fields.value(5);   // tpgid
-                if (!foreground.isEmpty() && foreground != f.value(0)) {
-                    QFile cmdline(QStringLiteral("/proc/%1/cmdline").arg(foreground));
-                    if (cmdline.open(QIODevice::ReadOnly)) {
-                        for (const QByteArray &arg : cmdline.readAll().split('\0')) {
-                            if (!arg.isEmpty())
-                                args << QString::fromLocal8Bit(arg);
-                        }
-                    }
-                }
-            }
+            // The pane's foreground process group, from its shell's terminal.
+            const int shellPid = f.value(0).toInt();
+            const int foreground = procinfo::terminalForegroundGroup(shellPid);
+            if (foreground > 0 && foreground != shellPid)
+                args << procinfo::arguments(foreground);
         }
         QJsonObject o{{QStringLiteral("dir"), dir}};
         if (!args.isEmpty()) {

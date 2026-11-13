@@ -37,6 +37,10 @@
 #include <QtDebug>
 #include <QRegularExpression>
 
+#ifdef Q_OS_MACOS
+#include <libproc.h>   // superterm: currentWorkingDirectory() on macOS
+#endif
+
 #include "Pty.h"
 //#include "kptyprocess.h"
 #include "ScreenWindow.h"
@@ -171,6 +175,17 @@ QString Session::currentWorkingDirectory()
         goto fallback;
     }
     return d.canonicalPath();
+#elif defined(Q_OS_MACOS)
+    // superterm: macOS has no /proc; ask the kernel for the shell's current
+    // directory vnode instead.
+    {
+        struct proc_vnodepathinfo info;
+        if (proc_pidinfo(processId(), PROC_PIDVNODEPATHINFO, 0, &info, sizeof(info)) == sizeof(info)
+            && info.pvi_cdir.vip_path[0] != '\0') {
+            return QString::fromUtf8(info.pvi_cdir.vip_path);
+        }
+        goto fallback;
+    }
 #endif
 
 fallback:

@@ -60,7 +60,9 @@ QString resolveMonoFamily()
         if (families.contains(c, Qt::CaseInsensitive))
             return c;
     }
-    return QStringLiteral("monospace");
+    // "monospace" is a fontconfig alias; macOS has no such family, so ask Qt
+    // for the platform's fixed-pitch face (Menlo there) instead.
+    return QFontDatabase::systemFont(QFontDatabase::FixedFont).family();
 }
 } // namespace
 

@@ -7,6 +7,7 @@
 #include "terminalwidget.h"
 
 #include "colorscheme.h"
+#include "procinfo.h"
 #include "screenshotoverlay.h"
 
 #include <QAction>
@@ -423,32 +424,14 @@ QString TerminalWidget::foregroundProgramName() const
     if (!m_terminal)
         return QString();
 
-    const int fgPgrp = m_terminal->getForegroundProcessId();
-    if (fgPgrp <= 0)
-        return QString();
-
-    // /proc/<pid>/comm is the kernel's short name for the process, truncated to
-    // 15 characters. Read it directly rather than shelling out to ps.
-    QFile comm(QStringLiteral("/proc/%1/comm").arg(fgPgrp));
-    if (!comm.open(QIODevice::ReadOnly))
-        return QString();
-    return QString::fromUtf8(comm.readAll()).trimmed();
+    return procinfo::name(m_terminal->getForegroundProcessId());
 }
 
 QStringList TerminalWidget::foregroundCommandLine() const
 {
     if (!m_terminal || !hasRunningProcess())
         return {};
-    const int fgPgrp = m_terminal->getForegroundProcessId();
-    QFile cmdline(QStringLiteral("/proc/%1/cmdline").arg(fgPgrp));
-    if (fgPgrp <= 0 || !cmdline.open(QIODevice::ReadOnly))
-        return {};
-    QStringList args;
-    for (const QByteArray &arg : cmdline.readAll().split('\0')) {
-        if (!arg.isEmpty())
-            args << QString::fromLocal8Bit(arg);
-    }
-    return args;
+    return procinfo::arguments(m_terminal->getForegroundProcessId());
 }
 
 QSize TerminalWidget::screenPixelSize() const

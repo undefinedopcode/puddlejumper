@@ -52,6 +52,8 @@ qt_add_executable(superterm
     src-widgets/colorschemeeditor.h
     src-widgets/screenshotoverlay.cpp
     src-widgets/screenshotoverlay.h
+    src-widgets/procinfo.cpp
+    src-widgets/procinfo.h
     src-widgets/themeicon.h
     src-widgets/tmuxcontrol.cpp
     src-widgets/tmuxcontrol.h

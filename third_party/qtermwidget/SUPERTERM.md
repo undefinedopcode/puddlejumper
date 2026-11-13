@@ -18,7 +18,8 @@ and colour schemes in as Qt resources under `:/qtermwidget/`. Translations
 ## Patches
 
 Patches 1–6 are in `lib/TerminalDisplay.cpp` / `.h`; patch 7 also touches
-`qtermwidget`, `Session`, `Emulation` and `Vt102Emulation`. Each is marked
+`qtermwidget`, `Session`, `Emulation` and `Vt102Emulation`; patch 10 is in
+`lib/Session.cpp`. Each is marked
 with a `superterm:` comment.
 
 1. **Block elements and Powerline separators are drawn as geometry.**
@@ -85,6 +86,16 @@ with a `superterm:` comment.
    \` before every command, and tmux control mode passes pane output on as it
    is, so the command's name appeared in the output. All five are now consumed
    up to `ESC \` (or BEL, as OSC allows) and ignored.
+
+10. **The shell's current directory is found on macOS.**
+    `Session::currentWorkingDirectory()` reads `/proc/<pid>/cwd` on Linux only;
+    elsewhere it returned the directory the shell started in. On macOS it now
+    asks `proc_pidinfo(PROC_PIDVNODEPATHINFO)`, so new tabs and saved
+    workspaces follow the shell after a `cd` there too.
+
+The build also defines `HAVE_UTMPX` on macOS (in our `CMakeLists.txt`, not the
+sources): it has only the utmpx API, and `kpty.cpp` otherwise falls back to
+utmp functions that don't exist there.
 
 ## Updating
 
