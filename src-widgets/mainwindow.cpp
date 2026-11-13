@@ -7,6 +7,7 @@
 #include "mainwindow.h"
 
 #include "appicon.h"
+#include "macwindow.h"
 #include "procinfo.h"
 #include "settingsdialog.h"
 #include "tabstrip.h"
@@ -687,6 +688,8 @@ void MainWindow::buildMenus()
     spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     bar->addWidget(spacer);
     bar->addAction(settingsAct);
+
+    unifyTitleBar(this, bar);
 
     view->addSeparator();
     QAction *showBar = bar->toggleViewAction();

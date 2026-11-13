@@ -38,6 +38,7 @@ qt_add_executable(superterm
     src-widgets/appicon.cpp
     src-widgets/appicon.h
     src-widgets/cardstyle.h
+    src-widgets/macwindow.h
     src-widgets/main.cpp
     src-widgets/mainwindow.cpp
     src-widgets/mainwindow.h
@@ -85,6 +86,13 @@ target_link_libraries(superterm PRIVATE
 )
 
 set_target_properties(superterm PROPERTIES AUTOMOC ON)
+
+# macOS: the toolbar in the title bar (src-widgets/macwindow.h).
+if(APPLE)
+    enable_language(OBJCXX)
+    target_sources(superterm PRIVATE src-widgets/macwindow.mm)
+    target_link_libraries(superterm PRIVATE "-framework AppKit")
+endif()
 
 # Embed the icon so the window and taskbar get it without an install step.
 qt_add_resources(superterm "app_icons"
