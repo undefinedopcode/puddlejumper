@@ -11,6 +11,7 @@
 
 #include <QApplication>
 #include <QCommandLineParser>
+#include <QTimer>
 #include <QDebug>
 #include <QDir>
 #include <QIcon>
@@ -66,6 +67,12 @@ int main(int argc, char *argv[])
                        "the platform style."),
         QStringLiteral("name"));
     parser.addOption(styleOpt);
+    parser.addPositionalArgument(
+        QStringLiteral("workspace"),
+        QStringLiteral("A workspace to open: a folder (its .superterm.yml or .smug.yml, "
+                       "or a workspace for the folder), a workspace file, or the name of "
+                       "one in ~/.config/superterm/workspaces or ~/.config/smug."),
+        QStringLiteral("[workspace]"));
     parser.process(app);
 
     if (parser.isSet(styleOpt)) {
@@ -80,5 +87,10 @@ int main(int argc, char *argv[])
     }
     MainWindow window;
     window.show();
+    if (const QStringList args = parser.positionalArguments(); !args.isEmpty()) {
+        // Once the window is up, so dialogs (variables, trust) have a parent.
+        const QString target = args.first();
+        QTimer::singleShot(0, &window, [&window, target]() { window.openWorkspaceTarget(target); });
+    }
     return app.exec();
 }

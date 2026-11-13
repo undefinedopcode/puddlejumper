@@ -76,6 +76,13 @@ QList<QPair<QString, QString>> available();
 /* Whether `path` is in one of directories(): the user's own, not a project's. */
 bool isUsersOwn(const QString &path);
 
+/* A project's workspace file in `dir`: .superterm.yml, else .smug.yml
+ * (or .yaml); empty if it has none. */
+QString projectFileIn(const QString &dir);
+/* The nearest one in `dir` or a folder above it, stopping short of the home
+ * folder (and the root); empty if none. */
+QString findProjectFile(const QString &dir);
+
 /*
  * Variables `text` uses that neither `values` nor the environment define.
  * Those the file sets in its own env: are left alone: the panes have them,

@@ -42,6 +42,13 @@ class MainWindow : public QMainWindow
 public:
     explicit MainWindow(QWidget *parent = nullptr);
 
+    /*
+     * Open what the command line named: a folder (its project workspace
+     * file, or a workspace for the folder), a workspace file, or the name of
+     * one in the workspace directories.
+     */
+    void openWorkspaceTarget(const QString &target);
+
 protected:
     void closeEvent(QCloseEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
@@ -99,6 +106,11 @@ private:
      * workspace's tabs. One already open is switched to instead.
      */
     void openWorkspaceFile(const QString &path);
+    /* A folder: its .superterm.yml or .smug.yml if it has one, else a plain
+     * workspace for it (or the one already open there). */
+    void openFolder(const QString &dir);
+    /* Offer, in the status bar, a workspace file for where the shell is. */
+    void updateProjectNotice();
     /* Read a workspace's file again, with the variables it was opened with. */
     bool readWorkspaceFile(const QString &path, QHash<QString, QString> &variables,
                            WorkspaceSpec &spec, bool askForVariables);
@@ -213,6 +225,9 @@ private:
     QLabel *m_statusDir = nullptr;
     QLabel *m_statusInfo = nullptr;
     QLabel *m_screenshotNotice = nullptr;
+    QLabel *m_projectNotice = nullptr;
+    QString m_projectNoticeDir;    // the directory it was last worked out for
+    QString m_projectNoticeFile;
     QTimer *m_screenshotNoticeTimer = nullptr;
     QPixmap m_lastScreenshot;
     QTimer *m_previewTimer = nullptr;

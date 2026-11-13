@@ -380,6 +380,34 @@ bool isUsersOwn(const QString &path)
     return false;
 }
 
+QString projectFileIn(const QString &dir)
+{
+    for (const char *name : {".superterm.yml", ".superterm.yaml", ".smug.yml", ".smug.yaml"}) {
+        const QFileInfo f(QDir(dir).filePath(QLatin1String(name)));
+        if (f.isFile())
+            return f.absoluteFilePath();
+    }
+    return QString();
+}
+
+QString findProjectFile(const QString &dir)
+{
+    const QString home = QDir::cleanPath(QDir::homePath());
+    QDir d(dir);
+    if (dir.isEmpty() || !d.exists())
+        return QString();
+    while (true) {
+        const QString here = QDir::cleanPath(d.absolutePath());
+        if (here == home || d.isRoot())
+            return QString();
+        const QString found = projectFileIn(here);
+        if (!found.isEmpty())
+            return found;
+        if (!d.cdUp())
+            return QString();
+    }
+}
+
 QStringList missingVariables(const QString &text, const QHash<QString, QString> &values)
 {
     const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
@@ -438,8 +466,15 @@ bool parse(const QString &text, const QString &path, WorkspaceSpec &out, QString
         out.name = str(doc, "session");
         if (out.name.isEmpty())
             out.name = QFileInfo(path).completeBaseName();
+        // A project's file is about its folder, as smug run there would take
+        // it: no root means that folder, and a relative one is from there.
         const QString root = str(doc, "root");
-        out.root = root.isEmpty() ? QString() : resolve(QString(), root);
+        if (!isUsersOwn(path) && !path.isEmpty()) {
+            const QString folder = QFileInfo(path).absolutePath();
+            out.root = root.isEmpty() ? folder : resolve(folder, root);
+        } else {
+            out.root = root.isEmpty() ? QString() : resolve(QString(), root);
+        }
         QString colour = str(doc, "colour");
         if (colour.isEmpty())
             colour = str(doc, "color");

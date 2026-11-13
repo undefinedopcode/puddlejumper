@@ -598,7 +598,26 @@ shells.
   session is built at the size superterm will show it, to keep the sizes the
   file gives.
 
-Opening a project's `.smug.yml` straight from its folder is planned.
+### Project folders
+
+A project can keep its workspace file with its code, as `.superterm.yml` or
+smug's `.smug.yml` (or `.yaml`), so everyone working on it gets the same
+setup.
+
+- **Workspace → Open Folder…** opens a folder's file if it has one.
+  Otherwise it makes a workspace for the folder, named after it and starting
+  there, or switches to the one already open.
+- When the shell is in a project with a file whose workspace isn't open
+  (in that folder or one above it, short of your home folder), the status bar
+  says so, with a link to open it.
+- In a project's file, `root` is taken from the file's folder: left out, it's
+  the folder itself, as running smug there would take it.
+- A project's file is someone else's, so it always goes through the trust
+  prompt the first time and whenever it changes.
+
+From the command line, `superterm <workspace>` opens one at launch: a
+folder, a workspace file, or the name of a file in the workspace directories
+(as `smug start <name>` does).
 
 ## Split panes
 

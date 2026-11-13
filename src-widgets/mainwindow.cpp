@@ -203,7 +203,10 @@ MainWindow::MainWindow(QWidget *parent)
     // hidden tabs update as well as the visible one, and idle tabs cost nothing.
     m_previewTimer = new QTimer(this);
     m_previewTimer->setInterval(250);
-    connect(m_previewTimer, &QTimer::timeout, this, [this]() { refreshPreviews(false); });
+    connect(m_previewTimer, &QTimer::timeout, this, [this]() {
+        refreshPreviews(false);
+        updateProjectNotice();   // cheap unless the shell has changed directory
+    });
     m_previewTimer->start();
 
     connect(&m_settings, &Settings::appearanceChanged,
@@ -677,6 +680,17 @@ void MainWindow::buildStatusBar()
     m_screenshotNotice->hide();
     connect(m_screenshotNotice, &QLabel::linkActivated, this, &MainWindow::saveScreenshot);
     statusBar()->addPermanentWidget(m_screenshotNotice);
+
+    m_projectNotice = new QLabel(this);
+    m_projectNotice->setTextFormat(Qt::RichText);
+    m_projectNotice->setTextInteractionFlags(Qt::LinksAccessibleByMouse);
+    m_projectNotice->setFocusPolicy(Qt::NoFocus);
+    m_projectNotice->hide();
+    connect(m_projectNotice, &QLabel::linkActivated, this, [this]() {
+        if (!m_projectNoticeFile.isEmpty())
+            openWorkspaceFile(m_projectNoticeFile);
+    });
+    statusBar()->addPermanentWidget(m_projectNotice);
 
     m_screenshotNoticeTimer = new QTimer(this);
     m_screenshotNoticeTimer->setSingleShot(true);
@@ -1887,6 +1901,13 @@ void MainWindow::rebuildWorkspaceMenu()
             openWorkspaceFile(path);
     });
     m_workspaceMenu->addMenu(m_openWorkspaceMenu);
+    m_workspaceMenu->addAction(themeIcon({"folder-open", "document-open-folder", "folder"}),
+                               tr("Open &Folder…"), this, [this]() {
+        const QString dir = QFileDialog::getExistingDirectory(this, tr("Open Folder"),
+                                                              QDir::homePath());
+        if (!dir.isEmpty())
+            openFolder(dir);
+    });
 
     // Windows the current workspace's file keeps for when they're asked for.
     const Workspace &current = m_workspaces.at(m_currentWorkspace);
@@ -2579,4 +2600,78 @@ bool MainWindow::runSetupCommands(const QStringList &commands, const QString &di
     }
     progress.setValue(int(commands.size()));
     return true;
+}
+
+// ---- project folders ----------------------------------------------------------
+
+void MainWindow::openFolder(const QString &dir)
+{
+    const QString folder = QDir::cleanPath(QFileInfo(dir).absoluteFilePath());
+    const QString file = WorkspaceFile::projectFileIn(folder);
+    if (!file.isEmpty()) {
+        openWorkspaceFile(file);
+        return;
+    }
+    // No file: a workspace for the folder, named after it.
+    for (int i = 0; i < m_workspaces.size(); ++i) {
+        if (QDir::cleanPath(m_workspaces.at(i).root) == folder && m_workspaces.at(i).definition.isEmpty()) {
+            switchWorkspace(i);
+            return;
+        }
+    }
+    Workspace ws;
+    ws.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    ws.name = QDir(folder).dirName();
+    ws.root = folder;
+    m_workspaces << ws;
+    switchWorkspace(m_workspaces.size() - 1);
+}
+
+void MainWindow::openWorkspaceTarget(const QString &target)
+{
+    const QFileInfo info(target);
+    if (info.isDir()) {
+        openFolder(info.absoluteFilePath());
+        return;
+    }
+    if (info.isFile()) {
+        openWorkspaceFile(info.absoluteFilePath());
+        return;
+    }
+    for (const auto &[name, path] : WorkspaceFile::available()) {
+        if (name == target) {
+            openWorkspaceFile(path);
+            return;
+        }
+    }
+    QMessageBox::warning(this, tr("Open Workspace"),
+                         tr("There's no folder, file or workspace called “%1”.\n\n"
+                            "Named workspaces are the files in %2.")
+                             .arg(target, WorkspaceFile::directories().join(tr(" and "))));
+}
+
+void MainWindow::updateProjectNotice()
+{
+    // Looked for only when the shell moves; whether it's open, every time.
+    TerminalWidget *pane = currentTerminal();
+    const QString dir = pane ? pane->currentDirectory() : QString();
+    if (dir != m_projectNoticeDir) {
+        m_projectNoticeDir = dir;
+        m_projectNoticeFile = WorkspaceFile::findProjectFile(dir);
+    }
+    bool open = false;
+    for (const Workspace &w : std::as_const(m_workspaces))
+        open = open || w.definition == m_projectNoticeFile;
+    if (m_projectNoticeFile.isEmpty() || open) {
+        m_projectNotice->hide();
+        return;
+    }
+    const QString text = tr("%1 has a workspace file · <a href=\"open\">Open</a>")
+                             .arg(QDir(QFileInfo(m_projectNoticeFile).absolutePath()).dirName()
+                                      .toHtmlEscaped());
+    if (m_projectNotice->text() != text) {
+        m_projectNotice->setText(text);
+        m_projectNotice->setToolTip(tildePath(m_projectNoticeFile));
+    }
+    m_projectNotice->show();
 }
