@@ -9,6 +9,7 @@
 #include "terminalwidget.h"
 
 #include <QApplication>
+#include <QJsonArray>
 #include <QPainter>
 #include <QSet>
 #include <QSplitter>
@@ -255,6 +256,85 @@ void TerminalTab::collapse(QSplitter *splitter)
     replaceInTree(splitter, only);
     splitter->hide();
     splitter->deleteLater();
+}
+
+QJsonObject TerminalTab::saveLayout(const std::function<QJsonObject(TerminalWidget *)> &describe) const
+{
+    QJsonObject out = saveNode(m_root, describe);
+    out.insert(QStringLiteral("active"), qMax(0, int(panes().indexOf(m_active.data()))));
+    return out;
+}
+
+QJsonObject TerminalTab::saveNode(QWidget *node,
+                                  const std::function<QJsonObject(TerminalWidget *)> &describe) const
+{
+    if (auto *pane = qobject_cast<TerminalWidget *>(node))
+        return describe(pane);
+    auto *splitter = qobject_cast<QSplitter *>(node);
+    if (!splitter)
+        return {};
+    QJsonArray children;
+    QJsonArray sizes;
+    const QList<int> px = splitter->sizes();
+    for (int i = 0; i < splitter->count(); ++i) {
+        children.append(saveNode(splitter->widget(i), describe));
+        sizes.append(px.value(i));
+    }
+    return {
+        {QStringLiteral("split"), splitter->orientation() == Qt::Horizontal
+                                      ? QStringLiteral("right") : QStringLiteral("down")},
+        {QStringLiteral("sizes"), sizes},
+        {QStringLiteral("panes"), children},
+    };
+}
+
+TerminalTab *TerminalTab::restoreLayout(const QJsonObject &layout,
+                                        const std::function<TerminalWidget *(const QJsonObject &)> &makePane)
+{
+    auto *tab = new TerminalTab(nullptr);
+    QWidget *root = tab->restoreNode(layout, makePane);
+    if (!root) {
+        delete tab;
+        return nullptr;
+    }
+    tab->m_root = root;
+    tab->m_layout->addWidget(root);
+    const QList<TerminalWidget *> all = tab->panes();
+    for (TerminalWidget *pane : all)
+        tab->watchPane(pane);
+    tab->m_active = all.value(layout.value(QStringLiteral("active")).toInt(), all.value(0));
+    tab->updateFrames();
+    return tab;
+}
+
+QWidget *TerminalTab::restoreNode(const QJsonObject &node,
+                                  const std::function<TerminalWidget *(const QJsonObject &)> &makePane)
+{
+    const QString split = node.value(QStringLiteral("split")).toString();
+    if (split.isEmpty())
+        return makePane(node);
+
+    // A split that comes back with fewer than two parts is just that part.
+    QList<QWidget *> parts;
+    QList<int> sizes;
+    const QJsonArray children = node.value(QStringLiteral("panes")).toArray();
+    const QJsonArray savedSizes = node.value(QStringLiteral("sizes")).toArray();
+    for (int i = 0; i < children.size(); ++i) {
+        if (QWidget *part = restoreNode(children.at(i).toObject(), makePane)) {
+            parts << part;
+            sizes << qMax(1, savedSizes.at(i).toInt(1));
+        }
+    }
+    if (parts.size() < 2)
+        return parts.value(0);
+
+    QSplitter *splitter = makeSplitter(split == QLatin1String("down") ? Qt::Vertical
+                                                                      : Qt::Horizontal);
+    for (QWidget *part : std::as_const(parts))
+        splitter->addWidget(part);
+    // Not shown yet, so these are taken as proportions when it is laid out.
+    splitter->setSizes(sizes);
+    return splitter;
 }
 
 void TerminalTab::setActivePane(TerminalWidget *pane, bool giveFocus)

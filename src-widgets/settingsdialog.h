@@ -135,6 +135,7 @@ private:
     QCheckBox *m_monitorSilenceBox = nullptr;
     QSpinBox *m_silenceTimeoutBox = nullptr;
     QCheckBox *m_confirmCloseBox = nullptr;
+    QCheckBox *m_restoreSessionBox = nullptr;
 
     // Profiles page.
     QListWidget *m_profileList = nullptr;

@@ -32,6 +32,7 @@ constexpr auto kScrollback  = "scrolling/scrollback";
 constexpr auto kScrollbarPos   = "scrolling/scrollbarPosition";
 constexpr auto kFlowCtrlWarn   = "scrolling/flowControlWarning";
 constexpr auto kConfirmCloseRunning = "scrolling/confirmCloseWithRunningProcesses";
+constexpr auto kRestoreSession = "window/restoreSession";
 constexpr auto kMonitorActivity = "scrolling/monitorActivity";
 constexpr auto kMonitorSilence  = "scrolling/monitorSilence";
 constexpr auto kSilenceTimeout  = "scrolling/silenceTimeout";
@@ -112,6 +113,8 @@ void Settings::load()
     m_scrolling.confirmCloseWithRunningProcesses =
         m_settings.value(kConfirmCloseRunning,
                          m_scrolling.confirmCloseWithRunningProcesses).toBool();
+    m_scrolling.restoreSession =
+        m_settings.value(kRestoreSession, m_scrolling.restoreSession).toBool();
     m_scrolling.monitorActivity =
         m_settings.value(kMonitorActivity, m_scrolling.monitorActivity).toBool();
     m_scrolling.monitorSilence =
@@ -368,6 +371,15 @@ void Settings::setConfirmCloseWithRunningProcesses(bool v)
     if (m_scrolling.confirmCloseWithRunningProcesses == v) return;
     m_scrolling.confirmCloseWithRunningProcesses = v;
     m_settings.setValue(kConfirmCloseRunning, v);
+    m_settings.sync();
+    emit scrollingChanged();
+}
+
+void Settings::setRestoreSession(bool v)
+{
+    if (m_scrolling.restoreSession == v) return;
+    m_scrolling.restoreSession = v;
+    m_settings.setValue(kRestoreSession, v);
     m_settings.sync();
     emit scrollingChanged();
 }

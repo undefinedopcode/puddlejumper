@@ -9,7 +9,9 @@
 #include <QColor>
 #include <QWidget>
 
+class QIcon;
 class QListWidget;
+class QMenu;
 class QListWidgetItem;
 class QPoint;
 class QResizeEvent;
@@ -60,6 +62,13 @@ public:
      * a little lighter again, text in the scheme's own colour.
      */
     void setColours(const QColor &background, const QColor &foreground);
+
+    /*
+     * The workspace header above the cards: its name and colour, opening
+     * `menu` (the window's workspace menu) when clicked. Hidden while there
+     * is only one workspace.
+     */
+    void setWorkspace(const QString &name, const QIcon &icon, QMenu *menu, bool show);
     QColor background() const { return m_background; }
 
 signals:
@@ -82,6 +91,7 @@ private:
 
     QListWidget *m_list = nullptr;
     QToolButton *m_newTab = nullptr;
+    QToolButton *m_workspace = nullptr;
     qreal m_aspect = 0.6;
     QSize m_lastPreviewSize;
     QColor m_background;

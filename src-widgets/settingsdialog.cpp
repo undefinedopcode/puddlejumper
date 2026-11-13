@@ -500,6 +500,15 @@ QWidget *SettingsDialog::buildWindowPage()
     quitting->addRow(QString(), makeHint(tr("For an editor, a build or an ssh session. "
                                             "An idle shell prompt never asks."), page));
 
+    m_restoreSessionBox = new QCheckBox(tr("Reopen workspaces and tabs at startup"), page);
+    connect(m_restoreSessionBox, &QCheckBox::toggled, this, [this](bool v) {
+        m_settings.setRestoreSession(v);
+    });
+    quitting->addRow(tr("Next start"), m_restoreSessionBox);
+    quitting->addRow(QString(), makeHint(tr("Layouts, directories and names; programs "
+                                            "aren't restarted. Running tmux sessions "
+                                            "are reattached."), page));
+
     layout->addStretch(1);
     return page;
 }
@@ -1035,4 +1044,5 @@ void SettingsDialog::syncFromSettings()
     m_silenceTimeoutBox->setValue(s.silenceTimeout);
     m_silenceTimeoutBox->setEnabled(s.monitorSilence);
     m_confirmCloseBox->setChecked(s.confirmCloseWithRunningProcesses);
+    m_restoreSessionBox->setChecked(s.restoreSession);
 }

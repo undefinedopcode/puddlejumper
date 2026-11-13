@@ -110,6 +110,13 @@ public:
         bool    confirmCloseWithRunningProcesses = true;
 
         /*
+         * Reopen the workspaces and tabs that were open at quit: their
+         * layouts, directories and names (programs are not restarted), and
+         * tmux sessions on this machine that are still running.
+         */
+        bool    restoreSession = true;
+
+        /*
          * Paste handling (QTermWidget's own options). Both off by default,
          * which is what the library does. These are input behaviour rather
          * than scrolling, but live here because they are applied with the rest
@@ -143,6 +150,7 @@ public:
     void setScrollbarPosition(const QString &v);
     void setFlowControlWarning(bool v);
     void setConfirmCloseWithRunningProcesses(bool v);
+    void setRestoreSession(bool v);
     void setMonitorActivity(bool v);
     void setMonitorSilence(bool v);
     void setSilenceTimeout(int v);

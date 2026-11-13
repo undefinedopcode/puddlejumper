@@ -15,6 +15,7 @@
 #include "tmuxsession.h"
 
 #include <QAction>
+#include <QActionGroup>
 #include <QApplication>
 #include <QClipboard>
 #include <QCloseEvent>
@@ -26,6 +27,9 @@
 #include <QFileInfo>
 #include <QFormLayout>
 #include <QInputDialog>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLineEdit>
 #include <QProcess>
 #include <QDialogButtonBox>
@@ -38,12 +42,14 @@
 #include <QPushButton>
 #include <QPainter>
 #include <QSplitter>
+#include <QSettings>
 #include <QSplitterHandle>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTabBar>
 #include <QTabWidget>
 #include <QTimer>
+#include <QUuid>
 #include <QToolBar>
 #include <QToolButton>
 #include <QVBoxLayout>
@@ -77,6 +83,16 @@ QString shellQuote(const QString &arg)
 }
 
 constexpr int kDefaultSidebarWidth = 220;
+
+// On a tab: it has output that hasn't been seen (kept while it is parked).
+constexpr char kBusyProperty[] = "supertermBusy";
+
+// On a new tab: until when (ms since the epoch) its output is its shell
+// starting up, not news.
+constexpr char kQuietUntilProperty[] = "supertermQuietUntil";
+
+// Where the session (workspaces and their tabs) is kept between runs.
+constexpr auto kSessionKey = "session/state";
 
 /*
  * The handle between the sidebar and the terminals: painted in the sidebar's
@@ -165,6 +181,12 @@ MainWindow::MainWindow(QWidget *parent)
     setWindowTitle(QStringLiteral("SuperTerm"));
     setMinimumSize(760, 420);
 
+    // There is always a workspace; a saved session replaces this one.
+    Workspace first;
+    first.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    first.name = tr("Default");
+    m_workspaces << first;
+
     buildLayout();
     buildMenus();
     buildStatusBar();
@@ -198,8 +220,10 @@ MainWindow::MainWindow(QWidget *parent)
         restoreState(m_settings.windowState());
 
     refreshProfiles();   // populate the submenu before the first tab opens
-    newTab();
+    if (!m_settings.scrolling().restoreSession || !restoreSession())
+        newTab();
     updateTabLayout();
+    updateWorkspaceChrome();
 }
 
 void MainWindow::buildLayout()
@@ -210,6 +234,9 @@ void MainWindow::buildLayout()
     m_splitter->setHandleWidth(5);
 
     m_sidebar = new ThumbnailSidebar(m_splitter);
+
+    m_parking = new QWidget(this);
+    m_parking->hide();
 
     m_tabs = new QTabWidget(m_splitter);
     m_tabs->setTabsClosable(true);
@@ -243,22 +270,7 @@ void MainWindow::buildLayout()
     });
 
     connect(m_tabs, &QTabWidget::tabCloseRequested, this, &MainWindow::closeTab);
-    connect(m_tabs, &QTabWidget::currentChanged, this, [this](int index) {
-        m_sidebar->setCurrentIndex(index);
-        if (auto *tab = tabAt(index)) {
-            // Keep tmux's current window in step, so another client attaching
-            // sees the same one.
-            if (auto *session = tmuxSessionFor(tab))
-                session->selectWindow(tab);
-            // Selecting a tab counts as having seen its output.
-            m_sidebar->setBusy(index, false);
-            if (tab->activePane())
-                tab->activePane()->focusTerminal();
-            syncTabFromActivePane(tab);
-        }
-        updateSidebarColours();
-        updateStatus();
-    });
+    connect(m_tabs, &QTabWidget::currentChanged, this, &MainWindow::onCurrentTabChanged);
     // A tab dragged along the tab bar: move its card too. (A card dragged in
     // the sidebar moves the tab, below, and the card is already in place.)
     connect(m_tabs->tabBar(), &QTabBar::tabMoved, this, [this](int from, int to) {
@@ -281,6 +293,29 @@ void MainWindow::buildLayout()
             this, &MainWindow::showTabMenu);
     connect(m_sidebar, &ThumbnailSidebar::previewSizeChanged,
             this, [this]() { refreshPreviews(true); });
+}
+
+void MainWindow::onCurrentTabChanged(int index)
+{
+    // Mid-switch the tab widget fills and empties; the switch calls this once
+    // it's done.
+    if (m_switchingWorkspace)
+        return;
+    m_sidebar->setCurrentIndex(index);
+    if (auto *tab = tabAt(index)) {
+        // Keep tmux's current window in step, so another client attaching
+        // sees the same one.
+        if (auto *session = tmuxSessionFor(tab))
+            session->selectWindow(tab);
+        // Selecting a tab counts as having seen its output.
+        m_sidebar->setBusy(index, false);
+        tab->setProperty(kBusyProperty, false);
+        if (tab->activePane())
+            tab->activePane()->focusTerminal();
+        syncTabFromActivePane(tab);
+    }
+    updateSidebarColours();
+    updateStatus();
 }
 
 void MainWindow::setSidebarWidth(int width)
@@ -414,6 +449,37 @@ void MainWindow::buildMenus()
     });
 
     auto *view = menuBar()->addMenu(tr("&View"));
+
+    // The workspace list is rebuilt whenever it changes (and as the menu
+    // opens); these actions are the window's, so they and their shortcuts
+    // survive that.
+    m_workspaceMenu = menuBar()->addMenu(tr("&Workspace"));
+    connect(m_workspaceMenu, &QMenu::aboutToShow, this, &MainWindow::rebuildWorkspaceMenu);
+    m_newWorkspaceAct = new QAction(themeIcon({"list-add"}), tr("&New Workspace…"), this);
+    connect(m_newWorkspaceAct, &QAction::triggered, this, [this]() { newWorkspace(true); });
+    m_editWorkspaceAct = new QAction(themeIcon({"document-edit", "document-properties"}),
+                                     tr("&Edit Workspace…"), this);
+    connect(m_editWorkspaceAct, &QAction::triggered, this,
+            [this]() { editWorkspace(m_currentWorkspace); });
+    m_closeWorkspaceAct = new QAction(themeIcon({"window-close"}), tr("&Close Workspace"), this);
+    connect(m_closeWorkspaceAct, &QAction::triggered, this,
+            [this]() { closeWorkspace(m_currentWorkspace); });
+    // Ctrl+Shift+PgUp/PgDn: no terminal program has a use for them.
+    m_nextWorkspaceAct = new QAction(tr("Ne&xt Workspace"), this);
+    m_nextWorkspaceAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+PgDown")));
+    connect(m_nextWorkspaceAct, &QAction::triggered, this, [this]() {
+        switchWorkspace((m_currentWorkspace + 1) % m_workspaces.size());
+    });
+    m_prevWorkspaceAct = new QAction(tr("Pre&vious Workspace"), this);
+    m_prevWorkspaceAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+PgUp")));
+    connect(m_prevWorkspaceAct, &QAction::triggered, this, [this]() {
+        const int n = m_workspaces.size();
+        switchWorkspace((m_currentWorkspace - 1 + n) % n);
+    });
+    // Shortcuts only work for actions that are in a widget.
+    addAction(m_nextWorkspaceAct);
+    addAction(m_prevWorkspaceAct);
+    rebuildWorkspaceMenu();
     // Filled each time it opens, since tmux sessions come and go outside.
     m_tmuxMenu = menuBar()->addMenu(tr("t&mux"));
     connect(m_tmuxMenu, &QMenu::aboutToShow, this, &MainWindow::rebuildTmuxMenu);
@@ -511,6 +577,15 @@ void MainWindow::buildMenus()
     auto *bar = addToolBar(tr("Main Toolbar"));
     bar->setObjectName(QStringLiteral("mainToolBar"));
     bar->setFloatable(false);
+
+    // The workspace first: everything else acts within it.
+    m_workspaceButton = new QToolButton(bar);
+    m_workspaceButton->setMenu(m_workspaceMenu);
+    m_workspaceButton->setPopupMode(QToolButton::InstantPopup);
+    m_workspaceButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_workspaceButton->setToolTip(tr("Workspace: switch, add or edit"));
+    bar->addWidget(m_workspaceButton);
+    bar->addSeparator();
 
     // New Tab with the profile list as a drop-down, rather than a second
     // button: clicking opens the default profile, the arrow picks another.
@@ -680,9 +755,23 @@ int MainWindow::tabIndexOf(const QWidget *pane) const
 QList<TerminalWidget *> MainWindow::allPanes() const
 {
     QList<TerminalWidget *> out;
+    for (TerminalTab *tab : allTabs())
+        out += tab->panes();
+    return out;
+}
+
+QList<TerminalTab *> MainWindow::allTabs() const
+{
+    QList<TerminalTab *> out;
     for (int i = 0; i < m_tabs->count(); ++i) {
         if (auto *tab = tabAt(i))
-            out += tab->panes();
+            out << tab;
+    }
+    for (const Workspace &w : m_workspaces) {
+        for (const QPointer<TerminalTab> &tab : w.parked) {
+            if (tab)
+                out << tab;
+        }
     }
     return out;
 }
@@ -699,13 +788,22 @@ TerminalWidget *MainWindow::makePane(const TerminalProfile &profile,
     return pane;
 }
 
-int MainWindow::addTab(TerminalTab *tab, const QString &text, const QString &toolTip)
+int MainWindow::addTab(TerminalTab *tab, const QString &text, const QString &toolTip,
+                       int workspace)
 {
-    const int index = m_tabs->addTab(tab, text);
-    m_tabs->setTabToolTip(index, toolTip);
     wireTab(tab);
     for (TerminalWidget *pane : tab->panes())
         wirePane(pane);
+    tab->setProperty(kQuietUntilProperty, QDateTime::currentMSecsSinceEpoch() + 3000);
+    if (workspace >= 0 && workspace < m_workspaces.size() && workspace != m_currentWorkspace) {
+        // For a workspace not on screen: parked until it is. Its text and
+        // tooltip are set from its pane when it is shown.
+        tab->setParent(m_parking);
+        m_workspaces[workspace].parked << tab;
+        return -1;
+    }
+    const int index = m_tabs->addTab(tab, text);
+    m_tabs->setTabToolTip(index, toolTip);
     syncTabTitles();
     return index;
 }
@@ -782,9 +880,7 @@ void MainWindow::wirePane(TerminalWidget *term)
     // the visible "something changed here" cue, and it also tells the preview
     // rotation which tab is worth re-capturing.
     connect(term, &TerminalWidget::outputArrived, this, [this, term]() {
-        const int i = tabIndexOf(term);
-        if (i >= 0 && i != m_tabs->currentIndex())
-            m_sidebar->setBusy(i, true);
+        markTabBusy(tabOf(term));
     });
 
     connect(term, &TerminalWidget::screenshotTaken, this, &MainWindow::onScreenshot);
@@ -801,11 +897,7 @@ void MainWindow::wirePane(TerminalWidget *term)
     // marker: the sidebar prefix-dot is cheap, survives, and clears on tab
     // select, which is exactly the affordance "come back when the build is
     // done" wants. The signals only fire while the matching setting is on.
-    auto markIfBackground = [this, term]() {
-        const int i = tabIndexOf(term);
-        if (i >= 0 && i != m_tabs->currentIndex())
-            m_sidebar->setBusy(i, true);
-    };
+    auto markIfBackground = [this, term]() { markTabBusy(tabOf(term)); };
     connect(term, &TerminalWidget::activityDetected, this, markIfBackground);
     connect(term, &TerminalWidget::silenceDetected,  this, markIfBackground);
 }
@@ -840,8 +932,16 @@ void MainWindow::closePane(TerminalWidget *pane)
 void MainWindow::removeTab(TerminalTab *tab)
 {
     const int index = m_tabs->indexOf(tab);
-    if (index < 0)
+    if (index < 0) {
+        // Parked in another workspace (its shell exited, or its tmux window
+        // closed), or in one that has been closed.
+        if (!tab)
+            return;
+        for (Workspace &w : m_workspaces)
+            w.parked.removeAll(tab);
+        tab->deleteLater();
         return;
+    }
     m_tabs->removeTab(index);
     tab->deleteLater();
 
@@ -1014,14 +1114,15 @@ void MainWindow::connectTmuxHost()
         QStringLiteral("tmux -u -C new-session -A -s ") + shellQuote(name)});
 }
 
-void MainWindow::attachTmux(const QString &label, const QStringList &command)
+void MainWindow::attachTmux(const QString &label, const QStringList &command,
+                            const QString &workspaceId)
 {
     for (TmuxSession *s : std::as_const(m_tmuxSessions)) {
         if (s->label() != label)
             continue;
         qCInfo(lcTmux) << "attach" << label << "already open with" << s->tabs().size() << "tabs";
         if (!s->tabs().isEmpty()) {
-            m_tabs->setCurrentWidget(s->tabs().first());
+            showTab(s->tabs().first());
             return;
         }
         // Still connected but showing nothing, so attaching again would
@@ -1035,14 +1136,20 @@ void MainWindow::attachTmux(const QString &label, const QStringList &command)
     auto *session = new TmuxSession(label, command, m_settings,
                                     m_profiles.defaultProfile(), this);
     m_tmuxSessions << session;
+    m_sessionWorkspace.insert(session, workspaceId.isEmpty()
+                                           ? m_workspaces.value(m_currentWorkspace).id
+                                           : workspaceId);
     auto shownAny = std::make_shared<bool>(false);
 
     connect(session, &TmuxSession::tabAdded, this,
             [this, session, shownAny](TerminalTab *tab, const QString &name) {
-        const int index = addTab(tab, name, tr("tmux %1 — %2").arg(session->label(), name));
+        // Into the session's workspace, which may not be the one on screen.
+        const int index = addTab(tab, name, tr("tmux %1 — %2").arg(session->label(), name),
+                                 workspaceIndex(m_sessionWorkspace.value(session)));
         if (!*shownAny) {
             *shownAny = true;
-            m_tabs->setCurrentIndex(index);
+            if (index >= 0)
+                m_tabs->setCurrentIndex(index);
             rebuildTmuxMenu();   // for a global menu, which may not ask again
         }
     });
@@ -1058,6 +1165,7 @@ void MainWindow::attachTmux(const QString &label, const QStringList &command)
             [this, session, shownAny](const QString &reason) {
         qCInfo(lcTmux) << "session" << session->label() << "ended:" << reason;
         m_tmuxSessions.removeOne(session);
+        m_sessionWorkspace.remove(session);
         session->deleteLater();
         rebuildTmuxMenu();
         if (!*shownAny) {
@@ -1095,7 +1203,9 @@ void MainWindow::newTabWithProfile(const QString &profileId)
         profileId.isEmpty() ? m_profiles.defaultProfile()
                             : m_profiles.profileById(profileId);
 
-    auto *term = makePane(profile);
+    // In the workspace's folder, when it has one (and it still exists).
+    const QString root = m_workspaces.value(m_currentWorkspace).root;
+    auto *term = makePane(profile, !root.isEmpty() && QDir(root).exists() ? root : QString());
     auto *tab = new TerminalTab(term);
 
     // The tab tooltip carries the profile, which is the only cue in the
@@ -1181,6 +1291,11 @@ void MainWindow::syncTabTitles()
     for (int i = 0; i < m_tabs->count(); ++i)
         titles << m_tabs->tabText(i);
     m_sidebar->syncTabs(titles, m_tabs->currentIndex());
+    // The cards are new: put back the marks for unseen output.
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        if (auto *tab = tabAt(i); tab && tab->property(kBusyProperty).toBool())
+            m_sidebar->setBusy(i, true);
+    }
     refreshPreviews(true);
 }
 
@@ -1255,6 +1370,28 @@ void MainWindow::showTabMenu(int index, const QPoint &globalPos)
             }
         });
         others->setEnabled(m_tabs->count() > 1);
+
+        // A tmux session lives in one workspace, so its tabs move together.
+        QMenu *move = menu.addMenu(tmuxSessionFor(tabAt(index)) ? tr("&Move Session to Workspace")
+                                                                : tr("&Move to Workspace"));
+        QPointer<TerminalTab> tab = tabAt(index);
+        for (int w = 0; w < m_workspaces.size(); ++w) {
+            if (w == m_currentWorkspace)
+                continue;
+            const QString id = m_workspaces.at(w).id;
+            move->addAction(m_workspaces.at(w).icon(palette().color(QPalette::WindowText)),
+                            m_workspaces.at(w).name, this, [this, tab, id]() {
+                if (tab)
+                    moveTabToWorkspace(tab, workspaceIndex(id));
+            });
+        }
+        if (!move->isEmpty())
+            move->addSeparator();
+        move->addAction(themeIcon({"list-add"}), tr("New Workspace…"), this, [this, tab]() {
+            const int w = newWorkspace(false);
+            if (tab && w >= 0)
+                moveTabToWorkspace(tab, w);
+        });
         menu.addSeparator();
     }
     menu.addAction(themeIcon({"tab-new", "list-add"}), tr("&New Tab"), this, &MainWindow::newTab);
@@ -1435,5 +1572,423 @@ void MainWindow::closeEvent(QCloseEvent *event)
     // stored config never points at a throwaway file.
     m_settings.finaliseLiveSchemes();
     m_settings.saveWindowGeometry(saveGeometry(), saveState());
+    saveSession();
     QMainWindow::closeEvent(event);
+}
+
+// ---- workspaces ---------------------------------------------------------------
+
+int MainWindow::workspaceOf(const TerminalTab *tab) const
+{
+    if (!tab)
+        return -1;
+    if (m_tabs->indexOf(const_cast<TerminalTab *>(tab)) >= 0)
+        return m_currentWorkspace;
+    for (int i = 0; i < m_workspaces.size(); ++i) {
+        for (const QPointer<TerminalTab> &t : m_workspaces.at(i).parked) {
+            if (t == tab)
+                return i;
+        }
+    }
+    return -1;
+}
+
+int MainWindow::workspaceIndex(const QString &id) const
+{
+    for (int i = 0; i < m_workspaces.size(); ++i) {
+        if (m_workspaces.at(i).id == id)
+            return i;
+    }
+    return -1;
+}
+
+void MainWindow::switchWorkspace(int index)
+{
+    if (index < 0 || index >= m_workspaces.size() || index == m_currentWorkspace)
+        return;
+
+    m_switchingWorkspace = true;
+    Workspace &from = m_workspaces[m_currentWorkspace];
+    from.parked.clear();
+    from.currentTab = qMax(0, m_tabs->currentIndex());
+    while (m_tabs->count() > 0) {
+        TerminalTab *tab = tabAt(0);
+        m_tabs->removeTab(0);
+        if (tab) {
+            tab->setParent(m_parking);
+            from.parked << tab;
+        }
+    }
+
+    m_currentWorkspace = index;
+    Workspace &to = m_workspaces[index];
+    to.unseenOutput = false;
+    for (const QPointer<TerminalTab> &tab : std::as_const(to.parked)) {
+        if (tab)
+            m_tabs->addTab(tab, QString());
+    }
+    to.parked.clear();
+    m_switchingWorkspace = false;
+
+    if (m_tabs->count() == 0) {
+        newTab();   // a new or emptied workspace starts with a tab
+    } else {
+        for (int i = 0; i < m_tabs->count(); ++i)
+            syncTabFromActivePane(tabAt(i));
+        const int current = qBound(0, to.currentTab, m_tabs->count() - 1);
+        m_tabs->setCurrentIndex(current);
+        syncTabTitles();
+        onCurrentTabChanged(current);
+    }
+    updateWorkspaceChrome();
+}
+
+void MainWindow::showTab(TerminalTab *tab)
+{
+    const int w = workspaceOf(tab);
+    if (w < 0)
+        return;
+    switchWorkspace(w);
+    m_tabs->setCurrentWidget(tab);
+}
+
+int MainWindow::newWorkspace(bool show)
+{
+    Workspace ws;
+    ws.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    if (!WorkspaceDialog::edit(this, tr("New Workspace"), ws))
+        return -1;
+    m_workspaces << ws;
+    const int index = m_workspaces.size() - 1;
+    if (show)
+        switchWorkspace(index);
+    else
+        updateWorkspaceChrome();
+    return index;
+}
+
+void MainWindow::editWorkspace(int index)
+{
+    if (index < 0 || index >= m_workspaces.size())
+        return;
+    Workspace ws = m_workspaces.at(index);
+    if (!WorkspaceDialog::edit(this, tr("Edit Workspace"), ws))
+        return;
+    m_workspaces[index].name = ws.name;
+    m_workspaces[index].root = ws.root;
+    m_workspaces[index].colour = ws.colour;
+    updateWorkspaceChrome();
+}
+
+void MainWindow::closeWorkspace(int index)
+{
+    if (index < 0 || index >= m_workspaces.size() || m_workspaces.size() < 2)
+        return;
+    const QString name = m_workspaces.at(index).name;
+
+    // Its tabs, and what closing them would stop.
+    QList<TerminalTab *> tabs;
+    for (TerminalTab *tab : allTabs()) {
+        if (workspaceOf(tab) == index)
+            tabs << tab;
+    }
+    QStringList running;
+    QList<TmuxSession *> sessions;
+    for (TerminalTab *tab : std::as_const(tabs)) {
+        if (TmuxSession *session = tmuxSessionFor(tab)) {
+            if (!sessions.contains(session))
+                sessions << session;
+            continue;
+        }
+        for (TerminalWidget *pane : tab->panes()) {
+            if (pane->hasRunningProcess()) {
+                const QString program = pane->foregroundProgramName();
+                running << (program.isEmpty() ? tr("a program") : program);
+            }
+        }
+    }
+    if (!running.isEmpty() && m_settings.scrolling().confirmCloseWithRunningProcesses) {
+        QMessageBox box(QMessageBox::Warning, tr("Close Workspace?"),
+                        tr("Programs are still running in workspace “%1”.").arg(name),
+                        QMessageBox::NoButton, this);
+        box.setInformativeText(tr("Closing it will terminate:\n\n%1").arg(running.join(QLatin1Char('\n'))));
+        QPushButton *close = box.addButton(tr("&Close Workspace"), QMessageBox::DestructiveRole);
+        QPushButton *cancel = box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(cancel);
+        box.exec();
+        if (box.clickedButton() != close)
+            return;
+    }
+
+    // Off screen first, so its tabs are all parked.
+    if (index == m_currentWorkspace)
+        switchWorkspace(index == 0 ? 1 : index - 1);
+
+    // tmux sessions are detached, not ended; their tabs go when they have.
+    for (TmuxSession *session : std::as_const(sessions))
+        session->detach();
+    for (TerminalTab *tab : std::as_const(tabs)) {
+        if (!tmuxSessionFor(tab))
+            tab->deleteLater();
+    }
+    const QString id = m_workspaces.at(index).id;
+    m_workspaces.removeAt(index);
+    if (m_currentWorkspace > index)
+        --m_currentWorkspace;
+    statusBar()->showMessage(tr("Closed workspace “%1”").arg(name), 4000);
+    updateWorkspaceChrome();
+}
+
+void MainWindow::moveTabToWorkspace(TerminalTab *tab, int index)
+{
+    if (!tab || index < 0 || index >= m_workspaces.size())
+        return;
+    const int from = workspaceOf(tab);
+    if (from < 0 || from == index)
+        return;
+
+    QList<TerminalTab *> tabs{tab};
+    if (TmuxSession *session = tmuxSessionFor(tab)) {
+        tabs = session->tabs();
+        m_sessionWorkspace.insert(session, m_workspaces.at(index).id);
+    }
+    for (TerminalTab *t : std::as_const(tabs)) {
+        const int i = m_tabs->indexOf(t);
+        if (i >= 0)
+            m_tabs->removeTab(i);
+        else
+            m_workspaces[from].parked.removeAll(t);
+        if (index == m_currentWorkspace) {
+            m_tabs->addTab(t, QString());
+            syncTabFromActivePane(t);
+        } else {
+            t->setParent(m_parking);
+            m_workspaces[index].parked << t;
+        }
+    }
+
+    if (m_tabs->count() == 0) {
+        newTab();
+    } else {
+        syncTabTitles();
+        updateStatus();
+    }
+    statusBar()->showMessage(tr("Moved to workspace “%1”").arg(m_workspaces.at(index).name), 4000);
+}
+
+void MainWindow::rebuildWorkspaceMenu()
+{
+    m_workspaceMenu->clear();
+    const QColor outline = palette().color(QPalette::WindowText);
+    auto *group = new QActionGroup(m_workspaceMenu);
+    for (int i = 0; i < m_workspaces.size(); ++i) {
+        const Workspace &w = m_workspaces.at(i);
+        // A dot after the name: something happened there while away.
+        QAction *act = m_workspaceMenu->addAction(
+            w.icon(outline), w.unseenOutput ? tr("%1  •").arg(w.name) : w.name);
+        act->setCheckable(true);
+        act->setChecked(i == m_currentWorkspace);
+        act->setActionGroup(group);
+        if (!w.root.isEmpty())
+            act->setToolTip(tildePath(w.root));
+        // By id, decided when chosen: the menu may be a stale copy.
+        const QString id = w.id;
+        connect(act, &QAction::triggered, this, [this, id]() { switchWorkspace(workspaceIndex(id)); });
+    }
+    m_workspaceMenu->addSeparator();
+    m_workspaceMenu->addAction(m_newWorkspaceAct);
+    m_workspaceMenu->addAction(m_editWorkspaceAct);
+    m_closeWorkspaceAct->setEnabled(m_workspaces.size() > 1);
+    m_workspaceMenu->addAction(m_closeWorkspaceAct);
+    m_workspaceMenu->addSeparator();
+    m_nextWorkspaceAct->setEnabled(m_workspaces.size() > 1);
+    m_prevWorkspaceAct->setEnabled(m_workspaces.size() > 1);
+    m_workspaceMenu->addAction(m_nextWorkspaceAct);
+    m_workspaceMenu->addAction(m_prevWorkspaceAct);
+}
+
+void MainWindow::updateWorkspaceChrome()
+{
+    const Workspace &w = m_workspaces.at(m_currentWorkspace);
+    const QIcon icon = w.icon(palette().color(QPalette::WindowText));
+    const bool unseenElsewhere = std::any_of(m_workspaces.cbegin(), m_workspaces.cend(),
+                                             [](const Workspace &ws) { return ws.unseenOutput; });
+    const QString text = unseenElsewhere ? tr("%1  •").arg(w.name) : w.name;
+    if (m_workspaceButton) {
+        m_workspaceButton->setText(text);
+        m_workspaceButton->setIcon(icon);
+    }
+    // The sidebar has the terminal's colours, so its dot is outlined in those.
+    m_sidebar->setWorkspace(text, w.icon(m_sidebar->palette().color(QPalette::WindowText)),
+                            m_workspaceMenu, m_workspaces.size() > 1);
+    if (m_workspaceMenu)
+        rebuildWorkspaceMenu();   // a global menu shows a copy: keep it current
+}
+
+void MainWindow::markTabBusy(TerminalTab *tab)
+{
+    if (!tab || QDateTime::currentMSecsSinceEpoch() < tab->property(kQuietUntilProperty).toLongLong())
+        return;
+    const int i = m_tabs->indexOf(tab);
+    if (i >= 0) {
+        if (i != m_tabs->currentIndex()) {
+            tab->setProperty(kBusyProperty, true);
+            m_sidebar->setBusy(i, true);
+        }
+        return;
+    }
+    tab->setProperty(kBusyProperty, true);
+    const int w = workspaceOf(tab);
+    if (w >= 0 && !m_workspaces.at(w).unseenOutput) {
+        m_workspaces[w].unseenOutput = true;
+        updateWorkspaceChrome();
+    }
+}
+
+void MainWindow::saveSession()
+{
+    // Local tabs as layouts of directories and profiles; tmux sessions on
+    // this machine by how they were attached (over ssh, they are left be).
+    const auto describe = [](TerminalWidget *pane) {
+        return QJsonObject{
+            {QStringLiteral("dir"), pane->currentDirectory()},
+            {QStringLiteral("profile"), pane->profileId()},
+        };
+    };
+    QJsonArray workspaces;
+    for (int i = 0; i < m_workspaces.size(); ++i) {
+        const Workspace &w = m_workspaces.at(i);
+        QList<TerminalTab *> tabs;
+        int currentTab = w.currentTab;
+        if (i == m_currentWorkspace) {
+            for (int t = 0; t < m_tabs->count(); ++t)
+                tabs << tabAt(t);
+            currentTab = m_tabs->currentIndex();
+        } else {
+            for (const QPointer<TerminalTab> &t : w.parked)
+                tabs << t.data();
+        }
+
+        QJsonArray savedTabs;
+        int savedCurrent = 0;
+        for (int t = 0; t < tabs.size(); ++t) {
+            TerminalTab *tab = tabs.at(t);
+            if (!tab || tmuxSessionFor(tab))
+                continue;
+            if (t == currentTab)
+                savedCurrent = savedTabs.size();
+            savedTabs.append(QJsonObject{
+                {QStringLiteral("title"), tab->customTitle()},
+                {QStringLiteral("layout"), tab->saveLayout(describe)},
+            });
+        }
+        QJsonArray tmux;
+        for (TmuxSession *session : std::as_const(m_tmuxSessions)) {
+            const QStringList command = session->command();
+            if (m_sessionWorkspace.value(session) != w.id || command.isEmpty()
+                || command.first() == QLatin1String("ssh"))
+                continue;
+            tmux.append(QJsonObject{
+                {QStringLiteral("label"), session->label()},
+                {QStringLiteral("command"), QJsonArray::fromStringList(command)},
+            });
+        }
+        workspaces.append(QJsonObject{
+            {QStringLiteral("id"), w.id},
+            {QStringLiteral("name"), w.name},
+            {QStringLiteral("root"), w.root},
+            {QStringLiteral("colour"), w.colour.isValid() ? w.colour.name() : QString()},
+            {QStringLiteral("currentTab"), savedCurrent},
+            {QStringLiteral("tabs"), savedTabs},
+            {QStringLiteral("tmux"), tmux},
+        });
+    }
+    const QJsonObject state{
+        {QStringLiteral("version"), 1},
+        {QStringLiteral("current"), m_currentWorkspace},
+        {QStringLiteral("workspaces"), workspaces},
+    };
+    QSettings().setValue(QLatin1String(kSessionKey),
+                         QString::fromUtf8(QJsonDocument(state).toJson(QJsonDocument::Compact)));
+}
+
+bool MainWindow::restoreSession()
+{
+    const QJsonObject state = QJsonDocument::fromJson(
+        QSettings().value(QLatin1String(kSessionKey)).toString().toUtf8()).object();
+    const QJsonArray saved = state.value(QStringLiteral("workspaces")).toArray();
+    if (saved.isEmpty())
+        return false;
+
+    QList<Workspace> workspaces;
+    for (const QJsonValue &v : saved) {
+        const QJsonObject o = v.toObject();
+        Workspace w;
+        w.id = o.value(QStringLiteral("id")).toString();
+        if (w.id.isEmpty())
+            w.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        w.name = o.value(QStringLiteral("name")).toString();
+        if (w.name.isEmpty())
+            w.name = tr("Workspace");
+        w.root = o.value(QStringLiteral("root")).toString();
+        w.colour = QColor(o.value(QStringLiteral("colour")).toString());
+        w.currentTab = o.value(QStringLiteral("currentTab")).toInt();
+        workspaces << w;
+    }
+    m_workspaces = workspaces;
+    m_currentWorkspace = qBound(0, state.value(QStringLiteral("current")).toInt(),
+                                int(m_workspaces.size()) - 1);
+
+    // Sessions on this machine still running, to reattach to.
+    QStringList running;
+    {
+        QProcess list;
+        const QStringList program = tmuxProgram();
+        list.start(program.first(), program.mid(1) + QStringList{
+            QStringLiteral("list-sessions"), QStringLiteral("-F"), QStringLiteral("#{session_name}")});
+        if (list.waitForFinished(2000))
+            running = QString::fromUtf8(list.readAllStandardOutput()).split(QLatin1Char('\n'));
+    }
+
+    for (int i = 0; i < saved.size(); ++i) {
+        const QJsonObject o = saved.at(i).toObject();
+        const QString root = m_workspaces.at(i).root;
+        const auto makeSavedPane = [this, &root](const QJsonObject &p) {
+            // Where it was; failing that the workspace's folder, or the profile's.
+            QString dir = p.value(QStringLiteral("dir")).toString();
+            if (dir.isEmpty() || !QDir(dir).exists())
+                dir = !root.isEmpty() && QDir(root).exists() ? root : QString();
+            return makePane(m_profiles.profileById(p.value(QStringLiteral("profile")).toString()), dir);
+        };
+        for (const QJsonValue &t : o.value(QStringLiteral("tabs")).toArray()) {
+            const QJsonObject savedTab = t.toObject();
+            TerminalTab *tab = TerminalTab::restoreLayout(
+                savedTab.value(QStringLiteral("layout")).toObject(), makeSavedPane);
+            if (!tab)
+                continue;
+            tab->setCustomTitle(savedTab.value(QStringLiteral("title")).toString());
+            addTab(tab, tr("Terminal"), QString(), i);
+            if (i == m_currentWorkspace)
+                syncTabFromActivePane(tab);
+        }
+        for (const QJsonValue &t : o.value(QStringLiteral("tmux")).toArray()) {
+            const QJsonObject session = t.toObject();
+            const QString label = session.value(QStringLiteral("label")).toString();
+            QStringList command;
+            for (const QJsonValue &arg : session.value(QStringLiteral("command")).toArray())
+                command << arg.toString();
+            if (!label.isEmpty() && !command.isEmpty() && running.contains(label))
+                attachTmux(label, command, m_workspaces.at(i).id);
+        }
+    }
+
+    if (m_tabs->count() == 0) {
+        newTab();
+    } else {
+        const int current = qBound(0, m_workspaces.at(m_currentWorkspace).currentTab,
+                                   m_tabs->count() - 1);
+        m_tabs->setCurrentIndex(current);
+        onCurrentTabChanged(current);
+    }
+    return true;
 }

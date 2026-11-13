@@ -6,18 +6,21 @@
 
 #pragma once
 
+#include <QHash>
 #include <QMainWindow>
 #include <QPixmap>
 #include <QVector>
 
 #include "profiles.h"
 #include "settings.h"
+#include "workspace.h"
 
 class QTabWidget;
 class QSplitter;
 class QLabel;
 class QMenu;
 class QTimer;
+class QToolButton;
 class TerminalTab;
 class TerminalWidget;
 class TmuxSession;
@@ -60,14 +63,45 @@ private:
     /* The tab holding `pane`, and its index (-1 if none). */
     TerminalTab *tabOf(const QWidget *pane) const;
     int tabIndexOf(const QWidget *pane) const;
-    /* Every pane in every tab. */
+    /* Every pane in every tab, in every workspace. */
     QList<TerminalWidget *> allPanes() const;
+
+    /*
+     * Workspaces. The tab widget holds the shown workspace's tabs; the
+     * others' are parked (hidden, still running) in their Workspace.
+     */
+    QList<TerminalTab *> allTabs() const;
+    /* The workspace a tab is in, as an index; -1 if none. */
+    int workspaceOf(const TerminalTab *tab) const;
+    int workspaceIndex(const QString &id) const;
+    void switchWorkspace(int index);
+    /* Bring a tab on screen, switching workspace if need be. */
+    void showTab(TerminalTab *tab);
+    /* Ask for a new workspace's details; its index, or -1 if cancelled.
+     * `show` switches to it, which opens its first tab. */
+    int newWorkspace(bool show);
+    void editWorkspace(int index);
+    void closeWorkspace(int index);
+    /* Move a tab (a tmux tab: its whole session) to another workspace. */
+    void moveTabToWorkspace(TerminalTab *tab, int index);
+    void rebuildWorkspaceMenu();
+    /* Workspace name and colour on the toolbar, sidebar and menu. */
+    void updateWorkspaceChrome();
+    /* Mark a tab as having output that hasn't been seen. */
+    void markTabBusy(TerminalTab *tab);
+    void onCurrentTabChanged(int index);
+
+    /* Workspaces and their tabs at quit, reopened at the next start. */
+    void saveSession();
+    bool restoreSession();
 
     /* A new local pane; `directory` overrides the profile's start directory. */
     TerminalWidget *makePane(const TerminalProfile &profile,
                              const QString &directory = QString());
     /* Add a tab to the window and hook up its signals and its first panes. */
-    int addTab(TerminalTab *tab, const QString &text, const QString &toolTip);
+    /* `workspace`: an index, or -1 for the shown one. */
+    int addTab(TerminalTab *tab, const QString &text, const QString &toolTip,
+               int workspace = -1);
     void wireTab(TerminalTab *tab);
     void wirePane(TerminalWidget *pane);
     /* Tab text, tooltip and window title from the tab's active pane. */
@@ -86,7 +120,9 @@ private:
     /* Fill the tmux menu: this machine's sessions, then the other actions. */
     void rebuildTmuxMenu();
     /* Attach to (or create) a session through `command`, a control-mode client. */
-    void attachTmux(const QString &label, const QStringList &command);
+    /* Its tabs go to the workspace with id `workspaceId` (the shown one if empty). */
+    void attachTmux(const QString &label, const QStringList &command,
+                    const QString &workspaceId = QString());
     void newTmuxSession();
     void connectTmuxHost();
 
@@ -155,6 +191,20 @@ private:
     QMenu *m_newTabWithProfileMenu = nullptr;
     QMenu *m_tmuxMenu = nullptr;
     QList<TmuxSession *> m_tmuxSessions;
+    // The workspace (id) each session's tabs belong to.
+    QHash<TmuxSession *, QString> m_sessionWorkspace;
+
+    QList<Workspace> m_workspaces;
+    int m_currentWorkspace = 0;
+    QWidget *m_parking = nullptr;       // hidden parent of parked tabs
+    bool m_switchingWorkspace = false;
+    QMenu *m_workspaceMenu = nullptr;
+    QToolButton *m_workspaceButton = nullptr;
+    QAction *m_newWorkspaceAct = nullptr;
+    QAction *m_editWorkspaceAct = nullptr;
+    QAction *m_closeWorkspaceAct = nullptr;
+    QAction *m_nextWorkspaceAct = nullptr;
+    QAction *m_prevWorkspaceAct = nullptr;
 
     bool m_movingFromSidebar = false;   // a card drag is moving a tab
 

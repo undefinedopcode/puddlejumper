@@ -83,7 +83,7 @@ with four sections:
 | --- | --- |
 | Appearance | **Colours:** scheme (and its editor), background opacity · **Font:** family, size (8–32pt in 0.5pt steps), line spacing, margin · **Rendering:** bright colours in bold, italic, antialiasing, own box drawing, bidirectional text |
 | Terminal | **Cursor:** shape, blinking · **Scrollback:** lines kept, scrollbar position · **Input:** confirm multi-line paste, trim trailing newlines, Ctrl+S notice |
-| Tabs & Window | **Tabs:** layout · **Watch a Terminal:** activity, silence (with idle time) · **Quitting:** warn while programs are running |
+| Tabs & Window | **Tabs:** layout · **Watch a Terminal:** activity, silence (with idle time) · **Quitting:** warn while programs are running, reopen workspaces and tabs at startup |
 | Profiles | create, duplicate, rename, delete and edit terminal profiles, and choose which one New Tab opens |
 
 Every page uses the same structure, titled groups whose label column is the
@@ -454,7 +454,8 @@ renames, which is what lets open tabs keep pointing at them.
 
 ## Toolbar
 
-A toolbar under the menu bar carries the common actions: new tab (the arrow
+A toolbar under the menu bar carries the common actions: the workspace
+switcher at the far left, then new tab (the arrow
 beside it opens the profile list), close tab, split right and split down, copy,
 paste, find, screenshot
 (the arrow offers the whole terminal), zoom out and
@@ -467,6 +468,47 @@ per action because Breeze and Adwaita name some differently. If the theme has
 none of them, the button shows its name instead. **View → Show Toolbar** (or
 right-clicking the toolbar) hides it, and its visibility and position are kept
 between sessions.
+
+## Workspaces
+
+A workspace is a named group of tabs, such as one per project. The window
+shows one workspace at a time: switching hides the other workspaces' tabs,
+with their programs still running, and brings back that workspace's tabs as
+you left them.
+
+The **Workspace** menu, the button at the left of the toolbar, and (once
+there is more than one) the header above the sidebar cards all list the
+workspaces. From any of them you can also choose **New Workspace…**,
+**Edit Workspace…** and **Close Workspace**. **Next** and **Previous
+Workspace** are `Ctrl+Shift+PgDown` and `Ctrl+Shift+PgUp`.
+
+- **Name, folder and colour.** New tabs in a workspace start in its folder
+  (splits still start where the shell beside them is). Choosing a folder
+  offers its name as the workspace's. The colour is a dot beside the name, to
+  tell workspaces apart at a glance.
+- **Unseen output.** Output in a workspace that isn't shown puts a dot after
+  its name in the list, and after the current workspace's name on the
+  toolbar, so you can tell something happened elsewhere. The tab's card keeps
+  its own mark until you look at it.
+- **Moving tabs.** A card's (or tab's) right-click menu has **Move to
+  Workspace**, including to a new one. A tmux session lives in one workspace,
+  so moving a tmux tab moves all of its session's tabs. New windows of that
+  session open in its workspace, even while another is shown.
+- **Closing.** Closing a workspace closes its tabs, after warning if
+  programs are running there. Its tmux sessions are detached rather than
+  ended. The last workspace can't be closed.
+
+**Reopening.** At the next start, superterm reopens the workspaces and tabs
+that were open when it quit: each tab's split layout, every pane's directory
+and profile, and tab names you gave. Programs aren't restarted; each pane
+gets a fresh shell where the old one was. tmux sessions on this machine that
+are still running are reattached in their workspaces; sessions over ssh
+aren't. **Settings → Tabs & Window → Reopen workspaces and tabs at startup**
+turns this off.
+
+Workspaces defined in files, which also start programs (in the style of
+[smug](https://github.com/ivaaaan/smug), and able to read smug's files), are
+planned.
 
 ## Split panes
 
@@ -564,6 +606,7 @@ real pixel size rather than the logical one.
 | `Ctrl+Shift+X` | Close pane |
 | `Ctrl+Shift+N` / `Ctrl+Shift+M` | Next / previous pane |
 | `Ctrl+Tab` / `Ctrl+Shift+Tab` | Next / previous tab |
+| `Ctrl+Shift+PgDown` / `Ctrl+Shift+PgUp` | Next / previous workspace |
 | `Ctrl+Shift+F` | Find in terminal |
 | `Ctrl+Shift+S` | Screenshot a region (drag to select) |
 | `Ctrl+Shift+P` | Screenshot the whole terminal |
@@ -599,7 +642,8 @@ is kept buildable but is no longer installed.
 ```
 CMakeLists.txt            build definition
 src-widgets/main.cpp      QApplication bootstrap, style and icon
-src-widgets/mainwindow.*  tabs, menus, toolbar, status bar, preview rotation
+src-widgets/mainwindow.*  tabs, workspaces, menus, toolbar, status bar, previews
+src-widgets/workspace.*   workspace data and its edit dialog
 src-widgets/terminaltab.*  one tab: a tree of panes in splitters
 src-widgets/terminalwidget.*  one pane: a QTermWidget plus appearance plumbing
 src-widgets/tmuxcontrol.*  tmux control-mode protocol client

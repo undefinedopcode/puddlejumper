@@ -210,6 +210,21 @@ ThumbnailSidebar::ThumbnailSidebar(QWidget *parent)
     outer->setContentsMargins(0, kGap, 0, kGap);
     outer->setSpacing(0);
 
+    m_workspace = new QToolButton(this);
+    m_workspace->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_workspace->setPopupMode(QToolButton::InstantPopup);
+    m_workspace->setAutoRaise(true);
+    m_workspace->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    m_workspace->setToolTip(tr("Switch workspace"));
+    QFont headerFont = m_workspace->font();
+    headerFont.setWeight(QFont::DemiBold);
+    m_workspace->setFont(headerFont);
+    m_workspace->hide();
+    auto *header = new QHBoxLayout;
+    header->setContentsMargins(kSide, 0, kSide, kGap);
+    header->addWidget(m_workspace);
+    outer->addLayout(header);
+
     m_list = new QListWidget(this);
     m_list->setItemDelegate(new CardDelegate(m_list));
     m_list->setUniformItemSizes(true);
@@ -387,6 +402,7 @@ void ThumbnailSidebar::setColours(const QColor &background, const QColor &foregr
     setPalette(pal);
     m_list->setPalette(pal);
     m_newTab->setPalette(pal);
+    m_workspace->setPalette(pal);
 
     // A plain plus in the text colour: theme icons are drawn for the window
     // colours, and a dark one vanishes on a dark scheme.
@@ -458,4 +474,13 @@ bool ThumbnailSidebar::eventFilter(QObject *watched, QEvent *event)
         }
     }
     return QWidget::eventFilter(watched, event);
+}
+
+void ThumbnailSidebar::setWorkspace(const QString &name, const QIcon &icon, QMenu *menu, bool show)
+{
+    m_workspace->setText(name);
+    m_workspace->setIcon(icon);
+    if (m_workspace->menu() != menu)
+        m_workspace->setMenu(menu);
+    m_workspace->setVisible(show);
 }

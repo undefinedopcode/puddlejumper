@@ -8,6 +8,7 @@
 
 #include "terminalwidget.h"
 
+#include <QJsonObject>
 #include <QPointer>
 #include <QVector>
 #include <QWidget>
@@ -91,6 +92,21 @@ public:
      * whether or not its window is split. tmux tabs need that for exact sizing. */
     void setAlwaysFramed(bool on);
 
+    /*
+     * The arrangement, for saving: splits ("split": "right" or "down", with
+     * "sizes" in proportion and "panes" in order) down to the panes, each
+     * described by describe(). "active" is the active pane's index in
+     * panes() order.
+     */
+    QJsonObject saveLayout(const std::function<QJsonObject(TerminalWidget *)> &describe) const;
+    /*
+     * The reverse: a tab laid out as saveLayout() said, each pane made by
+     * makePane() from its description. Null when the layout names no pane
+     * that could be made.
+     */
+    static TerminalTab *restoreLayout(const QJsonObject &layout,
+                                      const std::function<TerminalWidget *(const QJsonObject &)> &makePane);
+
     bool hasNewOutput() const;
     void clearNewOutput();
     /*
@@ -138,6 +154,11 @@ private:
     void paintPreview(QPainter &painter, QWidget *node, const QRect &box,
                       qreal devicePixelRatio) const;
     void watchPane(TerminalWidget *pane);
+
+    QJsonObject saveNode(QWidget *node,
+                         const std::function<QJsonObject(TerminalWidget *)> &describe) const;
+    QWidget *restoreNode(const QJsonObject &node,
+                         const std::function<TerminalWidget *(const QJsonObject &)> &makePane);
 
     QWidget *buildLayout(const PaneLayout &node,
                          const std::function<TerminalWidget *(int paneId)> &paneFor,

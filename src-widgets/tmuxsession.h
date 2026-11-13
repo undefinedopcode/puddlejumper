@@ -56,6 +56,8 @@ public:
     bool detachRequested() const { return m_detachRequested; }
 
     QString label() const { return m_label; }
+    /* How the session was attached: the control-mode client command. */
+    QStringList command() const { return m_command; }
     QString sessionName() const { return m_sessionName; }
 
     bool ownsTab(const TerminalTab *tab) const;
