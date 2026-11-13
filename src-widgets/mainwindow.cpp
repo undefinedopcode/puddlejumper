@@ -9,6 +9,7 @@
 #include "appicon.h"
 #include "procinfo.h"
 #include "settingsdialog.h"
+#include "tabstrip.h"
 #include "terminaltab.h"
 #include "terminalwidget.h"
 #include "thumbnailsidebar.h"
@@ -249,17 +250,25 @@ void MainWindow::buildLayout()
     m_parking = new QWidget(this);
     m_parking->hide();
 
-    m_tabs = new QTabWidget(m_splitter);
-    m_tabs->setTabsClosable(true);
-    m_tabs->setMovable(true);
+    // The terminals, with the tab strip above them when the tabs are along
+    // the top. The tab widget's own bar is never shown: the strip and the
+    // sidebar stand in for it, drawn alike on every platform. It still owns
+    // the pages and their order.
+    auto *tabArea = new QWidget(m_splitter);
+    auto *tabLayout = new QVBoxLayout(tabArea);
+    tabLayout->setContentsMargins(0, 0, 0, 0);
+    tabLayout->setSpacing(0);
+    m_tabStrip = new TabStrip(tabArea);
+    m_tabs = new QTabWidget(tabArea);
     m_tabs->setDocumentMode(true);
-    m_tabs->setElideMode(Qt::ElideRight);
-    m_tabs->tabBar()->setExpanding(false);
-    // Its size gives the previews their shape.
+    m_tabs->tabBar()->hide();
+    // Its size, the terminal area's, gives the previews their shape.
     m_tabs->installEventFilter(this);
+    tabLayout->addWidget(m_tabStrip);
+    tabLayout->addWidget(m_tabs, 1);
 
     m_splitter->addWidget(m_sidebar);
-    m_splitter->addWidget(m_tabs);
+    m_splitter->addWidget(tabArea);
     setCentralWidget(m_splitter);
 
     // The terminals take any change in window width; the sidebar keeps its
@@ -280,13 +289,14 @@ void MainWindow::buildLayout()
         m_settings.setSidebarWidth(width);
     });
 
-    connect(m_tabs, &QTabWidget::tabCloseRequested, this, &MainWindow::closeTab);
     connect(m_tabs, &QTabWidget::currentChanged, this, &MainWindow::onCurrentTabChanged);
-    // A tab dragged along the tab bar: move its card too. (A card dragged in
-    // the sidebar moves the tab, below, and the card is already in place.)
+    // A tab dragged in the sidebar or the strip moves the page (below); the
+    // other view follows here. The one it was dragged in is already in place.
     connect(m_tabs->tabBar(), &QTabBar::tabMoved, this, [this](int from, int to) {
-        if (!m_movingFromSidebar)
+        if (m_moveSource != m_sidebar)
             m_sidebar->moveCard(from, to);
+        if (m_moveSource != m_tabStrip)
+            m_tabStrip->moveTab(from, to);
     });
 
     connect(m_sidebar, &ThumbnailSidebar::tabActivated, this, [this](int index) {
@@ -295,15 +305,28 @@ void MainWindow::buildLayout()
     });
     connect(m_sidebar, &ThumbnailSidebar::tabClosed, this, &MainWindow::closeTab);
     connect(m_sidebar, &ThumbnailSidebar::tabMoved, this, [this](int from, int to) {
-        m_movingFromSidebar = true;
+        m_moveSource = m_sidebar;
         m_tabs->tabBar()->moveTab(from, to);
-        m_movingFromSidebar = false;
+        m_moveSource = nullptr;
     });
     connect(m_sidebar, &ThumbnailSidebar::newTabRequested, this, &MainWindow::newTab);
     connect(m_sidebar, &ThumbnailSidebar::contextMenuRequested,
             this, &MainWindow::showTabMenu);
     connect(m_sidebar, &ThumbnailSidebar::previewSizeChanged,
             this, [this]() { refreshPreviews(true); });
+
+    connect(m_tabStrip, &TabStrip::tabActivated, this, [this](int index) {
+        if (index >= 0 && index < m_tabs->count() && index != m_tabs->currentIndex())
+            m_tabs->setCurrentIndex(index);
+    });
+    connect(m_tabStrip, &TabStrip::tabClosed, this, &MainWindow::closeTab);
+    connect(m_tabStrip, &TabStrip::tabMoved, this, [this](int from, int to) {
+        m_moveSource = m_tabStrip;
+        m_tabs->tabBar()->moveTab(from, to);
+        m_moveSource = nullptr;
+    });
+    connect(m_tabStrip, &TabStrip::newTabRequested, this, &MainWindow::newTab);
+    connect(m_tabStrip, &TabStrip::contextMenuRequested, this, &MainWindow::showTabMenu);
 }
 
 void MainWindow::onCurrentTabChanged(int index)
@@ -313,6 +336,7 @@ void MainWindow::onCurrentTabChanged(int index)
     if (m_switchingWorkspace)
         return;
     m_sidebar->setCurrentIndex(index);
+    m_tabStrip->setCurrentIndex(index);
     if (auto *tab = tabAt(index)) {
         // Keep tmux's current window in step, so another client attaching
         // sees the same one.
@@ -320,12 +344,13 @@ void MainWindow::onCurrentTabChanged(int index)
             session->selectWindow(tab);
         // Selecting a tab counts as having seen its output.
         m_sidebar->setBusy(index, false);
+        m_tabStrip->setBusy(index, false);
         tab->setProperty(kBusyProperty, false);
         if (tab->activePane())
             tab->activePane()->focusTerminal();
         syncTabFromActivePane(tab);
     }
-    updateSidebarColours();
+    updateTabColours();
     updateStatus();
 }
 
@@ -339,11 +364,9 @@ void MainWindow::setSidebarWidth(int width)
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
     if (watched == m_tabs && event->type() == QEvent::Resize) {
-        // Cards take the terminal area's shape: the tab widget less its tab
-        // bar. (The pages haven't been resized yet when this runs.)
-        QSize area = static_cast<QResizeEvent *>(event)->size();
-        if (m_tabs->tabBar()->isVisible())
-            area.rheight() -= m_tabs->tabBar()->sizeHint().height();
+        // Cards take the terminal area's shape, which is the tab widget's: its
+        // own bar is hidden. (The pages haven't been resized yet when this runs.)
+        const QSize area = static_cast<QResizeEvent *>(event)->size();
         if (area.width() > 0 && area.height() > 0)
             m_sidebar->setPreviewAspect(qreal(area.height()) / area.width());
     }
@@ -868,9 +891,11 @@ void MainWindow::syncTabFromActivePane(TerminalTab *tab)
         const QString name = session->windowName(tab);
         m_tabs->setTabText(i, name);
         m_sidebar->setTitle(i, name);
+        m_tabStrip->setTitle(i, name);
         m_tabs->setTabToolTip(i, title.isEmpty()
                                      ? tr("tmux %1 — %2").arg(session->label(), name)
                                      : tr("tmux %1 — %2\n%3").arg(session->label(), name, title));
+        m_tabStrip->setTabToolTip(i, m_tabs->tabToolTip(i));
         if (tab == currentTab())
             setWindowTitle(tr("%1 — tmux %2 — SuperTerm")
                                .arg(title.isEmpty() ? name : title, session->label()));
@@ -885,6 +910,8 @@ void MainWindow::syncTabFromActivePane(TerminalTab *tab)
     m_tabs->setTabToolTip(i, title.isEmpty() || title == name
                                  ? name : QStringLiteral("%1\n%2").arg(name, title));
     m_sidebar->setTitle(i, name);
+    m_tabStrip->setTitle(i, name);
+    m_tabStrip->setTabToolTip(i, m_tabs->tabToolTip(i));
     if (tab == currentTab())
         setWindowTitle(title.isEmpty() ? QStringLiteral("SuperTerm")
                                        : tr("%1 — SuperTerm").arg(title));
@@ -1306,8 +1333,9 @@ void MainWindow::updateTabLayout()
         m_settings.appearance().tabLayout == QStringLiteral("thumbnails");
 
     m_sidebar->setVisible(thumbs);
-    // In thumbnail mode the cards carry the titles, so the tab bar is noise.
-    m_tabs->tabBar()->setVisible(!thumbs);
+    // In thumbnail mode the cards carry the titles, so the strip is noise.
+    m_tabStrip->setVisible(!thumbs);
+    updateTabColours();
 
     if (thumbs) {
         // Back from being dragged shut (or never sized): give it its width.
@@ -1315,7 +1343,6 @@ void MainWindow::updateTabLayout()
             const int saved = m_settings.sidebarWidth();
             setSidebarWidth(saved >= m_sidebar->minimumWidth() ? saved : kDefaultSidebarWidth);
         }
-        updateSidebarColours();
         syncTabTitles();
     }
 }
@@ -1327,10 +1354,14 @@ void MainWindow::syncTabTitles()
     for (int i = 0; i < m_tabs->count(); ++i)
         titles << m_tabs->tabText(i);
     m_sidebar->syncTabs(titles, m_tabs->currentIndex());
+    m_tabStrip->syncTabs(titles, m_tabs->currentIndex());
     // The cards are new: put back the marks for unseen output.
     for (int i = 0; i < m_tabs->count(); ++i) {
-        if (auto *tab = tabAt(i); tab && tab->property(kBusyProperty).toBool())
+        m_tabStrip->setTabToolTip(i, m_tabs->tabToolTip(i));
+        if (auto *tab = tabAt(i); tab && tab->property(kBusyProperty).toBool()) {
             m_sidebar->setBusy(i, true);
+            m_tabStrip->setBusy(i, true);
+        }
     }
     refreshPreviews(true);
 }
@@ -1383,10 +1414,12 @@ void MainWindow::updateCardDetails(int index)
     m_sidebar->setSubtitle(index, parts.join(QStringLiteral("  ·  ")));
 }
 
-void MainWindow::updateSidebarColours()
+void MainWindow::updateTabColours()
 {
-    if (auto *tab = currentTab())
+    if (auto *tab = currentTab()) {
         m_sidebar->setColours(tab->backgroundColour(), tab->foregroundColour());
+        m_tabStrip->setColours(tab->backgroundColour(), tab->foregroundColour());
+    }
     m_splitter->handle(1)->update();
 }
 
@@ -1981,6 +2014,7 @@ void MainWindow::markTabBusy(TerminalTab *tab)
         if (i != m_tabs->currentIndex()) {
             tab->setProperty(kBusyProperty, true);
             m_sidebar->setBusy(i, true);
+            m_tabStrip->setBusy(i, true);
         }
         return;
     }

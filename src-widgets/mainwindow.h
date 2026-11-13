@@ -26,6 +26,7 @@ class TerminalTab;
 class TerminalWidget;
 class TmuxSession;
 class SettingsDialog;
+class TabStrip;
 class ThumbnailSidebar;
 
 /*
@@ -179,8 +180,8 @@ private:
      */
     void refreshPreviews(bool all);
     void updateCardDetails(int index);
-    /* The sidebar takes its colours from the current tab's scheme. */
-    void updateSidebarColours();
+    /* The sidebar and tab strip take their colours from the current tab's scheme. */
+    void updateTabColours();
     void setSidebarWidth(int width);
     void showTabMenu(int index, const QPoint &globalPos);
     /* Name a tab; a tmux tab's window is renamed in tmux. */
@@ -220,6 +221,7 @@ private:
 
     QSplitter *m_splitter = nullptr;
     ThumbnailSidebar *m_sidebar = nullptr;
+    TabStrip *m_tabStrip = nullptr;     // the tabs along the top (QTabBar is hidden)
     QTabWidget *m_tabs = nullptr;
 
     QLabel *m_statusDir = nullptr;
@@ -253,7 +255,7 @@ private:
     QAction *m_nextWorkspaceAct = nullptr;
     QAction *m_prevWorkspaceAct = nullptr;
 
-    bool m_movingFromSidebar = false;   // a card drag is moving a tab
+    QObject *m_moveSource = nullptr;    // the sidebar or strip a drag is moving a tab in
 
     int m_nextTabId = 1;
 };

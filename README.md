@@ -225,6 +225,15 @@ Thumbnail Sidebar (`Ctrl+Shift+B`), in the settings dialog, or by setting
 - **thumbnails** — a left sidebar of cards, each with a live preview of that
   terminal.
 
+Both are superterm's own, not the platform's tab bar, so they look the same on
+every desktop and on macOS: cards in the terminal scheme's colours, the current
+one tinted and outlined in the system accent colour. Drag to reorder,
+middle-click or ✕ to close, right-click for the tab menu; double-click the
+empty end of the top strip for a new tab. When the top strip runs out of room
+the widest tabs narrow first, down to a minimum; past that it scrolls (wheel or
+trackpad), fades out at an edge with tabs beyond it, and shows a ⌄ list of all
+tabs beside New Tab.
+
 Each card shows a live preview of the tab, its title, and a second line saying
 what it is: the program running (when it isn't just the shell), the directory,
 and how many panes, or for tmux the active pane's title, with a `tmux <session>`
@@ -792,8 +801,9 @@ builds share the same config file, so settings carry across.
 
 **Colour scheme.** On a Plasma session the KDE platform theme supplies a
 palette to Qt, so the chrome takes the user's actual Plasma colours and follows
-live changes — switching Plasma between light and dark restyles the tab bar and
-status bar immediately, with no restart.
+live changes — switching Plasma between light and dark restyles the toolbar and
+status bar immediately, with no restart. (The tabs take the terminal scheme's
+colours instead, and the system accent.)
 
 Worth knowing: this comes from the *platform theme*, not the Qt Quick style.
 Fusion reports exactly the same `SystemPalette` values as KDE's own styles, so

@@ -37,6 +37,7 @@ file(GLOB LUCIDE_ICONS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" icons/lucide/*.svg
 qt_add_executable(superterm
     src-widgets/appicon.cpp
     src-widgets/appicon.h
+    src-widgets/cardstyle.h
     src-widgets/main.cpp
     src-widgets/mainwindow.cpp
     src-widgets/mainwindow.h
@@ -58,6 +59,8 @@ qt_add_executable(superterm
     src-widgets/colorschemeeditor.h
     src-widgets/screenshotoverlay.cpp
     src-widgets/screenshotoverlay.h
+    src-widgets/tabstrip.cpp
+    src-widgets/tabstrip.h
     src-widgets/procinfo.cpp
     src-widgets/procinfo.h
     src-widgets/tmuxcontrol.cpp

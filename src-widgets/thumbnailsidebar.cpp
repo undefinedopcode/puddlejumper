@@ -6,8 +6,9 @@
 
 #include "thumbnailsidebar.h"
 
+#include "cardstyle.h"
+
 #include <QAbstractItemModel>
-#include <QApplication>
 #include <QListWidget>
 #include <QMouseEvent>
 #include <QPainter>
@@ -30,18 +31,12 @@ constexpr int kBusyRole = Qt::UserRole + 5;
 constexpr int kSide = 8;        // between the sidebar edge and a card
 constexpr int kGap = 4;         // half the space between cards
 constexpr int kPad = 6;         // inside a card, round the preview and text
-constexpr int kRadius = 6;      // card corners
 constexpr int kPreviewRadius = 3;
 constexpr int kClose = 18;      // the close button on a hovered card
-constexpr int kDot = 8;         // the new-output dot
 constexpr int kScrollBar = 6;   // thin, and always reserved (see itemWidth())
 
-QColor mix(const QColor &a, const QColor &b, qreal t)
-{
-    return QColor::fromRgbF(a.redF() + (b.redF() - a.redF()) * t,
-                            a.greenF() + (b.greenF() - a.greenF()) * t,
-                            a.blueF() + (b.blueF() - a.blueF()) * t);
-}
+using cardstyle::kDot;
+using cardstyle::mix;
 
 QFont smallFont(const QFont &base)
 {
@@ -61,7 +56,6 @@ public:
 
     QColor background;
     QColor foreground;
-    QColor accent;
     qreal aspect = 0.6;
 
     static QRect cardRect(const QRect &row)
@@ -98,18 +92,10 @@ public:
         const bool hovered = option.state & QStyle::State_MouseOver;
         const QRect card = cardRect(option.rect);
 
-        // The card: lifted off the sidebar, more so under the mouse; the
-        // current tab is tinted and outlined in the accent colour.
-        QColor fill = mix(background, foreground, hovered ? 0.12 : 0.07);
-        if (selected)
-            fill = mix(fill, accent, 0.22);
-        QPainterPath cardPath;
-        cardPath.addRoundedRect(QRectF(card).adjusted(0.5, 0.5, -0.5, -0.5), kRadius, kRadius);
-        p->fillPath(cardPath, fill);
-        if (selected) {
-            p->setPen(QPen(accent, 2));
-            p->drawRoundedRect(QRectF(card).adjusted(1, 1, -1, -1), kRadius - 1, kRadius - 1);
-        }
+        // Read each time, so a change of system accent shows at once.
+        const QColor accent = cardstyle::accent();
+        const QColor fill = cardstyle::paintCard(p, card, background, foreground, accent,
+                                                 hovered, selected);
 
         // The preview, clipped to rounded corners.
         const QRect preview = previewRect(option.rect);
@@ -161,11 +147,8 @@ public:
         QRect title(preview.left(), preview.bottom() + 1 + 6, preview.width(),
                     titleMetrics.height());
         if (busy) {
-            const QRectF dot(title.right() - kDot, title.center().y() - kDot / 2.0 + 0.5,
-                             kDot, kDot);
-            p->setPen(Qt::NoPen);
-            p->setBrush(accent);
-            p->drawEllipse(dot);
+            cardstyle::paintDot(p, QPointF(title.right() - kDot / 2.0, title.center().y() + 0.5),
+                                accent);
             title.setRight(title.right() - kDot - 6);
         }
         QFont titleFont = option.font;
@@ -389,9 +372,7 @@ void ThumbnailSidebar::setColours(const QColor &background, const QColor &foregr
     m_background = background;
     m_foreground = foreground;
 
-    // Lifted a little off the terminal, so the two read as one surface with
-    // a seam rather than as unrelated widgets.
-    const QColor side = mix(background, foreground, 0.04);
+    const QColor side = cardstyle::surface(background, foreground);
     QPalette pal = palette();
     pal.setColor(QPalette::Window, side);
     pal.setColor(QPalette::Base, side);
@@ -404,25 +385,11 @@ void ThumbnailSidebar::setColours(const QColor &background, const QColor &foregr
     m_newTab->setPalette(pal);
     m_workspace->setPalette(pal);
 
-    // A plain plus in the text colour: theme icons are drawn for the window
-    // colours, and a dark one vanishes on a dark scheme.
-    const qreal dpr = devicePixelRatioF();
-    QPixmap plus(QSize(16, 16) * dpr);
-    plus.setDevicePixelRatio(dpr);
-    plus.fill(Qt::transparent);
-    {
-        QPainter p(&plus);
-        p.setRenderHint(QPainter::Antialiasing);
-        p.setPen(QPen(foreground, 1.6, Qt::SolidLine, Qt::RoundCap));
-        p.drawLine(QPointF(8, 3), QPointF(8, 13));
-        p.drawLine(QPointF(3, 8), QPointF(13, 8));
-    }
-    m_newTab->setIcon(QIcon(plus));
+    m_newTab->setIcon(cardstyle::plusIcon(foreground, devicePixelRatioF()));
 
     auto *delegate = delegateOf(m_list);
     delegate->background = side;
     delegate->foreground = foreground;
-    delegate->accent = QApplication::palette().color(QPalette::Highlight);
 
     const QColor handle = mix(side, foreground, 0.25);
     m_list->verticalScrollBar()->setStyleSheet(
