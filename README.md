@@ -518,6 +518,7 @@ they are, with a few additions of superterm's own that smug ignores.
 session: blog                  # the workspace's name
 root: ~/src/blog               # where everything starts
 colour: "#4a8fe0"              # superterm: the workspace's colour
+backend: tmux                  # superterm: run as a tmux session (see below)
 env:
   NODE_ENV: development        # set in every pane
 before_start:                  # run first; a failure stops the opening
@@ -577,9 +578,27 @@ windows as tabs; if it's already open, it's switched to instead.
   download, runs commands. The first time it's opened, and whenever it
   changes, superterm lists the commands and asks first.
 
-Workspace files open locally for now: their panes are superterm's own
-shells. Running them as tmux sessions, which smug does, so they outlive
-superterm, is planned. So is opening a project's `.smug.yml` from its folder.
+**Running in tmux.** With `backend: tmux`, a workspace file runs as a tmux
+session named after it, as smug does, so its programs keep running when
+superterm closes. Files in smug's directory, or named `.smug.yml`, use tmux
+unless they say `backend: local`; superterm's own files default to local
+shells.
+
+- **Opening** builds the session with tmux's command line (windows, splits at
+  the file's sizes, `env`, commands), then attaches to it in control mode, so
+  its windows are tabs as with any tmux session. If the session already
+  exists, it's attached to as it is and `before_start` doesn't run again.
+- **Start Window** opens a manual window in the session.
+- **Close Workspace** offers **Detach** (the default), which leaves the
+  session running to open again later, or **Stop Workspace**, which runs the
+  file's `stop` commands and ends the session, like `smug stop`.
+- **Save Workspace As…** includes tmux tabs, with each pane's directory and
+  running command taken from tmux, and writes `backend: tmux`.
+- tmux spreads a resize evenly across panes rather than in proportion, so the
+  session is built at the size superterm will show it, to keep the sizes the
+  file gives.
+
+Opening a project's `.smug.yml` straight from its folder is planned.
 
 ## Split panes
 
@@ -716,6 +735,7 @@ src-widgets/main.cpp      QApplication bootstrap, style and icon
 src-widgets/mainwindow.*  tabs, workspaces, menus, toolbar, status bar, previews
 src-widgets/workspace.*   workspace data and its edit dialog
 src-widgets/workspacefile.*  workspace files: smug's YAML, read and written
+src-widgets/tmuxworkspace.*  builds a workspace file's tmux session
 src-widgets/terminaltab.*  one tab: a tree of panes in splitters
 src-widgets/terminalwidget.*  one pane: a QTermWidget plus appearance plumbing
 src-widgets/tmuxcontrol.*  tmux control-mode protocol client

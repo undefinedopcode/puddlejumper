@@ -22,6 +22,7 @@
  *   session: name              root: ~/src/project       env: {KEY: value}
  *   before_start: [commands]   stop: [commands]          sendkeys_timeout: ms
  *   colour: "#4a8fe0"          profile: <profile name>   (superterm)
+ *   backend: tmux | local                                (superterm)
  *   windows:
  *     - name: code             root: relative/or/abs     layout: main-vertical
  *       commands: [...]        panes: [{root, commands, type}]
@@ -57,6 +58,12 @@ struct WorkspaceSpec
     QStringList beforeStart;   // run in root before opening; a failure stops it
     QStringList stop;          // run in root when the workspace is closed
     int sendKeysDelay = 0;     // ms between commands typed into a pane
+    /*
+     * Run as a tmux session (named `name`), as smug does, so it outlives
+     * superterm; otherwise as superterm's own shells. `backend:` says which;
+     * without it, smug's files (in its directory, or .smug.yml) use tmux.
+     */
+    bool tmux = false;
     QList<Window> windows;
 };
 
@@ -97,8 +104,10 @@ struct SavedWindow
  * `basedOn`, the text of the file the workspace was opened from, if any,
  * lends what an open workspace doesn't show: its env, before_start, stop and
  * other settings, and its manual windows that aren't open (all unexpanded).
+ * `tmux` writes backend: tmux, unless the original says otherwise.
  */
 QString write(const QString &name, const QString &root, const QColor &colour,
-              const QList<SavedWindow> &windows, const QString &basedOn = QString());
+              const QList<SavedWindow> &windows, const QString &basedOn = QString(),
+              bool tmux = false);
 
 } // namespace WorkspaceFile

@@ -147,9 +147,10 @@ private:
     /* Fill the tmux menu: this machine's sessions, then the other actions. */
     void rebuildTmuxMenu();
     /* Attach to (or create) a session through `command`, a control-mode client. */
-    /* Its tabs go to the workspace with id `workspaceId` (the shown one if empty). */
+    /* Its tabs go to the workspace with id `workspaceId` (the shown one if
+     * empty); `show` switches to that workspace when the first one arrives. */
     void attachTmux(const QString &label, const QStringList &command,
-                    const QString &workspaceId = QString());
+                    const QString &workspaceId = QString(), bool show = false);
     void newTmuxSession();
     void connectTmuxHost();
 

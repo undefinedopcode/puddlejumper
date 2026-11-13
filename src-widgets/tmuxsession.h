@@ -52,10 +52,14 @@ public:
     void start();
     /* Disconnect, leaving the session running. ended() follows. */
     void detach();
+    /* End the session in tmux, and with it this client. */
+    void killSession();
     /* Whether ended() came from detach() rather than the session going. */
     bool detachRequested() const { return m_detachRequested; }
 
     QString label() const { return m_label; }
+    /* tmux's id for a pane of this session ("%12" is 12); -1 if not ours. */
+    int tmuxPaneId(const TerminalWidget *pane) const { return paneId(pane); }
     /* How the session was attached: the control-mode client command. */
     QStringList command() const { return m_command; }
     QString sessionName() const { return m_sessionName; }

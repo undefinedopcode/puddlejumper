@@ -13,6 +13,7 @@
 #include "thumbnailsidebar.h"
 #include "tmuxcontrol.h"
 #include "tmuxsession.h"
+#include "tmuxworkspace.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -1130,7 +1131,7 @@ void MainWindow::connectTmuxHost()
 }
 
 void MainWindow::attachTmux(const QString &label, const QStringList &command,
-                            const QString &workspaceId)
+                            const QString &workspaceId, bool show)
 {
     for (TmuxSession *s : std::as_const(m_tmuxSessions)) {
         if (s->label() != label)
@@ -1157,7 +1158,7 @@ void MainWindow::attachTmux(const QString &label, const QStringList &command,
     auto shownAny = std::make_shared<bool>(false);
 
     connect(session, &TmuxSession::tabAdded, this,
-            [this, session, shownAny](TerminalTab *tab, const QString &name) {
+            [this, session, shownAny, show](TerminalTab *tab, const QString &name) {
         // Into the session's workspace, which may not be the one on screen.
         const int index = addTab(tab, name, tr("tmux %1 — %2").arg(session->label(), name),
                                  workspaceIndex(m_sessionWorkspace.value(session)));
@@ -1165,6 +1166,8 @@ void MainWindow::attachTmux(const QString &label, const QStringList &command,
             *shownAny = true;
             if (index >= 0)
                 m_tabs->setCurrentIndex(index);
+            else if (show)
+                showTab(tab);
             rebuildTmuxMenu();   // for a global menu, which may not ask again
         }
     });
@@ -1735,9 +1738,28 @@ void MainWindow::closeWorkspace(int index)
             return;
     }
 
-    // A workspace file's stop commands, before its programs go.
+    // A workspace file run by tmux: keep it running (as closing any tmux
+    // tab offers), or stop it as smug stop does.
     const Workspace &closing = m_workspaces.at(index);
-    if (!closing.definition.isEmpty()) {
+    bool stopSessions = false;
+    if (!closing.definition.isEmpty() && !sessions.isEmpty()) {
+        QMessageBox box(QMessageBox::Question, tr("Close Workspace"),
+                        tr("Workspace “%1” runs in tmux.").arg(name), QMessageBox::NoButton, this);
+        box.setInformativeText(tr("Detach to keep it running, to open again later; or stop "
+                                  "it, which runs its stop commands and ends the session."));
+        QPushButton *detach = box.addButton(tr("&Detach"), QMessageBox::AcceptRole);
+        QPushButton *stop = box.addButton(tr("&Stop Workspace"), QMessageBox::DestructiveRole);
+        box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(detach);
+        box.exec();
+        if (box.clickedButton() != detach && box.clickedButton() != stop)
+            return;
+        stopSessions = box.clickedButton() == stop;
+    }
+
+    // A workspace file's stop commands, before its programs go (not when
+    // its tmux session is only being detached).
+    if (!closing.definition.isEmpty() && (sessions.isEmpty() || stopSessions)) {
         QHash<QString, QString> variables = closing.variables;
         WorkspaceSpec spec;
         QString output;
@@ -1760,9 +1782,13 @@ void MainWindow::closeWorkspace(int index)
     if (index == m_currentWorkspace)
         switchWorkspace(index == 0 ? 1 : index - 1);
 
-    // tmux sessions are detached, not ended; their tabs go when they have.
-    for (TmuxSession *session : std::as_const(sessions))
-        session->detach();
+    // tmux sessions are detached, unless stopped; their tabs go when they have.
+    for (TmuxSession *session : std::as_const(sessions)) {
+        if (stopSessions)
+            session->killSession();
+        else
+            session->detach();
+    }
     for (TerminalTab *tab : std::as_const(tabs)) {
         if (!tmuxSessionFor(tab))
             tab->deleteLater();
@@ -1873,8 +1899,12 @@ void MainWindow::rebuildWorkspaceMenu()
                 if (!win.manual)
                     continue;
                 bool running = false;
-                for (int i = 0; i < m_tabs->count(); ++i)
-                    running = running || (tabAt(i) && tabAt(i)->customTitle() == win.name);
+                for (int i = 0; i < m_tabs->count(); ++i) {
+                    TerminalTab *tab = tabAt(i);
+                    TmuxSession *session = tmuxSessionFor(tab);
+                    running = running || (tab && tab->customTitle() == win.name)
+                              || (session && session->windowName(tab) == win.name);
+                }
                 QAction *act = m_startWindowMenu->addAction(win.name);
                 act->setEnabled(!running);
                 const QString name = win.name;
@@ -2196,8 +2226,21 @@ void MainWindow::openWorkspaceFile(const QString &path)
         }
     }
 
+    // Run by tmux: an existing session is attached to as it is, as smug does;
+    // otherwise it's made, then attached to.
+    const QStringList tmux = tmuxProgram();
+    const bool tmuxRunning = spec.tmux && TmuxWorkspace::sessionExists(tmux, spec.name);
+    if (tmuxRunning) {
+        for (TmuxSession *s : std::as_const(m_tmuxSessions)) {
+            if (s->label() == spec.name && !s->tabs().isEmpty()) {
+                showTab(s->tabs().first());   // already open, in another workspace
+                return;
+            }
+        }
+    }
+
     QString output;
-    if (!spec.beforeStart.isEmpty()
+    if (!tmuxRunning && !spec.beforeStart.isEmpty()
         && !runSetupCommands(spec.beforeStart, spec.root, spec.environment,
                              tr("Starting “%1”").arg(spec.name), &output)) {
         QMessageBox box(QMessageBox::Warning, tr("Open Workspace"),
@@ -2215,6 +2258,34 @@ void MainWindow::openWorkspaceFile(const QString &path)
     ws.colour = spec.colour;
     ws.definition = file;
     ws.variables = variables;
+
+    if (spec.tmux) {
+        QString error;
+        // The size the session will be shown at, in cells, as TmuxSession
+        // works it out: the page less its margin and a pane's frame.
+        QSize cells;
+        if (TerminalWidget *pane = currentTerminal(); pane && m_tabs->currentWidget()) {
+            const QSize cell = pane->cellSize();
+            const int m = m_settings.appearance().terminalMargin;
+            const QSize area = m_tabs->currentWidget()->size() - QSize(2 * m, 2 * m)
+                               - QSize(2 * TerminalWidget::paneBorder(), 2 * TerminalWidget::paneBorder());
+            if (!cell.isEmpty())
+                cells = QSize(qMax(10, area.width() / cell.width()), qMax(3, area.height() / cell.height()));
+        }
+        if (!tmuxRunning && !TmuxWorkspace::createSession(tmux, spec, cells, &error)) {
+            QMessageBox::warning(this, tr("Open Workspace"),
+                                 tr("Couldn't start tmux session “%1”.\n\n%2").arg(spec.name, error));
+            return;
+        }
+        m_workspaces << ws;
+        updateWorkspaceChrome();
+        attachTmux(spec.name, tmux + QStringList{QStringLiteral("-u"), QStringLiteral("-C"),
+                                                 QStringLiteral("attach-session"), QStringLiteral("-t"),
+                                                 spec.name},
+                   ws.id, true);
+        return;
+    }
+
     m_workspaces << ws;
     const int index = m_workspaces.size() - 1;
 
@@ -2289,6 +2360,17 @@ void MainWindow::startManualWindow(const QString &name)
     for (const WorkspaceSpec::Window &win : std::as_const(spec.windows)) {
         if (win.name != name)
             continue;
+        // In the workspace's tmux session, if it has one: the tab follows.
+        if (spec.tmux) {
+            for (TmuxSession *s : std::as_const(m_tmuxSessions)) {
+                if (s->label() != spec.name)
+                    continue;
+                QString error;
+                if (!TmuxWorkspace::addWindow(tmuxProgram(), spec, win, &error))
+                    QMessageBox::warning(this, tr("Start Window"), error);
+                return;
+            }
+        }
         if (TerminalTab *tab = makeWindowTab(spec, win)) {
             const int index = addTab(tab, name, QString());
             m_tabs->setCurrentIndex(index);
@@ -2301,11 +2383,43 @@ void MainWindow::saveWorkspaceAs()
 {
     Workspace &w = m_workspaces[m_currentWorkspace];
 
-    // Each local tab as a window: its panes' directories, and what each is
-    // running as the command to start it with.
-    const auto describe = [](TerminalWidget *pane) {
-        QJsonObject o{{QStringLiteral("dir"), pane->currentDirectory()}};
-        const QStringList args = pane->foregroundCommandLine();
+    // Each tab as a window: its panes' directories, and what each is running
+    // as the command to start it with. A tmux pane's come from tmux and, for
+    // a server on this machine, /proc.
+    const auto describe = [this](TerminalWidget *pane) {
+        QString dir = pane->currentDirectory();
+        QStringList args = pane->foregroundCommandLine();
+        if (TmuxSession *session = tmuxSessionFor(pane);
+            session && session->command().value(0) != QLatin1String("ssh")) {
+            QProcess p;
+            const QStringList tmux = tmuxProgram();
+            p.start(tmux.first(), tmux.mid(1) + QStringList{
+                QStringLiteral("display-message"), QStringLiteral("-p"), QStringLiteral("-t"),
+                QLatin1Char('%') + QString::number(session->tmuxPaneId(pane)),
+                QStringLiteral("#{pane_pid}\t#{pane_current_path}")});
+            p.waitForFinished(2000);
+            const QStringList f = QString::fromLocal8Bit(p.readAllStandardOutput()).trimmed()
+                                      .split(QLatin1Char('\t'));
+            dir = f.value(1);
+            // The pane's foreground process group, from its shell's stat.
+            QFile stat(QStringLiteral("/proc/%1/stat").arg(f.value(0)));
+            if (stat.open(QIODevice::ReadOnly)) {
+                const QString line = QString::fromLocal8Bit(stat.readAll());
+                const QStringList fields = line.mid(line.lastIndexOf(QLatin1Char(')')) + 2)
+                                               .split(QLatin1Char(' '));
+                const QString foreground = fields.value(5);   // tpgid
+                if (!foreground.isEmpty() && foreground != f.value(0)) {
+                    QFile cmdline(QStringLiteral("/proc/%1/cmdline").arg(foreground));
+                    if (cmdline.open(QIODevice::ReadOnly)) {
+                        for (const QByteArray &arg : cmdline.readAll().split('\0')) {
+                            if (!arg.isEmpty())
+                                args << QString::fromLocal8Bit(arg);
+                        }
+                    }
+                }
+            }
+        }
+        QJsonObject o{{QStringLiteral("dir"), dir}};
         if (!args.isEmpty()) {
             QStringList quoted;
             for (const QString &arg : args) {
@@ -2317,11 +2431,16 @@ void MainWindow::saveWorkspaceAs()
         return o;
     };
     QList<WorkspaceFile::SavedWindow> windows;
+    bool tmux = false;
     for (int i = 0; i < m_tabs->count(); ++i) {
         TerminalTab *tab = tabAt(i);
-        if (!tab || tmuxSessionFor(tab))
+        if (!tab)
             continue;
         QString name = tab->customTitle();
+        if (TmuxSession *session = tmuxSessionFor(tab)) {
+            name = session->windowName(tab);
+            tmux = true;
+        }
         if (name.isEmpty() && tab->activePane()) {
             name = tab->activePane()->hasRunningProcess()
                        ? tab->activePane()->foregroundProgramName()
@@ -2366,7 +2485,7 @@ void MainWindow::saveWorkspaceAs()
     QString original;
     if (QFile file(w.definition); !w.definition.isEmpty() && file.open(QIODevice::ReadOnly))
         original = QString::fromUtf8(file.readAll());
-    editor->setPlainText(WorkspaceFile::write(w.name, w.root, w.colour, windows, original));
+    editor->setPlainText(WorkspaceFile::write(w.name, w.root, w.colour, windows, original, tmux));
     editor->setMinimumSize(560, 360);
     layout->addWidget(editor, 1);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);

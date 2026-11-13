@@ -57,6 +57,8 @@ qt_add_executable(superterm
     src-widgets/tmuxcontrol.h
     src-widgets/tmuxsession.cpp
     src-widgets/tmuxsession.h
+    src-widgets/tmuxworkspace.cpp
+    src-widgets/tmuxworkspace.h
     src-widgets/workspace.cpp
     src-widgets/workspace.h
     src-widgets/workspacefile.cpp

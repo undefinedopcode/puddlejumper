@@ -448,6 +448,15 @@ bool parse(const QString &text, const QString &path, WorkspaceSpec &out, QString
         out.beforeStart = list(doc, "before_start");
         out.stop = list(doc, "stop");
         out.sendKeysDelay = doc["sendkeys_timeout"] ? doc["sendkeys_timeout"].as<int>(0) : 0;
+        const QString backend = str(doc, "backend");
+        if (backend.isEmpty()) {
+            const QFileInfo info(path);
+            out.tmux = info.fileName() == QLatin1String(".smug.yml")
+                       || info.fileName() == QLatin1String(".smug.yaml")
+                       || QDir::cleanPath(info.absolutePath()) == QDir::cleanPath(directories().at(1));
+        } else {
+            out.tmux = backend == QLatin1String("tmux");
+        }
 
         if (doc["env"] && doc["env"].IsMap()) {
             for (const auto &kv : doc["env"])
@@ -508,8 +517,13 @@ QStringList commands(const WorkspaceSpec &spec)
 }
 
 QString write(const QString &name, const QString &root, const QColor &colour,
-              const QList<SavedWindow> &windows, const QString &basedOn)
+              const QList<SavedWindow> &windows, const QString &basedOn, bool tmux)
 {
+    const QList<QPair<QString, QString>> blocks = topLevelBlocks(basedOn);
+    const bool saysBackend = std::any_of(blocks.cbegin(), blocks.cend(), [](const auto &b) {
+        return b.first == QLatin1String("backend");
+    });
+
     YAML::Emitter head;
     head << YAML::BeginMap;
     head << YAML::Key << "session" << YAML::Value << name.toStdString();
@@ -517,11 +531,12 @@ QString write(const QString &name, const QString &root, const QColor &colour,
         head << YAML::Key << "root" << YAML::Value << relativeTo(QString(), root).toStdString();
     if (colour.isValid())
         head << YAML::Key << "colour" << YAML::Value << colour.name().toStdString();
+    if (tmux && !saysBackend)
+        head << YAML::Key << "backend" << YAML::Value << "tmux";
     head << YAML::EndMap;
     QString text = QString::fromStdString(head.c_str()) + QLatin1Char('\n');
 
     // Everything else the original said, as it said it.
-    const QList<QPair<QString, QString>> blocks = topLevelBlocks(basedOn);
     QString originalWindows;
     for (const auto &[key, block] : blocks) {
         if (key == QLatin1String("windows"))

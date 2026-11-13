@@ -211,6 +211,11 @@ void TmuxSession::detach()
     m_control->detach();
 }
 
+void TmuxSession::killSession()
+{
+    m_control->command(QStringLiteral("kill-session"));
+}
+
 void TmuxSession::onReady()
 {
     // Flow control (tmux 3.2+): if superterm falls more than a few seconds
