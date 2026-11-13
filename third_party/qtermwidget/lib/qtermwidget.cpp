@@ -337,8 +337,11 @@ QImage QTermWidget::renderScreen(qreal scale, qreal devicePixelRatio) const
     painter.scale(scale, scale);
 
     // Every glyph advances exactly one cell, so a run of text stays on the grid.
+    // The display's font already carries spacing to its own cell width (see
+    // setVTFont()), so measure the bare font.
     QFont font = display->getVTFont();
     font.setKerning(false);
+    font.setLetterSpacing(QFont::AbsoluteSpacing, 0);
     const QFontMetricsF metrics(font);
     font.setLetterSpacing(QFont::AbsoluteSpacing,
                           cw - metrics.horizontalAdvance(QLatin1Char('M')));

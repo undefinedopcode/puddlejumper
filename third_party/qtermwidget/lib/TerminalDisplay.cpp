@@ -337,6 +337,21 @@ void TerminalDisplay::setVTFont(const QFont& f)
   // italic, etc) are stored in QFont independently, in almost all cases styleName is not needed.
   font.setStyleName(QString());
 
+  // superterm: the cell grid is a whole number of pixels wide, but a run of
+  // text is drawn at the font's own advance, which is fractional wherever
+  // hinting doesn't snap it (always on macOS, and on Linux with hinting off):
+  // Monaco at 14pt is 8.39px in an 8px cell, 27px adrift by column 80. Letter
+  // spacing makes up the difference, so each glyph advances exactly one cell.
+  // Measured without spacing, as the font passed in may already carry it.
+  font.setLetterSpacing(QFont::AbsoluteSpacing, 0);
+  const QFontMetricsF metrics(font);
+  const qreal advance = metrics.horizontalAdvance(QLatin1Char(REPCHAR[0]));
+  bool monospaced = true;
+  for (unsigned int i = 1; i < qstrlen(REPCHAR) && monospaced; i++)
+    monospaced = qFuzzyCompare(advance, metrics.horizontalAdvance(QLatin1Char(REPCHAR[i])));
+  if (monospaced && advance > 0)
+    font.setLetterSpacing(QFont::AbsoluteSpacing, qMax(1, qRound(advance)) - advance);
+
   QWidget::setFont(font);
   fontChange(font);
 }

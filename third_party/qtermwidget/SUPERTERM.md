@@ -19,7 +19,8 @@ and colour schemes in as Qt resources under `:/qtermwidget/`. Translations
 
 Patches 1–6 are in `lib/TerminalDisplay.cpp` / `.h`; patch 7 also touches
 `qtermwidget`, `Session`, `Emulation` and `Vt102Emulation`; patch 10 is in
-`lib/Session.cpp`. Each is marked
+`lib/Session.cpp`; patch 11 is in `lib/TerminalDisplay.cpp` and
+`lib/qtermwidget.cpp`. Each is marked
 with a `superterm:` comment.
 
 1. **Block elements and Powerline separators are drawn as geometry.**
@@ -92,6 +93,17 @@ with a `superterm:` comment.
     elsewhere it returned the directory the shell started in. On macOS it now
     asks `proc_pidinfo(PROC_PIDVNODEPATHINFO)`, so new tabs and saved
     workspaces follow the shell after a `cd` there too.
+
+11. **Text stays on the cell grid when the font's advance is fractional.**
+    The cell width is whole pixels, but a run of characters is drawn as one
+    string at the font's own advance. Where hinting snaps that to whole pixels
+    (Linux with `PreferFullHinting`) the two agree; Core Text never hints, so
+    on macOS text drifted from the grid and the cursor by up to 33px over 80
+    columns at all but a few sizes (Monaco was right only at 10 and 15px).
+    `setVTFont()` now gives a monospaced font letter spacing of the cell width
+    minus its advance, so every glyph advances exactly one cell.
+    `renderScreen()` (patch 8) measures the font without that spacing before
+    applying its own.
 
 The build also defines `HAVE_UTMPX` on macOS (in our `CMakeLists.txt`, not the
 sources): it has only the utmpx API, and `kpty.cpp` otherwise falls back to
