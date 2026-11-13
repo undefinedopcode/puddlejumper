@@ -31,6 +31,20 @@ int main(int argc, char *argv[])
     app.setDesktopFileName(QStringLiteral("superterm"));
 
     /*
+     * The shells are ours, not those of the terminal superterm may have been
+     * started from: drop that one's identity, which they would inherit. On
+     * macOS, TERM_PROGRAM=Apple_Terminal makes /etc/zshrc load Terminal's
+     * session save/restore, and an inherited TERM_SESSION_ID has every shell
+     * share (and delete) one session file.
+     */
+    for (const char *name : {"TERM_SESSION_ID", "ITERM_SESSION_ID", "TERM_PROGRAM_VERSION",
+                             "KONSOLE_DBUS_SESSION", "KONSOLE_VERSION", "VTE_VERSION",
+                             "WT_SESSION"})
+        qunsetenv(name);
+    qputenv("TERM_PROGRAM", "superterm");
+    qputenv("TERM_PROGRAM_VERSION", app.applicationVersion().toUtf8());
+
+    /*
      * Register the user scheme directory before anything reads the scheme
      * list. qtermwidget caches its scheme list the first time it is asked, so
      * a directory registered later in the run would be missed until restart.
