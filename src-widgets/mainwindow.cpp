@@ -32,7 +32,13 @@
 #include <QJsonObject>
 #include <QLineEdit>
 #include <QProcess>
+#include <QCryptographicHash>
 #include <QDialogButtonBox>
+#include <QEventLoop>
+#include <QFontDatabase>
+#include <QPlainTextEdit>
+#include <QProgressDialog>
+#include <QRegularExpression>
 #include <QIcon>
 #include <QLabel>
 #include <QListWidget>
@@ -457,6 +463,15 @@ void MainWindow::buildMenus()
     connect(m_workspaceMenu, &QMenu::aboutToShow, this, &MainWindow::rebuildWorkspaceMenu);
     m_newWorkspaceAct = new QAction(themeIcon({"list-add"}), tr("&New Workspace…"), this);
     connect(m_newWorkspaceAct, &QAction::triggered, this, [this]() { newWorkspace(true); });
+    m_openWorkspaceMenu = new QMenu(tr("&Open Workspace"), this);
+    m_openWorkspaceMenu->setIcon(themeIcon({"document-open", "folder-open"}));
+    m_startWindowMenu = new QMenu(tr("&Start Window"), this);
+    m_saveWorkspaceAct = new QAction(themeIcon({"document-save-as", "document-save"}),
+                                     tr("&Save Workspace As…"), this);
+    connect(m_saveWorkspaceAct, &QAction::triggered, this, &MainWindow::saveWorkspaceAs);
+    m_editWorkspaceFileAct = new QAction(themeIcon({"document-edit", "accessories-text-editor"}),
+                                         tr("Edit Workspace &File"), this);
+    connect(m_editWorkspaceFileAct, &QAction::triggered, this, &MainWindow::editWorkspaceFile);
     m_editWorkspaceAct = new QAction(themeIcon({"document-edit", "document-properties"}),
                                      tr("&Edit Workspace…"), this);
     connect(m_editWorkspaceAct, &QAction::triggered, this,
@@ -1720,6 +1735,27 @@ void MainWindow::closeWorkspace(int index)
             return;
     }
 
+    // A workspace file's stop commands, before its programs go.
+    const Workspace &closing = m_workspaces.at(index);
+    if (!closing.definition.isEmpty()) {
+        QHash<QString, QString> variables = closing.variables;
+        WorkspaceSpec spec;
+        QString output;
+        if (readWorkspaceFile(closing.definition, variables, spec, false) && !spec.stop.isEmpty()
+            && !runSetupCommands(spec.stop, spec.root, spec.environment,
+                                 tr("Stopping “%1”").arg(name), &output)) {
+            QMessageBox box(QMessageBox::Warning, tr("Close Workspace"),
+                            tr("A stop command for “%1” failed.").arg(name),
+                            QMessageBox::NoButton, this);
+            box.setDetailedText(output);
+            QPushButton *close = box.addButton(tr("Close &Anyway"), QMessageBox::DestructiveRole);
+            box.addButton(QMessageBox::Cancel);
+            box.exec();
+            if (box.clickedButton() != close)
+                return;
+        }
+    }
+
     // Off screen first, so its tabs are all parked.
     if (index == m_currentWorkspace)
         switchWorkspace(index == 0 ? 1 : index - 1);
@@ -1797,7 +1833,63 @@ void MainWindow::rebuildWorkspaceMenu()
     }
     m_workspaceMenu->addSeparator();
     m_workspaceMenu->addAction(m_newWorkspaceAct);
+
+    // Workspace files: superterm's, then smug's; those open are ticked.
+    m_openWorkspaceMenu->clear();
+    for (const auto &[name, path] : WorkspaceFile::available()) {
+        QAction *act = m_openWorkspaceMenu->addAction(name);
+        act->setToolTip(tildePath(path));
+        bool open = false;
+        for (const Workspace &w : std::as_const(m_workspaces))
+            open = open || w.definition == path;
+        act->setCheckable(open);
+        act->setChecked(open);
+        const QString file = path;
+        connect(act, &QAction::triggered, this, [this, file]() { openWorkspaceFile(file); });
+    }
+    if (m_openWorkspaceMenu->isEmpty()) {
+        m_openWorkspaceMenu->addAction(tr("No workspace files yet"))->setEnabled(false);
+        m_openWorkspaceMenu->actions().constLast()->setToolTip(
+            WorkspaceFile::directories().join(QLatin1Char('\n')));
+    }
+    m_openWorkspaceMenu->addSeparator();
+    m_openWorkspaceMenu->addAction(tr("Open &File…"), this, [this]() {
+        const QString path = QFileDialog::getOpenFileName(
+            this, tr("Open Workspace File"), QDir::homePath(),
+            tr("Workspace files (*.yml *.yaml);;All files (*)"));
+        if (!path.isEmpty())
+            openWorkspaceFile(path);
+    });
+    m_workspaceMenu->addMenu(m_openWorkspaceMenu);
+
+    // Windows the current workspace's file keeps for when they're asked for.
+    const Workspace &current = m_workspaces.at(m_currentWorkspace);
+    m_startWindowMenu->clear();
+    if (!current.definition.isEmpty()) {
+        QHash<QString, QString> variables = current.variables;
+        WorkspaceSpec spec;
+        if (readWorkspaceFile(current.definition, variables, spec, false)) {
+            for (const WorkspaceSpec::Window &win : std::as_const(spec.windows)) {
+                if (!win.manual)
+                    continue;
+                bool running = false;
+                for (int i = 0; i < m_tabs->count(); ++i)
+                    running = running || (tabAt(i) && tabAt(i)->customTitle() == win.name);
+                QAction *act = m_startWindowMenu->addAction(win.name);
+                act->setEnabled(!running);
+                const QString name = win.name;
+                connect(act, &QAction::triggered, this, [this, name]() { startManualWindow(name); });
+            }
+        }
+    }
+    if (!m_startWindowMenu->isEmpty())
+        m_workspaceMenu->addMenu(m_startWindowMenu);
+
+    m_workspaceMenu->addAction(m_saveWorkspaceAct);
+    m_workspaceMenu->addSeparator();
     m_workspaceMenu->addAction(m_editWorkspaceAct);
+    m_editWorkspaceFileAct->setEnabled(!current.definition.isEmpty());
+    m_workspaceMenu->addAction(m_editWorkspaceFileAct);
     m_closeWorkspaceAct->setEnabled(m_workspaces.size() > 1);
     m_workspaceMenu->addAction(m_closeWorkspaceAct);
     m_workspaceMenu->addSeparator();
@@ -1893,11 +1985,16 @@ void MainWindow::saveSession()
                 {QStringLiteral("command"), QJsonArray::fromStringList(command)},
             });
         }
+        QJsonObject variables;
+        for (auto it = w.variables.cbegin(); it != w.variables.cend(); ++it)
+            variables.insert(it.key(), it.value());
         workspaces.append(QJsonObject{
             {QStringLiteral("id"), w.id},
             {QStringLiteral("name"), w.name},
             {QStringLiteral("root"), w.root},
             {QStringLiteral("colour"), w.colour.isValid() ? w.colour.name() : QString()},
+            {QStringLiteral("definition"), w.definition},
+            {QStringLiteral("variables"), variables},
             {QStringLiteral("currentTab"), savedCurrent},
             {QStringLiteral("tabs"), savedTabs},
             {QStringLiteral("tmux"), tmux},
@@ -1933,6 +2030,10 @@ bool MainWindow::restoreSession()
         w.root = o.value(QStringLiteral("root")).toString();
         w.colour = QColor(o.value(QStringLiteral("colour")).toString());
         w.currentTab = o.value(QStringLiteral("currentTab")).toInt();
+        w.definition = o.value(QStringLiteral("definition")).toString();
+        const QJsonObject variables = o.value(QStringLiteral("variables")).toObject();
+        for (auto it = variables.constBegin(); it != variables.constEnd(); ++it)
+            w.variables.insert(it.key(), it.value().toString());
         workspaces << w;
     }
     m_workspaces = workspaces;
@@ -1990,5 +2091,373 @@ bool MainWindow::restoreSession()
         m_tabs->setCurrentIndex(current);
         onCurrentTabChanged(current);
     }
+    return true;
+}
+
+// ---- workspace files ----------------------------------------------------------
+
+bool MainWindow::readWorkspaceFile(const QString &path, QHash<QString, QString> &variables,
+                                   WorkspaceSpec &spec, bool askForVariables)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        if (askForVariables)
+            QMessageBox::warning(this, tr("Open Workspace"),
+                                 tr("Couldn't read %1: %2").arg(tildePath(path), file.errorString()));
+        return false;
+    }
+    const QString text = QString::fromUtf8(file.readAll());
+
+    // Variables neither given nor in the environment: ask for them (smug
+    // takes them on its command line).
+    const QStringList missing = WorkspaceFile::missingVariables(text, variables);
+    if (!missing.isEmpty()) {
+        if (!askForVariables) {
+            for (const QString &name : missing)
+                variables.insert(name, QString());
+        } else {
+            QDialog dialog(this);
+            dialog.setWindowTitle(tr("Open Workspace"));
+            auto *form = new QFormLayout(&dialog);
+            auto *intro = new QLabel(tr("“%1” uses variables that aren't set:")
+                                         .arg(QFileInfo(path).completeBaseName()), &dialog);
+            form->addRow(intro);
+            QList<QLineEdit *> edits;
+            for (const QString &name : missing) {
+                auto *edit = new QLineEdit(&dialog);
+                form->addRow(name, edit);
+                edits << edit;
+            }
+            auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+            buttons->button(QDialogButtonBox::Ok)->setText(tr("&Open"));
+            connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+            connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+            form->addRow(buttons);
+            if (dialog.exec() != QDialog::Accepted)
+                return false;
+            for (int i = 0; i < missing.size(); ++i)
+                variables.insert(missing.at(i), edits.at(i)->text());
+        }
+    }
+
+    QString error;
+    if (!WorkspaceFile::parse(WorkspaceFile::expand(text, variables), path, spec, &error)) {
+        if (askForVariables)
+            QMessageBox::warning(this, tr("Open Workspace"),
+                                 tr("%1 isn't a workspace file superterm can read.\n\n%2")
+                                     .arg(tildePath(path), error));
+        return false;
+    }
+    return true;
+}
+
+void MainWindow::openWorkspaceFile(const QString &path)
+{
+    const QString file = QFileInfo(path).absoluteFilePath();
+    for (int i = 0; i < m_workspaces.size(); ++i) {
+        if (m_workspaces.at(i).definition == file) {
+            switchWorkspace(i);
+            return;
+        }
+    }
+
+    QHash<QString, QString> variables;
+    WorkspaceSpec spec;
+    if (!readWorkspaceFile(file, variables, spec, true))
+        return;
+
+    // A file from elsewhere (a project, a download) runs commands: ask once,
+    // and again whenever it changes. The user's own files are trusted.
+    if (!WorkspaceFile::isUsersOwn(file)) {
+        QFile f(file);
+        if (!f.open(QIODevice::ReadOnly))
+            return;
+        const QByteArray hash = QCryptographicHash::hash(f.readAll(), QCryptographicHash::Sha256).toHex();
+        const QString key = QStringLiteral("trustedWorkspaceFiles/")
+                            + QString::fromLatin1(QCryptographicHash::hash(file.toUtf8(),
+                                                  QCryptographicHash::Sha1).toHex());
+        QSettings settings;
+        const QStringList commands = WorkspaceFile::commands(spec);
+        if (!commands.isEmpty() && settings.value(key).toByteArray() != hash) {
+            QMessageBox box(QMessageBox::Warning, tr("Open Workspace"),
+                            tr("Run the commands in “%1”?").arg(tildePath(file)),
+                            QMessageBox::NoButton, this);
+            box.setInformativeText(tr("Opening this workspace runs %n command(s). Only open "
+                                      "files you trust; you'll be asked again if it changes.",
+                                      nullptr, int(commands.size())));
+            box.setDetailedText(commands.join(QLatin1Char('\n')));
+            QPushButton *trust = box.addButton(tr("&Trust and Open"), QMessageBox::AcceptRole);
+            QPushButton *cancel = box.addButton(QMessageBox::Cancel);
+            box.setDefaultButton(cancel);
+            box.exec();
+            if (box.clickedButton() != trust)
+                return;
+            settings.setValue(key, hash);
+        }
+    }
+
+    QString output;
+    if (!spec.beforeStart.isEmpty()
+        && !runSetupCommands(spec.beforeStart, spec.root, spec.environment,
+                             tr("Starting “%1”").arg(spec.name), &output)) {
+        QMessageBox box(QMessageBox::Warning, tr("Open Workspace"),
+                        tr("“%1” wasn't opened: a before_start command failed.").arg(spec.name),
+                        QMessageBox::Ok, this);
+        box.setDetailedText(output);
+        box.exec();
+        return;
+    }
+
+    Workspace ws;
+    ws.id = QUuid::createUuid().toString(QUuid::WithoutBraces);
+    ws.name = spec.name;
+    ws.root = spec.root;
+    ws.colour = spec.colour;
+    ws.definition = file;
+    ws.variables = variables;
+    m_workspaces << ws;
+    const int index = m_workspaces.size() - 1;
+
+    int selected = -1;
+    int opened = 0;
+    for (const WorkspaceSpec::Window &win : std::as_const(spec.windows)) {
+        if (win.manual)
+            continue;
+        TerminalTab *tab = makeWindowTab(spec, win);
+        if (!tab)
+            continue;
+        if (win.selected)
+            selected = opened;
+        ++opened;
+        addTab(tab, win.name.isEmpty() ? tr("Terminal") : win.name, QString(), index);
+    }
+    switchWorkspace(index);
+    if (selected >= 0)
+        m_tabs->setCurrentIndex(selected);
+}
+
+TerminalTab *MainWindow::makeWindowTab(const WorkspaceSpec &spec, const WorkspaceSpec::Window &window)
+{
+    TerminalTab *tab = TerminalTab::restoreLayout(window.layout, [this, &spec](const QJsonObject &leaf) {
+        TerminalProfile profile = m_profiles.defaultProfile();
+        const QString wanted = leaf.value(QStringLiteral("profile")).toString();
+        for (const TerminalProfile &p : m_profiles.profiles()) {
+            if (!wanted.isEmpty() && (p.name == wanted || p.id == wanted))
+                profile = p;
+        }
+        QStringList commands;
+        for (const QJsonValue &c : leaf.value(QStringLiteral("commands")).toArray())
+            commands << c.toString();
+        // exec: the commands are the pane's program, and it closes with them.
+        const bool exec = leaf.value(QStringLiteral("exec")).toBool() && !commands.isEmpty();
+        if (exec) {
+            profile.shellProgram = QStringLiteral("/bin/sh");
+            profile.shellArgs = QStringList{QStringLiteral("-c"), commands.join(QLatin1Char('\n'))};
+        }
+        profile.environment = spec.environment;
+
+        QString dir = leaf.value(QStringLiteral("dir")).toString();
+        if (dir.isEmpty() || !QDir(dir).exists())
+            dir = !spec.root.isEmpty() && QDir(spec.root).exists() ? spec.root : QString();
+        TerminalWidget *pane = makePane(profile, dir);
+
+        // Typed into the shell, as smug does, so it's still there afterwards
+        // and they're in its history.
+        if (!exec) {
+            const int step = qMax(spec.sendKeysDelay, 30);
+            for (int i = 0; i < commands.size(); ++i) {
+                const QString command = commands.at(i);
+                QTimer::singleShot(100 + i * step, pane, [pane, command]() {
+                    pane->sendText(command + QLatin1Char('\r'));
+                });
+            }
+        }
+        return pane;
+    });
+    if (tab)
+        tab->setCustomTitle(window.name);
+    return tab;
+}
+
+void MainWindow::startManualWindow(const QString &name)
+{
+    Workspace &current = m_workspaces[m_currentWorkspace];
+    WorkspaceSpec spec;
+    if (current.definition.isEmpty()
+        || !readWorkspaceFile(current.definition, current.variables, spec, true))
+        return;
+    for (const WorkspaceSpec::Window &win : std::as_const(spec.windows)) {
+        if (win.name != name)
+            continue;
+        if (TerminalTab *tab = makeWindowTab(spec, win)) {
+            const int index = addTab(tab, name, QString());
+            m_tabs->setCurrentIndex(index);
+        }
+        return;
+    }
+}
+
+void MainWindow::saveWorkspaceAs()
+{
+    Workspace &w = m_workspaces[m_currentWorkspace];
+
+    // Each local tab as a window: its panes' directories, and what each is
+    // running as the command to start it with.
+    const auto describe = [](TerminalWidget *pane) {
+        QJsonObject o{{QStringLiteral("dir"), pane->currentDirectory()}};
+        const QStringList args = pane->foregroundCommandLine();
+        if (!args.isEmpty()) {
+            QStringList quoted;
+            for (const QString &arg : args) {
+                static const QRegularExpression plain(QStringLiteral("^[A-Za-z0-9_./:=@%+-]+$"));
+                quoted << (plain.match(arg).hasMatch() ? arg : shellQuote(arg));
+            }
+            o.insert(QStringLiteral("commands"), QJsonArray{quoted.join(QLatin1Char(' '))});
+        }
+        return o;
+    };
+    QList<WorkspaceFile::SavedWindow> windows;
+    for (int i = 0; i < m_tabs->count(); ++i) {
+        TerminalTab *tab = tabAt(i);
+        if (!tab || tmuxSessionFor(tab))
+            continue;
+        QString name = tab->customTitle();
+        if (name.isEmpty() && tab->activePane()) {
+            name = tab->activePane()->hasRunningProcess()
+                       ? tab->activePane()->foregroundProgramName()
+                       : QDir(tab->activePane()->currentDirectory()).dirName();
+        }
+        windows << WorkspaceFile::SavedWindow{name, tab->saveLayout(describe)};
+    }
+
+    // Shown for review before it's written: the commands are a guess.
+    QDialog dialog(this);
+    dialog.setWindowTitle(tr("Save Workspace As"));
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *pathRow = new QHBoxLayout;
+    auto *pathEdit = new QLineEdit(&dialog);
+    QString suggested = w.definition;
+    if (suggested.isEmpty()) {
+        QString base = w.name.toLower();
+        base.replace(QRegularExpression(QStringLiteral("[^a-z0-9._-]+")), QStringLiteral("-"));
+        suggested = WorkspaceFile::directories().first() + QLatin1Char('/')
+                    + (base.isEmpty() ? QStringLiteral("workspace") : base) + QStringLiteral(".yml");
+    }
+    pathEdit->setText(suggested);
+    auto *browse = new QToolButton(&dialog);
+    browse->setIcon(themeIcon({"document-open-folder", "folder-open", "folder"}));
+    connect(browse, &QToolButton::clicked, &dialog, [&dialog, pathEdit]() {
+        const QString p = QFileDialog::getSaveFileName(&dialog, tr("Save Workspace As"), pathEdit->text(),
+                                                       tr("Workspace files (*.yml *.yaml)"));
+        if (!p.isEmpty())
+            pathEdit->setText(p);
+    });
+    pathRow->addWidget(new QLabel(tr("File:"), &dialog));
+    pathRow->addWidget(pathEdit, 1);
+    pathRow->addWidget(browse);
+    layout->addLayout(pathRow);
+    auto *hint = new QLabel(tr("Each pane's command is what it's running now. Check and edit "
+                               "before saving; files in %1 appear under Open Workspace.")
+                                .arg(tildePath(WorkspaceFile::directories().first())), &dialog);
+    hint->setWordWrap(true);
+    layout->addWidget(hint);
+    auto *editor = new QPlainTextEdit(&dialog);
+    editor->setFont(QFontDatabase::systemFont(QFontDatabase::FixedFont));
+    QString original;
+    if (QFile file(w.definition); !w.definition.isEmpty() && file.open(QIODevice::ReadOnly))
+        original = QString::fromUtf8(file.readAll());
+    editor->setPlainText(WorkspaceFile::write(w.name, w.root, w.colour, windows, original));
+    editor->setMinimumSize(560, 360);
+    layout->addWidget(editor, 1);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Save | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    if (dialog.exec() != QDialog::Accepted)
+        return;
+
+    QString path = pathEdit->text().trimmed();
+    if (path.startsWith(QLatin1String("~/")))
+        path = QDir::homePath() + path.mid(1);
+    QDir().mkpath(QFileInfo(path).absolutePath());
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)
+        || file.write(editor->toPlainText().toUtf8()) < 0) {
+        QMessageBox::warning(this, tr("Save Workspace As"),
+                             tr("Couldn't write %1: %2").arg(tildePath(path), file.errorString()));
+        return;
+    }
+    w.definition = QFileInfo(path).absoluteFilePath();
+    statusBar()->showMessage(tr("Saved workspace “%1” to %2").arg(w.name, tildePath(path)), 5000);
+    updateWorkspaceChrome();
+}
+
+void MainWindow::editWorkspaceFile()
+{
+    const QString path = m_workspaces.at(m_currentWorkspace).definition;
+    if (path.isEmpty())
+        return;
+    // In the terminal's own editor, in a tab of its own.
+    newTabWithProfile(QString());
+    if (TerminalWidget *pane = currentTerminal()) {
+        pane->sendText(QStringLiteral("${VISUAL:-${EDITOR:-nano}} %1\r").arg(shellQuote(path)));
+        if (TerminalTab *tab = currentTab()) {
+            tab->setCustomTitle(QFileInfo(path).fileName());
+            syncTabFromActivePane(tab);
+        }
+    }
+}
+
+bool MainWindow::runSetupCommands(const QStringList &commands, const QString &dir,
+                                  const QStringList &environment, const QString &what,
+                                  QString *output)
+{
+    if (!dir.isEmpty() && !QDir(dir).exists()) {
+        *output = tr("The folder %1 doesn't exist.").arg(dir);
+        return false;
+    }
+    QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
+    for (const QString &pair : environment) {
+        const int eq = pair.indexOf(QLatin1Char('='));
+        if (eq > 0)
+            env.insert(pair.left(eq), pair.mid(eq + 1));
+    }
+
+    QProgressDialog progress(what, tr("Cancel"), 0, int(commands.size()), this);
+    progress.setWindowModality(Qt::WindowModal);
+    progress.setMinimumDuration(400);
+    for (int i = 0; i < commands.size(); ++i) {
+        const QString command = commands.at(i);
+        progress.setLabelText(QStringLiteral("%1\n%2").arg(what, command));
+        progress.setValue(i);
+
+        QProcess proc;
+        proc.setProcessEnvironment(env);
+        proc.setWorkingDirectory(dir.isEmpty() ? QDir::homePath() : dir);
+        proc.setProcessChannelMode(QProcess::MergedChannels);
+        QEventLoop loop;
+        connect(&proc, &QProcess::finished, &loop, &QEventLoop::quit);
+        connect(&proc, &QProcess::errorOccurred, &loop, &QEventLoop::quit);
+        connect(&progress, &QProgressDialog::canceled, &loop, &QEventLoop::quit);
+        proc.start(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), command});
+        if (proc.state() != QProcess::NotRunning)
+            loop.exec();
+
+        *output += QStringLiteral("$ %1\n").arg(command) + QString::fromLocal8Bit(proc.readAll());
+        if (progress.wasCanceled()) {
+            proc.kill();
+            proc.waitForFinished(1000);
+            *output += tr("(cancelled)\n");
+            return false;
+        }
+        if (proc.state() != QProcess::NotRunning)
+            proc.waitForFinished(-1);
+        if (proc.error() == QProcess::FailedToStart || proc.exitStatus() != QProcess::NormalExit
+            || proc.exitCode() != 0) {
+            *output += tr("(exit status %1)\n").arg(proc.exitCode());
+            return false;
+        }
+    }
+    progress.setValue(int(commands.size()));
     return true;
 }

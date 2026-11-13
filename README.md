@@ -38,6 +38,7 @@ The window chrome, toolbar, tab strip, status bar, and a live zsh prompt:
 | Qt | 6.5+ (developed against 6.12) |
 | CMake | 3.21+ |
 | Compiler | C++17 |
+| yaml-cpp | 0.7+ (workspace files; `yaml-cpp`, `libyaml-cpp-dev` or `yaml-cpp-devel`) |
 
 QTermWidget is **vendored** in `third_party/qtermwidget` (2.4.0, with rendering
 patches) and built as a static library, so no system qtermwidget package is
@@ -506,9 +507,79 @@ are still running are reattached in their workspaces; sessions over ssh
 aren't. **Settings → Tabs & Window → Reopen workspaces and tabs at startup**
 turns this off.
 
-Workspaces defined in files, which also start programs (in the style of
-[smug](https://github.com/ivaaaan/smug), and able to read smug's files), are
-planned.
+### Workspace files
+
+A workspace can also be described in a file, which says what to open and
+what to run, so a project's whole setup comes up in one go. The format is
+[smug](https://github.com/ivaaaan/smug)'s, so existing smug files work as
+they are, with a few additions of superterm's own that smug ignores.
+
+```yaml
+session: blog                  # the workspace's name
+root: ~/src/blog               # where everything starts
+colour: "#4a8fe0"              # superterm: the workspace's colour
+env:
+  NODE_ENV: development        # set in every pane
+before_start:                  # run first; a failure stops the opening
+  - docker compose up -d
+stop:                          # run when the workspace is closed
+  - docker compose stop
+windows:
+  - name: code                 # each window is a tab
+    layout: main-vertical      # tmux's layouts, or a tmux layout string
+    commands: [nvim]           # typed into the first pane's shell
+    panes:
+      - root: web              # relative to the window's root
+        commands: [npm run dev]
+      - commands: [git status]
+  - name: tests
+    split: down                # superterm: nested splits with sizes
+    sizes: [70, 30]
+    panes:
+      - commands: [npm test -- --watch]
+      - split: right
+        panes: [{}, {commands: [htop], exec: true}]
+  - name: logs
+    manual: true               # listed under Start Window, not opened
+    commands: [docker compose logs -f]
+```
+
+**Workspace → Open Workspace** lists the files in
+`~/.config/superterm/workspaces/` and smug's `~/.config/smug/`, and has
+**Open File…** for any other. Opening one creates a workspace with its
+windows as tabs; if it's already open, it's switched to instead.
+
+- **Commands** are typed into each pane's shell, as smug does. When one
+  finishes, the shell is still there and the command is in its history.
+  `exec: true` runs them in place of the shell instead, so the pane closes
+  when they end. `sendkeys_timeout` (milliseconds) spaces them out.
+- **Layouts**: tmux's `even-horizontal` (the default, as in smug),
+  `even-vertical`, `main-vertical`, `main-horizontal` (and their
+  `-mirrored` forms) and `tiled`, or a layout string as `tmux list-windows`
+  prints it. Or a nested `split: right|down` with `sizes` and `panes`, for any
+  arrangement.
+- **Variables**: `$name` and `${name}` are filled in from the environment,
+  as in smug. superterm asks for any that aren't set, in place of smug's
+  `name=value` arguments, and remembers the answers for that workspace.
+  Names the file sets under `env:` are left for the shell, so they read what
+  the panes were given.
+- **Profiles**: `profile:` (at the top, or on a window or pane) names a
+  profile to use instead of the default.
+- **Environment**: `SMUG_SESSION` and `SMUG_SESSION_CONFIG_PATH` are set as
+  in smug, and `SUPERTERM_WORKSPACE` too.
+- **Start Window** lists the `manual: true` windows not yet open.
+- **Edit Workspace File** opens the file in `$VISUAL` or `$EDITOR` (or nano)
+  in a new tab. **Save Workspace As…** writes any workspace as a file: each
+  tab's layout and directories, and as commands, what each pane is running
+  now. It's shown for checking first. For a workspace opened from a file, the
+  file's other settings and its unopened manual windows are kept as written.
+- **Trust.** A file outside those two directories, from a project or a
+  download, runs commands. The first time it's opened, and whenever it
+  changes, superterm lists the commands and asks first.
+
+Workspace files open locally for now: their panes are superterm's own
+shells. Running them as tmux sessions, which smug does, so they outlive
+superterm, is planned. So is opening a project's `.smug.yml` from its folder.
 
 ## Split panes
 
@@ -644,6 +715,7 @@ CMakeLists.txt            build definition
 src-widgets/main.cpp      QApplication bootstrap, style and icon
 src-widgets/mainwindow.*  tabs, workspaces, menus, toolbar, status bar, previews
 src-widgets/workspace.*   workspace data and its edit dialog
+src-widgets/workspacefile.*  workspace files: smug's YAML, read and written
 src-widgets/terminaltab.*  one tab: a tree of panes in splitters
 src-widgets/terminalwidget.*  one pane: a QTermWidget plus appearance plumbing
 src-widgets/tmuxcontrol.*  tmux control-mode protocol client

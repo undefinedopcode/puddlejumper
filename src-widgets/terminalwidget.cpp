@@ -141,6 +141,8 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings,
 
     if (m_profile.workingDirectory && !m_profile.workingDirectory->isEmpty())
         m_terminal->setWorkingDirectory(*m_profile.workingDirectory);
+    if (!m_profile.environment.isEmpty())
+        m_terminal->setEnvironment(m_profile.environment);   // added to superterm's own
 
     m_terminal->startShellProgram();
 }
@@ -431,6 +433,22 @@ QString TerminalWidget::foregroundProgramName() const
     if (!comm.open(QIODevice::ReadOnly))
         return QString();
     return QString::fromUtf8(comm.readAll()).trimmed();
+}
+
+QStringList TerminalWidget::foregroundCommandLine() const
+{
+    if (!m_terminal || !hasRunningProcess())
+        return {};
+    const int fgPgrp = m_terminal->getForegroundProcessId();
+    QFile cmdline(QStringLiteral("/proc/%1/cmdline").arg(fgPgrp));
+    if (fgPgrp <= 0 || !cmdline.open(QIODevice::ReadOnly))
+        return {};
+    QStringList args;
+    for (const QByteArray &arg : cmdline.readAll().split('\0')) {
+        if (!arg.isEmpty())
+            args << QString::fromLocal8Bit(arg);
+    }
+    return args;
 }
 
 QSize TerminalWidget::screenPixelSize() const

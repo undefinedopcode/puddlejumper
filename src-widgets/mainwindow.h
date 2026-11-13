@@ -14,6 +14,7 @@
 #include "profiles.h"
 #include "settings.h"
 #include "workspace.h"
+#include "workspacefile.h"
 
 class QTabWidget;
 class QSplitter;
@@ -90,6 +91,32 @@ private:
     /* Mark a tab as having output that hasn't been seen. */
     void markTabBusy(TerminalTab *tab);
     void onCurrentTabChanged(int index);
+
+    /*
+     * Workspace files (smug's format). Opening one asks for any variables it
+     * needs, asks before running the commands of a file that isn't the
+     * user's own, runs before_start, then opens its windows as a new
+     * workspace's tabs. One already open is switched to instead.
+     */
+    void openWorkspaceFile(const QString &path);
+    /* Read a workspace's file again, with the variables it was opened with. */
+    bool readWorkspaceFile(const QString &path, QHash<QString, QString> &variables,
+                           WorkspaceSpec &spec, bool askForVariables);
+    /* A tab for one of a file's windows; null if it has no panes. */
+    TerminalTab *makeWindowTab(const WorkspaceSpec &spec, const WorkspaceSpec::Window &window);
+    /* Start a window marked `manual` in the current workspace's file. */
+    void startManualWindow(const QString &name);
+    void saveWorkspaceAs();
+    /* Open the current workspace's file in an editor, in a new tab. */
+    void editWorkspaceFile();
+    /*
+     * Run setup commands (before_start, stop) one by one through sh in `dir`,
+     * showing progress. False if one fails or is cancelled; `output` gets
+     * what they printed.
+     */
+    bool runSetupCommands(const QStringList &commands, const QString &dir,
+                          const QStringList &environment, const QString &what,
+                          QString *output);
 
     /* Workspaces and their tabs at quit, reopened at the next start. */
     void saveSession();
@@ -201,6 +228,10 @@ private:
     QMenu *m_workspaceMenu = nullptr;
     QToolButton *m_workspaceButton = nullptr;
     QAction *m_newWorkspaceAct = nullptr;
+    QMenu *m_openWorkspaceMenu = nullptr;
+    QMenu *m_startWindowMenu = nullptr;
+    QAction *m_saveWorkspaceAct = nullptr;
+    QAction *m_editWorkspaceFileAct = nullptr;
     QAction *m_editWorkspaceAct = nullptr;
     QAction *m_closeWorkspaceAct = nullptr;
     QAction *m_nextWorkspaceAct = nullptr;

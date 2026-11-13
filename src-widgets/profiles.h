@@ -56,6 +56,12 @@ struct TerminalProfile
     std::optional<QString> workingDirectory;
 
     bool isDefault = false;
+
+    /*
+     * Extra environment for the shell, "NAME=value". Not stored: a workspace
+     * sets it on the panes it opens (and a split copies its neighbour's).
+     */
+    QStringList environment;
 };
 
 /*

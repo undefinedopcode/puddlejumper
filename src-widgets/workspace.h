@@ -8,6 +8,7 @@
 
 #include <QColor>
 #include <QDialog>
+#include <QHash>
 #include <QIcon>
 #include <QList>
 #include <QPointer>
@@ -28,6 +29,11 @@ struct Workspace
     QString name;
     QString root;     // where new tabs start; empty for the profile's default
     QColor colour;    // optional accent, to tell workspaces apart
+
+    // Opened from a workspace file: its path, and the values given for the
+    // variables it uses (so it can be read again for manual windows and stop).
+    QString definition;
+    QHash<QString, QString> variables;
 
     // While another workspace is shown: its tabs, in order, and which was
     // current. (The shown workspace's tabs are the tab widget's.)

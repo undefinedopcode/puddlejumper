@@ -135,6 +135,8 @@ public:
     bool hasRunningProcess() const;
     /* Name of the foreground program ("" when it cannot be determined). */
     QString foregroundProgramName() const;
+    /* The foreground program's arguments (from /proc), when one is running. */
+    QStringList foregroundCommandLine() const;
 
     /* The screen's size in pixels at the current font: columns x lines cells. */
     QSize screenPixelSize() const;

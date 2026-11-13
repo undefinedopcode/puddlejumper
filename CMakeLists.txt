@@ -20,6 +20,9 @@ include(GNUInstallDirs)
 # so the system qtermwidget6 package is not used.
 add_subdirectory(third_party/qtermwidget EXCLUDE_FROM_ALL)
 
+# Workspace files are YAML, in smug's format.
+find_package(yaml-cpp 0.7 REQUIRED)
+
 # ---------------------------------------------------------------------------
 # superterm — the application.
 #
@@ -56,6 +59,8 @@ qt_add_executable(superterm
     src-widgets/tmuxsession.h
     src-widgets/workspace.cpp
     src-widgets/workspace.h
+    src-widgets/workspacefile.cpp
+    src-widgets/workspacefile.h
 )
 
 target_link_libraries(superterm PRIVATE
@@ -63,6 +68,7 @@ target_link_libraries(superterm PRIVATE
     Qt6::Gui
     Qt6::Widgets
     qtermwidget
+    yaml-cpp::yaml-cpp
 )
 
 set_target_properties(superterm PROPERTIES AUTOMOC ON)
