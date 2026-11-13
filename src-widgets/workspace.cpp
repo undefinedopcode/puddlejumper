@@ -6,7 +6,7 @@
 
 #include "workspace.h"
 
-#include "themeicon.h"
+#include "appicon.h"
 
 #include <QButtonGroup>
 #include <QDialogButtonBox>
@@ -98,7 +98,7 @@ WorkspaceDialog::WorkspaceDialog(const QString &title, const Workspace &ws, QWid
     m_root->setPlaceholderText(tr("The profile's (usually home)"));
     m_root->setMinimumWidth(280);
     auto *browse = new QToolButton(rootRow);
-    browse->setIcon(themeIcon({"document-open-folder", "folder-open", "folder"}));
+    browse->setIcon(appIcon("folder-open"));
     browse->setToolTip(tr("Choose a folder"));
     connect(browse, &QToolButton::clicked, this, [this]() {
         const QString start = m_root->text().isEmpty() ? QDir::homePath() : m_root->text();

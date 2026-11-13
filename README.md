@@ -35,7 +35,7 @@ The window chrome, toolbar, tab strip, status bar, and a live zsh prompt:
 
 | Component | Version |
 | --- | --- |
-| Qt | 6.5+ (developed against 6.12) |
+| Qt | 6.5+ (developed against 6.12), with Qt SVG (`qt6-svg`, `qt6-svg-dev`) |
 | CMake | 3.21+ |
 | Compiler | C++17 |
 | yaml-cpp | 0.7+ (workspace files; `yaml-cpp`, `libyaml-cpp-dev` or `yaml-cpp-devel`) |
@@ -45,6 +45,12 @@ patches) and built as a static library, so no system qtermwidget package is
 needed. Its keyboard layouts and colour schemes are compiled in as Qt
 resources. See `third_party/qtermwidget/SUPERTERM.md` for what differs from
 upstream.
+
+The UI's icons are [Lucide](https://lucide.dev) (1.65.0, ISC; see
+`icons/lucide/LICENSE`), compiled in and drawn in the palette's text colour, so
+they look the same on every desktop and on macOS, whatever the icon theme. To
+add one, copy its SVG from `lucide-static` into `icons/lucide/` and use
+`appIcon("<name>")`.
 
 The legacy Qt Quick build needs the separate **QMLTermWidget** module instead;
 see the project layout section.

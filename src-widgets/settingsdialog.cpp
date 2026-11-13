@@ -6,11 +6,11 @@
 
 #include "settingsdialog.h"
 
+#include "appicon.h"
 #include "colorscheme.h"
 #include "colorschemeeditor.h"
 #include "profiles.h"
 #include "settings.h"
-#include "themeicon.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -131,10 +131,10 @@ SettingsDialog::SettingsDialog(Settings &settings, ProfileStore &profiles,
         auto *item = new QListWidgetItem(icon, text, m_sections);
         item->setSizeHint(QSize(0, 34));
     };
-    addSection(tr("Appearance"), themeIcon({"preferences-desktop-color", "preferences-desktop-theme"}));
-    addSection(tr("Terminal"), themeIcon({"utilities-terminal"}));
-    addSection(tr("Tabs & Window"), themeIcon({"preferences-system-windows", "window"}));
-    addSection(tr("Profiles"), themeIcon({"system-users", "user-identity"}));
+    addSection(tr("Appearance"), appIcon("palette"));
+    addSection(tr("Terminal"), appIcon("square-terminal"));
+    addSection(tr("Tabs & Window"), appIcon("app-window"));
+    addSection(tr("Profiles"), appIcon("users"));
     outer->addWidget(m_sections);
 
     auto *right = new QVBoxLayout;
@@ -257,7 +257,7 @@ QWidget *SettingsDialog::buildAppearancePage()
     schemeLayout->addWidget(m_schemeBox, 1);
     m_editSchemeBtn = new QToolButton(schemeRow);
     m_editSchemeBtn->setText(tr("&Edit…"));
-    m_editSchemeBtn->setIcon(themeIcon({"document-edit", "edit-entry"}));
+    m_editSchemeBtn->setIcon(appIcon("pencil"));
     m_editSchemeBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     m_editSchemeBtn->setToolTip(tr("Edit this scheme's colours"));
     schemeLayout->addWidget(m_editSchemeBtn);
@@ -540,10 +540,10 @@ QWidget *SettingsDialog::buildProfilesPage()
         b->setAutoRaise(true);
         return b;
     };
-    m_profileAdd = makeBtn(themeIcon({"list-add"}), QStringLiteral("+"), tr("New profile"));
-    m_profileDuplicate = makeBtn(themeIcon({"edit-copy"}), tr("Copy"),
+    m_profileAdd = makeBtn(appIcon("plus"), QStringLiteral("+"), tr("New profile"));
+    m_profileDuplicate = makeBtn(appIcon("copy"), tr("Copy"),
                                  tr("Duplicate the selected profile"));
-    m_profileDelete = makeBtn(themeIcon({"list-remove"}), QStringLiteral("−"),
+    m_profileDelete = makeBtn(appIcon("minus"), QStringLiteral("−"),
                               tr("Delete the selected profile"));
     buttons->addWidget(m_profileAdd);
     buttons->addWidget(m_profileDuplicate);
@@ -608,7 +608,7 @@ QWidget *SettingsDialog::buildProfilesPage()
     m_profileWorkDir = new QLineEdit(dirRow);
     m_profileWorkDir->setPlaceholderText(tr("Inherit (home directory)"));
     auto *browse = new QToolButton(dirRow);
-    browse->setIcon(themeIcon({"document-open-folder", "folder-open"}));
+    browse->setIcon(appIcon("folder-open"));
     browse->setText(tr("…"));
     browse->setToolTip(tr("Choose a folder"));
     dirLayout->addWidget(m_profileWorkDir, 1);
@@ -735,7 +735,7 @@ void SettingsDialog::rebuildProfileList(const QString &selectId)
     // intermediate row, which would reload (and re-commit) the form repeatedly.
     const QSignalBlocker block(m_profileList);
     m_profileList->clear();
-    const QIcon star = themeIcon({"starred", "favorite", "emblem-default"});
+    const QIcon star = appIcon("star");
     const QIcon blank = blankIcon(m_profileList->iconSize().width());
     for (const auto &p : m_profiles.profiles()) {
         auto *item = new QListWidgetItem(p.name);

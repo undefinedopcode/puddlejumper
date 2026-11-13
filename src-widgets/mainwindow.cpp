@@ -6,11 +6,11 @@
 
 #include "mainwindow.h"
 
+#include "appicon.h"
 #include "procinfo.h"
 #include "settingsdialog.h"
 #include "terminaltab.h"
 #include "terminalwidget.h"
-#include "themeicon.h"
 #include "thumbnailsidebar.h"
 #include "tmuxcontrol.h"
 #include "tmuxsession.h"
@@ -466,22 +466,22 @@ void MainWindow::buildMenus()
     // survive that.
     m_workspaceMenu = menuBar()->addMenu(tr("&Workspace"));
     connect(m_workspaceMenu, &QMenu::aboutToShow, this, &MainWindow::rebuildWorkspaceMenu);
-    m_newWorkspaceAct = new QAction(themeIcon({"list-add"}), tr("&New Workspace…"), this);
+    m_newWorkspaceAct = new QAction(appIcon("plus"), tr("&New Workspace…"), this);
     connect(m_newWorkspaceAct, &QAction::triggered, this, [this]() { newWorkspace(true); });
     m_openWorkspaceMenu = new QMenu(tr("&Open Workspace"), this);
-    m_openWorkspaceMenu->setIcon(themeIcon({"document-open", "folder-open"}));
+    m_openWorkspaceMenu->setIcon(appIcon("folder-open"));
     m_startWindowMenu = new QMenu(tr("&Start Window"), this);
-    m_saveWorkspaceAct = new QAction(themeIcon({"document-save-as", "document-save"}),
+    m_saveWorkspaceAct = new QAction(appIcon("save"),
                                      tr("&Save Workspace As…"), this);
     connect(m_saveWorkspaceAct, &QAction::triggered, this, &MainWindow::saveWorkspaceAs);
-    m_editWorkspaceFileAct = new QAction(themeIcon({"document-edit", "accessories-text-editor"}),
+    m_editWorkspaceFileAct = new QAction(appIcon("file-pen"),
                                          tr("Edit Workspace &File"), this);
     connect(m_editWorkspaceFileAct, &QAction::triggered, this, &MainWindow::editWorkspaceFile);
-    m_editWorkspaceAct = new QAction(themeIcon({"document-edit", "document-properties"}),
+    m_editWorkspaceAct = new QAction(appIcon("pencil"),
                                      tr("&Edit Workspace…"), this);
     connect(m_editWorkspaceAct, &QAction::triggered, this,
             [this]() { editWorkspace(m_currentWorkspace); });
-    m_closeWorkspaceAct = new QAction(themeIcon({"window-close"}), tr("&Close Workspace"), this);
+    m_closeWorkspaceAct = new QAction(appIcon("x"), tr("&Close Workspace"), this);
     connect(m_closeWorkspaceAct, &QAction::triggered, this,
             [this]() { closeWorkspace(m_currentWorkspace); });
     // Ctrl+Shift+PgUp/PgDn: no terminal program has a use for them.
@@ -574,20 +574,20 @@ void MainWindow::buildMenus()
      * sidebar check stay in one place. Its visibility and position are part of
      * saveState(), which closeEvent() persists; that needs the object name.
      */
-    newAct->setIcon(themeIcon({"tab-new", "list-add"}));
-    closeAct->setIcon(themeIcon({"tab-close", "window-close"}));
-    splitRightAct->setIcon(themeIcon({"view-split-left-right"}));
-    splitDownAct->setIcon(themeIcon({"view-split-top-bottom"}));
-    closePaneAct->setIcon(themeIcon({"view-close", "window-close"}));
-    copyAct->setIcon(themeIcon({"edit-copy"}));
-    pasteAct->setIcon(themeIcon({"edit-paste"}));
-    findAct->setIcon(themeIcon({"edit-find", "system-search"}));
-    shotRegionAct->setIcon(themeIcon({"camera-photo", "applets-screenshooter"}));
-    shotTermAct->setIcon(themeIcon({"view-fullscreen"}));
-    zoomOut->setIcon(themeIcon({"zoom-out"}));
-    zoomIn->setIcon(themeIcon({"zoom-in"}));
-    toggleLayout->setIcon(themeIcon({"sidebar-show", "sidebar-show-symbolic", "view-preview"}));
-    settingsAct->setIcon(themeIcon({"configure", "preferences-system", "document-properties"}));
+    newAct->setIcon(appIcon("plus"));
+    closeAct->setIcon(appIcon("x"));
+    splitRightAct->setIcon(appIcon("columns-2"));
+    splitDownAct->setIcon(appIcon("rows-2"));
+    closePaneAct->setIcon(appIcon("square-x"));
+    copyAct->setIcon(appIcon("copy"));
+    pasteAct->setIcon(appIcon("clipboard-paste"));
+    findAct->setIcon(appIcon("search"));
+    shotRegionAct->setIcon(appIcon("camera"));
+    shotTermAct->setIcon(appIcon("fullscreen"));
+    zoomOut->setIcon(appIcon("zoom-out"));
+    zoomIn->setIcon(appIcon("zoom-in"));
+    toggleLayout->setIcon(appIcon("panel-left"));
+    settingsAct->setIcon(appIcon("settings"));
     for (QAction *act : {newAct, closeAct, splitRightAct, splitDownAct, closePaneAct,
                          nextPaneAct, prevPaneAct, copyAct, pasteAct, findAct,
                          shotRegionAct, shotTermAct, zoomOut, zoomIn, zoomReset,
@@ -597,6 +597,9 @@ void MainWindow::buildMenus()
     auto *bar = addToolBar(tr("Main Toolbar"));
     bar->setObjectName(QStringLiteral("mainToolBar"));
     bar->setFloatable(false);
+    // The same size everywhere: styles disagree (macOS asks for 32px, Breeze
+    // 22px), and the Lucide set is drawn for small sizes.
+    bar->setIconSize(QSize(22, 22));
 
     // The workspace first: everything else acts within it.
     m_workspaceButton = new QToolButton(bar);
@@ -1065,9 +1068,9 @@ void MainWindow::rebuildTmuxMenu()
         m_tmuxMenu->addAction(tr("No sessions running"))->setEnabled(false);
 
     m_tmuxMenu->addSeparator();
-    m_tmuxMenu->addAction(themeIcon({"list-add"}), tr("&New Session…"),
+    m_tmuxMenu->addAction(appIcon("plus"), tr("&New Session…"),
                           this, &MainWindow::newTmuxSession);
-    m_tmuxMenu->addAction(themeIcon({"network-connect", "network-server"}),
+    m_tmuxMenu->addAction(appIcon("server"),
                           tr("&Connect to Host…"), this, &MainWindow::connectTmuxHost);
 
     m_tmuxMenu->addSeparator();
@@ -1393,7 +1396,7 @@ void MainWindow::showTabMenu(int index, const QPoint &globalPos)
     if (index >= 0) {
         menu.addAction(tr("&Rename…"), this, [this, index]() { renameTab(index); });
         menu.addSeparator();
-        menu.addAction(themeIcon({"tab-close", "window-close"}), tr("&Close Tab"), this,
+        menu.addAction(appIcon("x"), tr("&Close Tab"), this,
                        [this, index]() { closeTab(index); });
         QAction *others = menu.addAction(tr("Close &Other Tabs"), this, [this, index]() {
             QWidget *keep = m_tabs->widget(index);
@@ -1420,14 +1423,14 @@ void MainWindow::showTabMenu(int index, const QPoint &globalPos)
         }
         if (!move->isEmpty())
             move->addSeparator();
-        move->addAction(themeIcon({"list-add"}), tr("New Workspace…"), this, [this, tab]() {
+        move->addAction(appIcon("plus"), tr("New Workspace…"), this, [this, tab]() {
             const int w = newWorkspace(false);
             if (tab && w >= 0)
                 moveTabToWorkspace(tab, w);
         });
         menu.addSeparator();
     }
-    menu.addAction(themeIcon({"tab-new", "list-add"}), tr("&New Tab"), this, &MainWindow::newTab);
+    menu.addAction(appIcon("plus"), tr("&New Tab"), this, &MainWindow::newTab);
     menu.exec(globalPos);
 }
 
@@ -1902,7 +1905,7 @@ void MainWindow::rebuildWorkspaceMenu()
             openWorkspaceFile(path);
     });
     m_workspaceMenu->addMenu(m_openWorkspaceMenu);
-    m_workspaceMenu->addAction(themeIcon({"folder-open", "document-open-folder", "folder"}),
+    m_workspaceMenu->addAction(appIcon("folder-open"),
                                tr("Open &Folder…"), this, [this]() {
         const QString dir = QFileDialog::getExistingDirectory(this, tr("Open Folder"),
                                                               QDir::homePath());
@@ -2474,7 +2477,7 @@ void MainWindow::saveWorkspaceAs()
     }
     pathEdit->setText(suggested);
     auto *browse = new QToolButton(&dialog);
-    browse->setIcon(themeIcon({"document-open-folder", "folder-open", "folder"}));
+    browse->setIcon(appIcon("folder-open"));
     connect(browse, &QToolButton::clicked, &dialog, [&dialog, pathEdit]() {
         const QString p = QFileDialog::getSaveFileName(&dialog, tr("Save Workspace As"), pathEdit->text(),
                                                        tr("Workspace files (*.yml *.yaml)"));

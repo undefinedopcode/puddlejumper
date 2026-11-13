@@ -11,7 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # The Qt Widgets build is the application. QtQuick is only needed for the
 # legacy QML implementation, which is optional (see SUPERTERM_BUILD_QML below).
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Svg)
 qt_standard_project_setup(REQUIRES 6.5)
 
 include(GNUInstallDirs)
@@ -23,6 +23,10 @@ add_subdirectory(third_party/qtermwidget EXCLUDE_FROM_ALL)
 # Workspace files are YAML, in smug's format.
 find_package(yaml-cpp 0.7 REQUIRED)
 
+# The UI's icons: Lucide (ISC, see icons/lucide/LICENSE), compiled in and
+# drawn in the palette's text colour by src-widgets/appicon.cpp.
+file(GLOB LUCIDE_ICONS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" icons/lucide/*.svg)
+
 # ---------------------------------------------------------------------------
 # superterm — the application.
 #
@@ -31,6 +35,8 @@ find_package(yaml-cpp 0.7 REQUIRED)
 # launches.
 # ---------------------------------------------------------------------------
 qt_add_executable(superterm
+    src-widgets/appicon.cpp
+    src-widgets/appicon.h
     src-widgets/main.cpp
     src-widgets/mainwindow.cpp
     src-widgets/mainwindow.h
@@ -54,7 +60,6 @@ qt_add_executable(superterm
     src-widgets/screenshotoverlay.h
     src-widgets/procinfo.cpp
     src-widgets/procinfo.h
-    src-widgets/themeicon.h
     src-widgets/tmuxcontrol.cpp
     src-widgets/tmuxcontrol.h
     src-widgets/tmuxsession.cpp
@@ -71,6 +76,7 @@ target_link_libraries(superterm PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
+    Qt6::Svg
     qtermwidget
     yaml-cpp::yaml-cpp
 )
@@ -81,6 +87,11 @@ set_target_properties(superterm PROPERTIES AUTOMOC ON)
 qt_add_resources(superterm "app_icons"
     PREFIX "/"
     FILES icons/superterm.svg
+)
+qt_add_resources(superterm "lucide_icons"
+    PREFIX "/lucide"
+    BASE icons/lucide
+    FILES ${LUCIDE_ICONS}
 )
 
 install(TARGETS superterm
@@ -103,6 +114,7 @@ install(FILES icons/superterm.svg
 # ---------------------------------------------------------------------------
 qt_add_executable(probe-settingsdialog
     src-widgets/dev/probe_settingsdialog.cpp
+    src-widgets/appicon.cpp src-widgets/appicon.h
     src-widgets/settingsdialog.cpp src-widgets/settingsdialog.h
     src-widgets/settings.cpp src-widgets/settings.h
     src-widgets/profiles.cpp src-widgets/profiles.h
@@ -113,7 +125,13 @@ target_link_libraries(probe-settingsdialog PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
+    Qt6::Svg
     qtermwidget
+)
+qt_add_resources(probe-settingsdialog "lucide_icons"
+    PREFIX "/lucide"
+    BASE icons/lucide
+    FILES ${LUCIDE_ICONS}
 )
 set_target_properties(probe-settingsdialog PROPERTIES AUTOMOC ON)
 # Probe sources live under src-widgets/dev, so give it access to the parent
