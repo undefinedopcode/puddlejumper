@@ -17,6 +17,7 @@
 #include "tmuxcontrol.h"
 #include "tmuxsession.h"
 #include "tmuxworkspace.h"
+#include "vncview.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -405,6 +406,28 @@ void MainWindow::buildMenus()
     // A submenu rather than N top-level actions keeps the File menu stable as
     // profiles come and go.
     m_newTabWithProfileMenu = file->addMenu(tr("New Tab &with Profile"));
+
+    // A prototype: the remote screen opens in a window of its own for now.
+    auto *vncAct = file->addAction(tr("Connect to &VNC…"));
+    connect(vncAct, &QAction::triggered, this, [this]() {
+        QSettings settings;
+        const QString last = settings.value(QStringLiteral("vnc/lastAddress"),
+                                            QStringLiteral("localhost:5900")).toString();
+        bool ok = false;
+        const QString text = QInputDialog::getText(this, tr("Connect to VNC"),
+                                                   tr("Address (host, host:port or host:display):"),
+                                                   QLineEdit::Normal, last, &ok);
+        if (!ok)
+            return;
+        QString host;
+        quint16 port;
+        if (!VncView::parseAddress(text, &host, &port)) {
+            QMessageBox::warning(this, tr("Connect to VNC"), tr("“%1” isn't an address.").arg(text));
+            return;
+        }
+        settings.setValue(QStringLiteral("vnc/lastAddress"), text.trimmed());
+        VncView::openWindow(host, port);
+    });
 
     auto *closeAct = file->addAction(tr("&Close Tab"));
     closeAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+W")));

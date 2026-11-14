@@ -11,7 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # The Qt Widgets build is the application. QtQuick is only needed for the
 # legacy QML implementation, which is optional (see SUPERTERM_BUILD_QML below).
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Svg)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Svg Network)
 qt_standard_project_setup(REQUIRES 6.5)
 
 include(GNUInstallDirs)
@@ -70,6 +70,10 @@ qt_add_executable(superterm
     src-widgets/tmuxsession.h
     src-widgets/tmuxworkspace.cpp
     src-widgets/tmuxworkspace.h
+    src-widgets/vncclient.cpp
+    src-widgets/vncclient.h
+    src-widgets/vncview.cpp
+    src-widgets/vncview.h
     src-widgets/workspace.cpp
     src-widgets/workspace.h
     src-widgets/workspacefile.cpp
@@ -81,6 +85,7 @@ target_link_libraries(superterm PRIVATE
     Qt6::Gui
     Qt6::Widgets
     Qt6::Svg
+    Qt6::Network
     qtermwidget
     yaml-cpp::yaml-cpp
 )
@@ -118,6 +123,23 @@ install(FILES data/superterm.desktop
 install(FILES icons/superterm.svg
     DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
 )
+
+# ---------------------------------------------------------------------------
+# probe-vnc — drives the VNC view against a live server. Dev tool only; never
+# installed. Run: QT_QPA_PLATFORM=offscreen ./build/probe-vnc localhost:5900 /tmp/vnc
+# ---------------------------------------------------------------------------
+qt_add_executable(probe-vnc
+    src-widgets/dev/probe_vnc.cpp
+    src-widgets/vncclient.cpp src-widgets/vncclient.h
+    src-widgets/vncview.cpp src-widgets/vncview.h
+)
+target_link_libraries(probe-vnc PRIVATE
+    Qt6::Core
+    Qt6::Gui
+    Qt6::Widgets
+    Qt6::Network
+)
+set_target_properties(probe-vnc PROPERTIES AUTOMOC ON)
 
 # ---------------------------------------------------------------------------
 # probe-settingsdialog — offscreen diagnostics for the Settings dialog. Dev
