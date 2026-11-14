@@ -2190,10 +2190,13 @@ void MainWindow::saveSession()
             if (t == currentTab)
                 savedCurrent = savedTabs.size();
             if (auto *vnc = qobject_cast<VncTab *>(page)) {
-                savedTabs.append(QJsonObject{
+                QJsonObject saved{
                     {QStringLiteral("title"), vnc->customTitle()},
                     {QStringLiteral("vnc"), vnc->address()},
-                });
+                };
+                if (!vnc->username().isEmpty())
+                    saved.insert(QStringLiteral("user"), vnc->username());
+                savedTabs.append(saved);
                 continue;
             }
             auto *tab = qobject_cast<TerminalTab *>(page);
@@ -2301,6 +2304,7 @@ bool MainWindow::restoreSession()
                     continue;
                 auto *vnc = new VncTab(host, port);
                 vnc->setCustomTitle(savedTab.value(QStringLiteral("title")).toString());
+                vnc->setUsername(savedTab.value(QStringLiteral("user")).toString());
                 addTab(vnc, address, QString(), i);
                 if (i == m_currentWorkspace)
                     syncTabText(vnc);

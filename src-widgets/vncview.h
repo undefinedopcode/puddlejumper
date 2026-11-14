@@ -25,7 +25,8 @@ class VncClient;
  * held when the focus leaves are released, so none stay stuck down on the
  * remote end. Once disconnected, a click or Return connects again.
  *
- * A server that wants a password gets one from a prompt over the view; it is
+ * A server that wants a login gets it from a prompt over the view: a
+ * password, or for a Mac's own login an account name too. The password is
  * kept (in memory only) for reconnecting, and asked for again if wrong.
  */
 class VncView : public QWidget
@@ -40,6 +41,9 @@ public:
     VncClient *client() const { return m_client; }
     /* host:port, as connected to. */
     QString address() const { return m_address; }
+    /* The account name for a Mac's login, as last given (offered next time). */
+    QString username() const { return m_username; }
+    void setUsername(const QString &username) { m_username = username; }
     /* The remote desktop's name, or where it is while connecting. */
     QString title() const;
 
@@ -90,9 +94,11 @@ private:
     void releaseKeys();
     void setStatus(const QString &status);
     void updateCursor();
-    void showPasswordPrompt(const QString &error);
-    void submitPassword();
-    void placePasswordPrompt();
+    void showLoginPrompt(bool needsUsername, const QString &error);
+    void submitLogin();
+    void placeLoginPrompt();
+    /* Into the prompt: its name field, unless the name is known. */
+    void focusLoginPrompt();
 
     VncClient *m_client = nullptr;
     QString m_host;
@@ -108,9 +114,11 @@ private:
     QString m_sentClipboard;      // last clipboard text exchanged either way
     QImage m_cursor;
     QPoint m_cursorHotspot;
+    QString m_username;
     QString m_password;           // null until given
-    QString m_passwordError;      // why it is being asked for again
-    QWidget *m_passwordPrompt = nullptr;
-    QLabel *m_passwordLabel = nullptr;
+    QString m_loginError;         // why it is being asked for again
+    QWidget *m_loginPrompt = nullptr;
+    QLabel *m_loginLabel = nullptr;
+    QLineEdit *m_usernameEdit = nullptr;
     QLineEdit *m_passwordEdit = nullptr;
 };

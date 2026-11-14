@@ -35,6 +35,16 @@ QString VncTab::address() const
     return m_view->address();
 }
 
+QString VncTab::username() const
+{
+    return m_view->username();
+}
+
+void VncTab::setUsername(const QString &username)
+{
+    m_view->setUsername(username);
+}
+
 QString VncTab::title() const
 {
     return m_view->title();

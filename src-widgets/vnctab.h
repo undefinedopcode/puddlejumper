@@ -24,6 +24,9 @@ public:
     VncView *view() const { return m_view; }
     /* host:port, as connected to (and saved). */
     QString address() const;
+    /* The account name for a Mac's login, kept with the tab (its password isn't). */
+    QString username() const;
+    void setUsername(const QString &username);
     /* The remote desktop's name, or the address until it has said. */
     QString title() const;
     bool isConnected() const;

@@ -239,14 +239,18 @@ VncView::VncView(QWidget *parent)
     setAttribute(Qt::WA_InputMethodEnabled, false);   // keys, not composed text
     setCursor(dotCursor());
 
-    // The password prompt, shown over the view when the server asks.
+    // The login prompt, shown over the view when the server asks.
     auto *prompt = new QFrame(this);
     prompt->setFrameShape(QFrame::StyledPanel);
     prompt->setAutoFillBackground(true);
     prompt->setCursor(Qt::ArrowCursor);
-    m_passwordLabel = new QLabel(prompt);
-    m_passwordLabel->setWordWrap(true);
+    m_loginLabel = new QLabel(prompt);
+    m_loginLabel->setWordWrap(true);
+    m_usernameEdit = new QLineEdit(prompt);
+    m_usernameEdit->setObjectName(QStringLiteral("username"));
+    m_usernameEdit->setPlaceholderText(tr("User name"));
     m_passwordEdit = new QLineEdit(prompt);
+    m_passwordEdit->setObjectName(QStringLiteral("password"));
     m_passwordEdit->setEchoMode(QLineEdit::Password);
     m_passwordEdit->setPlaceholderText(tr("Password"));
     m_passwordEdit->setMinimumWidth(220);
@@ -255,21 +259,24 @@ VncView::VncView(QWidget *parent)
     row->addWidget(m_passwordEdit, 1);
     row->addWidget(connectButton);
     auto *column = new QVBoxLayout(prompt);
-    column->addWidget(m_passwordLabel);
+    column->addWidget(m_loginLabel);
+    column->addWidget(m_usernameEdit);
     column->addLayout(row);
-    connect(m_passwordEdit, &QLineEdit::returnPressed, this, &VncView::submitPassword);
-    connect(connectButton, &QPushButton::clicked, this, &VncView::submitPassword);
+    connect(m_usernameEdit, &QLineEdit::returnPressed, m_passwordEdit,
+            qOverload<>(&QWidget::setFocus));
+    connect(m_passwordEdit, &QLineEdit::returnPressed, this, &VncView::submitLogin);
+    connect(connectButton, &QPushButton::clicked, this, &VncView::submitLogin);
     prompt->hide();
-    m_passwordPrompt = prompt;
+    m_loginPrompt = prompt;
 
-    connect(m_client, &VncClient::passwordRequested, this, [this]() {
+    connect(m_client, &VncClient::credentialsRequested, this, [this](bool needsUsername) {
         if (!m_password.isNull())
-            m_client->setPassword(m_password);   // reconnecting
+            m_client->setCredentials(m_username, m_password);   // reconnecting
         else
-            showPasswordPrompt(m_passwordError);
+            showLoginPrompt(needsUsername, m_loginError);
     });
     connect(m_client, &VncClient::connected, this, [this]() {
-        m_passwordError.clear();
+        m_loginError.clear();
         m_connecting = false;
         setStatus(QString());
         emit titleChanged(title());
@@ -298,12 +305,12 @@ VncView::VncView(QWidget *parent)
         m_connecting = false;
         m_held.clear();
         m_buttons = 0;
-        m_passwordPrompt->hide();
+        m_loginPrompt->hide();
         if (m_client->authenticationFailed()) {
             // Ask again, saying why: on a new connection, once this one is
             // done with.
             m_password = QString();
-            m_passwordError = reason;
+            m_loginError = reason;
             m_connecting = true;
             setStatus(tr("Connecting to %1…").arg(m_address));
             QTimer::singleShot(0, this, &VncView::reconnect);
@@ -371,36 +378,56 @@ bool VncView::parseAddress(const QString &text, QString *host, quint16 *port)
     return true;
 }
 
-void VncView::showPasswordPrompt(const QString &error)
+void VncView::showLoginPrompt(bool needsUsername, const QString &error)
 {
-    QString text = tr("%1 wants a password.").arg(m_address);
-    if (!error.isEmpty())
+    QString text = needsUsername ? tr("Log in to %1 with an account on it.").arg(m_address)
+                                 : tr("%1 wants a password.").arg(m_address);
+    if (!error.isEmpty()) {
         text = error + QLatin1Char('\n') + text;
-    m_passwordLabel->setText(text);
+        // What usually stops a login a Mac turns down.
+        if (needsUsername)
+            text += QLatin1Char('\n')
+                    + tr("Use the account's short name, and check the Mac lists the account "
+                         "itself under Screen Sharing's “Allow access for” (a group such as "
+                         "Administrators may not be enough).");
+    }
+    m_loginLabel->setText(text);
+    m_usernameEdit->setVisible(needsUsername);
+    m_usernameEdit->setText(m_username);
     m_passwordEdit->clear();
     setStatus(QString());
-    m_passwordPrompt->show();
-    placePasswordPrompt();
+    m_loginPrompt->show();
+    placeLoginPrompt();
     if (hasFocus() || window()->isActiveWindow())
-        m_passwordEdit->setFocus();
+        focusLoginPrompt();
     emit titleChanged(title());
 }
 
-void VncView::submitPassword()
+void VncView::focusLoginPrompt()
 {
-    m_password = m_passwordEdit->text();
-    m_passwordEdit->clear();
-    m_passwordPrompt->hide();
-    setFocus();
-    setStatus(tr("Connecting to %1…").arg(m_address));
-    m_client->setPassword(m_password);
+    if (m_usernameEdit->isVisible() && m_usernameEdit->text().isEmpty())
+        m_usernameEdit->setFocus();
+    else
+        m_passwordEdit->setFocus();
 }
 
-void VncView::placePasswordPrompt()
+void VncView::submitLogin()
 {
-    m_passwordPrompt->adjustSize();
-    const QSize size = m_passwordPrompt->size().boundedTo(this->size());
-    m_passwordPrompt->setGeometry(QRect(QPoint((width() - size.width()) / 2,
+    if (m_usernameEdit->isVisible())
+        m_username = m_usernameEdit->text();
+    m_password = m_passwordEdit->text();
+    m_passwordEdit->clear();
+    m_loginPrompt->hide();
+    setFocus();
+    setStatus(tr("Connecting to %1…").arg(m_address));
+    m_client->setCredentials(m_username, m_password);
+}
+
+void VncView::placeLoginPrompt()
+{
+    m_loginPrompt->adjustSize();
+    const QSize size = m_loginPrompt->size().boundedTo(this->size());
+    m_loginPrompt->setGeometry(QRect(QPoint((width() - size.width()) / 2,
                                                (height() - size.height()) / 2), size));
 }
 
@@ -470,8 +497,8 @@ void VncView::paintEvent(QPaintEvent *event)
 void VncView::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
-    if (m_passwordPrompt->isVisible())
-        placePasswordPrompt();
+    if (m_loginPrompt->isVisible())
+        placeLoginPrompt();
     updateCursor();
 }
 
@@ -626,8 +653,8 @@ void VncView::releaseKeys()
 void VncView::focusInEvent(QFocusEvent *event)
 {
     QWidget::focusInEvent(event);
-    if (m_passwordPrompt->isVisible()) {
-        m_passwordEdit->setFocus();
+    if (m_loginPrompt->isVisible()) {
+        focusLoginPrompt();
         return;
     }
     // Hand over what was copied here while away (Latin-1 is all VNC carries).

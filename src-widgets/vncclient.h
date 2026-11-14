@@ -17,8 +17,9 @@ class QTcpSocket;
  * A VNC (RFB 3.3–3.8, RFC 6143) client: the connection and the remote
  * framebuffer, with no widgets.
  *
- * Kept to what a VM on the same machine needs: no authentication (QEMU's
- * default) or a VNC password, and raw and CopyRect updates, which are cheap
+ * Kept to what a VM on the same machine needs, plus logging in to a Mac:
+ * no authentication (QEMU's default), a VNC password, or Apple's (ARD)
+ * account login; and raw and CopyRect updates, which are cheap
  * to decode and fast enough over a local link. It follows the remote
  * screen's size (DesktopSize, ExtendedDesktopSize) and cursor shape
  * (Cursor), and takes
@@ -44,13 +45,14 @@ public:
     bool hasScanCodes() const { return m_scanCodes; }
 
     /*
-     * The password, for servers that ask for one (only its first 8
-     * characters count). Asked for with passwordRequested() when none was
-     * set; answering then carries on with the connection. Forgotten once the
-     * server turns it down.
+     * What to log in with, for servers that ask: a VNC password (only its
+     * first 8 characters count) or, for Apple's login, an account's name
+     * and password. Asked for with credentialsRequested() when no password
+     * was set; answering then carries on with the connection. The password
+     * is forgotten once the server turns it down.
      */
-    void setPassword(const QString &password);
-    /* The last connection ended because the password was wrong. */
+    void setCredentials(const QString &username, const QString &password);
+    /* The last connection ended because the login was turned down. */
     bool authenticationFailed() const { return m_authFailed; }
 
     /* `buttons`: 1 left, 2 middle, 4 right, 8/16 wheel up/down, 32/64 left/right. */
@@ -64,8 +66,9 @@ public:
     void sendClipboard(const QString &text);
 
 signals:
-    /* The server wants a password and none is set: call setPassword(). */
-    void passwordRequested();
+    /* The server wants a login and no password is set: call setCredentials().
+     * `needsUsername` for Apple's login, which takes an account name too. */
+    void credentialsRequested(bool needsUsername);
     void connected();
     /* The framebuffer has a new size (and is blank until updated). */
     void resized(const QSize &size);
@@ -79,8 +82,8 @@ signals:
 
 private:
     enum class State {
-        Idle, Version, SecurityTypes, SecurityType33, Challenge, AwaitingPassword,
-        SecurityResult, ServerInit, Normal, Rects, Closed,
+        Idle, Version, SecurityTypes, SecurityType33, Challenge, ArdParameters,
+        AwaitingCredentials, SecurityResult, ServerInit, Normal, Rects, Closed,
     };
 
     void onReadyRead();
@@ -89,7 +92,10 @@ private:
     bool parseRect();
     void fail(const QString &reason);
 
+    /* Answer the VNC challenge or Apple's key exchange. */
+    void sendAuthentication();
     void sendChallengeResponse();
+    void sendArdResponse();
     void sendClientInit();
     void sendSetup();
     void requestUpdate(bool incremental);
@@ -110,9 +116,13 @@ private:
     int m_rectsLeft = 0;          // in the FramebufferUpdate being read
     bool m_fullUpdate = false;    // ask for everything next (after a resize)
     bool m_scanCodes = false;
-    QString m_password;
-    QByteArray m_challenge;
-    bool m_authenticating = false;    // VNC authentication chosen
+    QString m_username;
+    QString m_password;           // null: ask for it
+    int m_securityType = 0;       // as chosen: 1 none, 2 VNC, 30 Apple
+    QByteArray m_challenge;       // VNC
+    QByteArray m_ardGenerator;    // Apple: Diffie-Hellman parameters
+    QByteArray m_ardPrime;
+    QByteArray m_ardServerKey;
     bool m_authFailed = false;
     QImage m_image;
     QString m_name;

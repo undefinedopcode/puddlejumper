@@ -9,8 +9,8 @@
  * <prefix>-<n>.png. The events are synthetic, so they take VncView's
  * no-native-code path.
  *
- * PROBE_VNC_PASSWORDS="wrong,right" answers the password prompt with each
- * in turn, as typed into it.
+ * PROBE_VNC_PASSWORDS="wrong,right" answers the login prompt with each in
+ * turn, as typed into it, and PROBE_VNC_USER fills its name field if shown.
  */
 
 #include "../vncclient.h"
@@ -114,20 +114,27 @@ int main(int argc, char *argv[])
     QObject::connect(view.client(), &VncClient::disconnected, [&](const QString &reason) {
         std::printf("disconnected: %s\n", qPrintable(reason));
         // A wrong password is asked for again, not the end.
-        if (view.client()->authenticationFailed() && !passwords.isEmpty())
+        if (view.client()->authenticationFailed())
             return;
         failure = reason;
         closed = true;
     });
-    QObject::connect(view.client(), &VncClient::passwordRequested, &view, [&]() {
+    QObject::connect(view.client(), &VncClient::credentialsRequested, &view, [&]() {
         // The view shows its prompt first; answer it as a user would.
         QTimer::singleShot(100, &view, [&]() {
             auto *label = view.findChild<QLabel *>();
-            auto *edit = view.findChild<QLineEdit *>();
+            auto *user = view.findChild<QLineEdit *>(QStringLiteral("username"));
+            auto *edit = view.findChild<QLineEdit *>(QStringLiteral("password"));
             std::printf("prompt: %s\n", qPrintable(label ? label->text().replace(QLatin1Char('\n'), QLatin1String(" / ")) : QString()));
-            if (!edit || passwords.isEmpty() || !edit->isVisible())
+            if (!edit || passwords.isEmpty() || !edit->isVisible()) {
+                view.grab().save(prefix + QStringLiteral("-prompt.png"));   // as left unanswered
                 return;
+            }
             const QString password = passwords.takeFirst();
+            if (user && user->isVisible()) {
+                user->setText(qEnvironmentVariable("PROBE_VNC_USER"));
+                std::printf("typing user \"%s\"\n", qPrintable(user->text()));
+            }
             std::printf("typing password \"%s\"\n", qPrintable(password));
             edit->setText(password);
             emit edit->returnPressed();

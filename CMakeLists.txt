@@ -59,8 +59,6 @@ qt_add_executable(superterm
     src-widgets/colorscheme.h
     src-widgets/colorschemeeditor.cpp
     src-widgets/colorschemeeditor.h
-    src-widgets/des.cpp
-    src-widgets/des.h
     src-widgets/screenshotoverlay.cpp
     src-widgets/screenshotoverlay.h
     src-widgets/tabstrip.cpp
@@ -75,6 +73,8 @@ qt_add_executable(superterm
     src-widgets/tmuxworkspace.h
     src-widgets/vncclient.cpp
     src-widgets/vncclient.h
+    src-widgets/vnccrypto.cpp
+    src-widgets/vnccrypto.h
     src-widgets/vncview.cpp
     src-widgets/vncview.h
     src-widgets/vnctab.cpp
@@ -135,7 +135,7 @@ install(FILES icons/superterm.svg
 # ---------------------------------------------------------------------------
 qt_add_executable(probe-vnc
     src-widgets/dev/probe_vnc.cpp
-    src-widgets/des.cpp src-widgets/des.h
+    src-widgets/vnccrypto.cpp src-widgets/vnccrypto.h
     src-widgets/vncclient.cpp src-widgets/vncclient.h
     src-widgets/vncview.cpp src-widgets/vncview.h
 )

@@ -6,13 +6,20 @@
 
 #include "vncclient.h"
 
-#include "des.h"
+#include "vnccrypto.h"
 
+#include <QCryptographicHash>
+#include <QLoggingCategory>
+#include <QRandomGenerator>
 #include <QSysInfo>
 #include <QTcpSocket>
 #include <QtEndian>
 
 #include <cstring>
+
+// The connection's steps, for when a server won't have us:
+// QT_LOGGING_RULES="superterm.vnc.debug=true"
+Q_LOGGING_CATEGORY(lcVnc, "superterm.vnc", QtInfoMsg)
 
 namespace {
 
@@ -25,6 +32,19 @@ constexpr qint32 kEncQemuKeys = -258;
 constexpr qint32 kEncExtendedDesktopSize = -308;
 
 constexpr quint32 kMaxText = 16 * 1024 * 1024;   // cut text and reasons
+
+// Security types.
+constexpr int kSecNone = 1;
+constexpr int kSecVnc = 2;
+constexpr int kSecArd = 30;
+
+QByteArray randomBytes(int count)
+{
+    QByteArray out(count, '\0');
+    for (char &c : out)
+        c = char(QRandomGenerator::system()->bounded(256));
+    return out;
+}
 
 void put8(QByteArray &out, quint8 v) { out.append(char(v)); }
 void put16(QByteArray &out, quint16 v)
@@ -71,7 +91,7 @@ void VncClient::connectToHost(const QString &host, quint16 port)
     m_in.clear();
     m_pos = 0;
     m_scanCodes = false;
-    m_authenticating = false;
+    m_securityType = 0;
     m_authFailed = false;
     m_state = State::Idle;
     m_socket->connectToHost(host, port);
@@ -144,6 +164,7 @@ bool VncClient::parseOne()
         }
         const int minor = version.mid(8, 3).toInt();
         m_minor = minor >= 8 ? 8 : minor == 7 ? 7 : 3;
+        qCDebug(lcVnc) << "server version" << version.trimmed() << "-> speaking 3." << m_minor;
         m_socket->write(QByteArrayLiteral("RFB 003.00") + QByteArray::number(m_minor) + '\n');
         m_state = m_minor == 3 ? State::SecurityType33 : State::SecurityTypes;
         return true;
@@ -163,27 +184,34 @@ bool VncClient::parseOne()
         }
         if (!available(1 + count))
             return false;
-        bool none = false, password = false;
-        for (int i = 0; i < count; ++i) {
-            none |= u8(1 + i) == 1;
-            password |= u8(1 + i) == 2;
-        }
+        QList<int> offered;
+        for (int i = 0; i < count; ++i)
+            offered << u8(1 + i);
         m_pos += 1 + count;
-        if (!none && !password) {
+        // None if allowed; then Apple's login over the VNC password, as a
+        // Mac offers both and its account is the stronger of the two.
+        for (int type : {kSecNone, kSecArd, kSecVnc}) {
+            if (offered.contains(type)) {
+                m_securityType = type;
+                break;
+            }
+        }
+        qCDebug(lcVnc) << "security types offered" << offered << "chose" << m_securityType;
+        if (!m_securityType) {
             fail(tr("The server offers no supported security type"));
             return false;
         }
         QByteArray choice;
-        put8(choice, none ? 1 : 2);
+        put8(choice, quint8(m_securityType));
         m_socket->write(choice);
-        if (!none) {
-            m_authenticating = true;
+        if (m_securityType == kSecVnc)
             m_state = State::Challenge;
-        } else if (m_minor >= 8) {
+        else if (m_securityType == kSecArd)
+            m_state = State::ArdParameters;
+        else if (m_minor >= 8)
             m_state = State::SecurityResult;
-        } else {
+        else
             sendClientInit();   // 3.7 only sends a result for types that authenticate
-        }
         return true;
     }
 
@@ -200,8 +228,8 @@ bool VncClient::parseOne()
             return false;
         }
         m_pos += 4;
-        if (type == 2) {
-            m_authenticating = true;
+        if (type == kSecVnc) {
+            m_securityType = kSecVnc;
             m_state = State::Challenge;
             return true;
         }
@@ -218,15 +246,26 @@ bool VncClient::parseOne()
             return false;
         m_challenge = m_in.mid(m_pos, 16);
         m_pos += 16;
-        if (m_password.isNull()) {
-            m_state = State::AwaitingPassword;
-            emit passwordRequested();
-            return false;
-        }
-        sendChallengeResponse();
+        sendAuthentication();
         return true;
 
-    case State::AwaitingPassword:
+    case State::ArdParameters: {
+        // Generator, key length, then the prime and the server's public key.
+        if (!available(4))
+            return false;
+        const int keyLength = u16(2);
+        if (!available(4 + 2 * keyLength))
+            return false;
+        m_ardGenerator = m_in.mid(m_pos, 2);
+        m_ardPrime = m_in.mid(m_pos + 4, keyLength);
+        m_ardServerKey = m_in.mid(m_pos + 4 + keyLength, keyLength);
+        m_pos += 4 + 2 * keyLength;
+        qCDebug(lcVnc) << "ARD: generator" << m_ardGenerator.toHex() << "key length" << keyLength;
+        sendAuthentication();
+        return true;
+    }
+
+    case State::AwaitingCredentials:
         return false;
 
     case State::SecurityResult: {
@@ -238,11 +277,14 @@ bool VncClient::parseOne()
             qsizetype size;
             if (m_minor >= 8 && !readString(4, &reason, &size))
                 return false;
-            m_authFailed = m_authenticating;
+            qCDebug(lcVnc) << "security result" << u32(0) << "reason" << reason;
+            m_authFailed = m_securityType != kSecNone;
             if (m_authFailed)
                 m_password = QString();   // never sent again
             if (reason.isEmpty())
-                reason = m_authenticating ? tr("Wrong password") : tr("The server refused the connection");
+                reason = m_securityType == kSecArd ? tr("Wrong user name or password")
+                         : m_authFailed            ? tr("Wrong password")
+                                                   : tr("The server refused the connection");
             fail(reason);
             return false;
         }
@@ -443,13 +485,27 @@ void VncClient::resizeFramebuffer(int width, int height)
     emit resized(m_image.size());
 }
 
-void VncClient::setPassword(const QString &password)
+void VncClient::setCredentials(const QString &username, const QString &password)
 {
+    m_username = username;
     m_password = password.isNull() ? QStringLiteral("") : password;
-    if (m_state == State::AwaitingPassword) {
-        sendChallengeResponse();
+    if (m_state == State::AwaitingCredentials) {
+        sendAuthentication();
         onReadyRead();   // anything that came in while waiting
     }
+}
+
+void VncClient::sendAuthentication()
+{
+    if (m_password.isNull()) {
+        m_state = State::AwaitingCredentials;
+        emit credentialsRequested(m_securityType == kSecArd);
+        return;
+    }
+    if (m_securityType == kSecArd)
+        sendArdResponse();
+    else
+        sendChallengeResponse();
 }
 
 void VncClient::sendChallengeResponse()
@@ -470,6 +526,35 @@ void VncClient::sendChallengeResponse()
     desEncryptBlock(key, blocks);
     desEncryptBlock(key, blocks + 8);
     m_socket->write(response);
+    m_state = State::SecurityResult;
+}
+
+void VncClient::sendArdResponse()
+{
+    // Diffie-Hellman with the server's parameters; the shared secret's MD5
+    // is the AES key for the name and password, each in 64 bytes, ended by
+    // a zero and padded at random.
+    const QByteArray privateKey = randomBytes(int(m_ardPrime.size()));
+    const QByteArray publicKey = modPow(m_ardGenerator, privateKey, m_ardPrime);
+    const QByteArray secret = modPow(m_ardServerKey, privateKey, m_ardPrime);
+    if (publicKey.isEmpty() || secret.isEmpty()) {
+        fail(tr("The server's login parameters are unusable"));
+        return;
+    }
+    const QByteArray key = QCryptographicHash::hash(secret, QCryptographicHash::Md5);
+
+    QByteArray credentials = randomBytes(128);
+    const QByteArray username = m_username.toUtf8().left(63) + '\0';
+    const QByteArray password = m_password.toUtf8().left(63) + '\0';
+    credentials.replace(0, username.size(), username);
+    credentials.replace(64, password.size(), password);
+    auto *blocks = reinterpret_cast<quint8 *>(credentials.data());
+    for (int i = 0; i < 128; i += 16)
+        aes128EncryptBlock(reinterpret_cast<const quint8 *>(key.constData()), blocks + i);
+
+    qCDebug(lcVnc) << "ARD: sending login for" << m_username << "with a"
+                   << m_password.size() << "character password";
+    m_socket->write(credentials + publicKey);
     m_state = State::SecurityResult;
 }
 
