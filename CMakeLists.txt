@@ -22,6 +22,7 @@ add_subdirectory(third_party/qtermwidget EXCLUDE_FROM_ALL)
 
 # Workspace files are YAML, in smug's format.
 find_package(yaml-cpp 0.7 REQUIRED)
+find_package(ZLIB REQUIRED)   # VNC's compressed updates
 
 # The UI's icons: Lucide (ISC, see icons/lucide/LICENSE), compiled in and
 # drawn in the palette's text colour by src-widgets/appicon.cpp.
@@ -93,6 +94,7 @@ target_link_libraries(superterm PRIVATE
     Qt6::Network
     qtermwidget
     yaml-cpp::yaml-cpp
+    ZLIB::ZLIB
 )
 
 set_target_properties(superterm PROPERTIES AUTOMOC ON)
@@ -144,6 +146,7 @@ target_link_libraries(probe-vnc PRIVATE
     Qt6::Gui
     Qt6::Widgets
     Qt6::Network
+    ZLIB::ZLIB
 )
 set_target_properties(probe-vnc PROPERTIES AUTOMOC ON)
 

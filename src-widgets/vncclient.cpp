@@ -9,6 +9,7 @@
 #include "vnccrypto.h"
 
 #include <QCryptographicHash>
+#include <QHostAddress>
 #include <QLoggingCategory>
 #include <QRandomGenerator>
 #include <QSysInfo>
@@ -17,8 +18,12 @@
 
 #include <cstring>
 
-// The connection's steps, for when a server won't have us:
-// QT_LOGGING_RULES="superterm.vnc.debug=true"
+#include <zlib.h>
+
+// The connection's steps, for when a server won't have us, and what updates
+// cost: QT_LOGGING_RULES="superterm.vnc.debug=true". SUPERTERM_VNC_ENCODINGS
+// (e.g. "raw,copyrect", or "tight,jpeg" for Tight with JPEG) limits the
+// encodings asked for, to compare them.
 Q_LOGGING_CATEGORY(lcVnc, "superterm.vnc", QtInfoMsg)
 
 namespace {
@@ -26,6 +31,10 @@ namespace {
 // Encodings (and pseudo-encodings) we ask for, in order of preference.
 constexpr qint32 kEncRaw = 0;
 constexpr qint32 kEncCopyRect = 1;
+constexpr qint32 kEncZlib = 6;
+constexpr qint32 kEncTight = 7;
+constexpr qint32 kEncZrle = 16;
+constexpr qint32 kEncJpegQuality = -32 + 7;   // Tight's JPEG quality, level 7 of 0-9
 constexpr qint32 kEncDesktopSize = -223;
 constexpr qint32 kEncCursor = -239;
 constexpr qint32 kEncQemuKeys = -258;
@@ -46,6 +55,24 @@ QByteArray randomBytes(int count)
     return out;
 }
 
+QString encodingName(qint32 encoding)
+{
+    switch (encoding) {
+    case kEncRaw: return QStringLiteral("raw");
+    case kEncCopyRect: return QStringLiteral("copyrect");
+    case kEncZlib: return QStringLiteral("zlib");
+    case kEncTight: return QStringLiteral("tight");
+    case kEncZrle: return QStringLiteral("zrle");
+    default: return QString::number(encoding);
+    }
+}
+
+// Tight's pixels: three bytes, red, green, blue.
+quint32 tightPixel(const uchar *p)
+{
+    return 0xff000000u | (p[0] << 16) | (p[1] << 8) | p[2];
+}
+
 void put8(QByteArray &out, quint8 v) { out.append(char(v)); }
 void put16(QByteArray &out, quint16 v)
 {
@@ -59,6 +86,49 @@ void put32(QByteArray &out, quint32 v)
 }
 
 } // namespace
+
+/*
+ * A zlib stream that lasts the connection: each rectangle's data carries on
+ * from the last one's.
+ */
+struct VncClient::Inflater
+{
+    z_stream stream{};
+    bool ok = false;
+
+    Inflater() { ok = inflateInit(&stream) == Z_OK; }
+    ~Inflater()
+    {
+        if (ok)
+            inflateEnd(&stream);
+    }
+
+    /* All of `in`, inflated; false if the stream is broken. */
+    bool inflate(const char *in, qsizetype size, QByteArray *out, qsizetype expected = 0)
+    {
+        if (!ok)
+            return false;
+        out->resize(qMax<qsizetype>(expected, size * 4 + 1024));
+        stream.next_in = reinterpret_cast<Bytef *>(const_cast<char *>(in));
+        stream.avail_in = uInt(size);
+        qsizetype produced = 0;
+        while (true) {
+            stream.next_out = reinterpret_cast<Bytef *>(out->data() + produced);
+            stream.avail_out = uInt(out->size() - produced);
+            const int result = ::inflate(&stream, Z_SYNC_FLUSH);
+            produced = out->size() - stream.avail_out;
+            if (result != Z_OK && result != Z_BUF_ERROR && result != Z_STREAM_END)
+                return false;
+            if (result == Z_STREAM_END || (stream.avail_in == 0 && stream.avail_out > 0))
+                break;
+            if (result == Z_BUF_ERROR && stream.avail_in == 0)
+                break;
+            out->resize(out->size() * 2);   // out of room: more
+        }
+        out->resize(produced);
+        return true;
+    }
+};
 
 VncClient::VncClient(QObject *parent)
     : QObject(parent), m_socket(new QTcpSocket(this))
@@ -92,6 +162,16 @@ void VncClient::connectToHost(const QString &host, quint16 port)
     m_pos = 0;
     m_scanCodes = false;
     m_securityType = 0;
+    m_zrle = std::make_unique<Inflater>();
+    m_zlib = std::make_unique<Inflater>();
+    for (auto &stream : m_tight)
+        stream = std::make_unique<Inflater>();
+    m_statsTimer.start();
+    m_statsBytes = 0;
+    m_statsPixels = 0;
+    m_statsDecodeNs = 0;
+    m_statsUpdates = 0;
+    m_statsRects.clear();
     m_authFailed = false;
     m_state = State::Idle;
     m_socket->connectToHost(host, port);
@@ -139,7 +219,9 @@ bool VncClient::readString(qsizetype at, QString *out, qsizetype *size) const
 
 void VncClient::onReadyRead()
 {
-    m_in.append(m_socket->readAll());
+    const QByteArray data = m_socket->readAll();
+    m_statsBytes += data.size();
+    m_in.append(data);
     while (m_state != State::Closed && parseOne()) {
     }
     m_in.remove(0, m_pos);
@@ -321,10 +403,12 @@ bool VncClient::parseOne()
             m_rectsLeft = u16(2);
             m_pos += 4;
             m_state = State::Rects;
-            if (m_rectsLeft == 0) {
+            // Ask for the next one now, so the server works on it while
+            // this one downloads, rather than after: a round trip less per
+            // update. (After a resize the full one is asked for at the end.)
+            requestUpdate(true);
+            if (m_rectsLeft == 0)
                 m_state = State::Normal;
-                requestUpdate(true);
-            }
             return true;
         case 1: {   // SetColourMapEntries: not used with a true-colour format
             if (!available(6))
@@ -365,12 +449,31 @@ bool VncClient::parseOne()
             return false;
         if (--m_rectsLeft == 0) {
             m_state = State::Normal;
-            requestUpdate(!m_fullUpdate);
+            if (m_fullUpdate)
+                requestUpdate(false);
             m_fullUpdate = false;
+            ++m_statsUpdates;
+            if (m_statsTimer.elapsed() >= 5000)
+                logStats();
         }
         return true;
     }
     return false;
+}
+
+void VncClient::logStats()
+{
+    const qreal seconds = m_statsTimer.restart() / 1000.0;
+    const qreal screen = qMax<qreal>(1, qreal(m_image.width()) * m_image.height());
+    qCDebug(lcVnc).nospace()
+        << m_statsUpdates / seconds << " updates/s, " << m_statsBytes / seconds / 1e6
+        << " MB/s, " << m_statsPixels / seconds / screen << " screens/s, decoding "
+        << m_statsDecodeNs / seconds / 1e6 << " ms/s; rectangles by encoding " << m_statsRects;
+    m_statsBytes = 0;
+    m_statsPixels = 0;
+    m_statsDecodeNs = 0;
+    m_statsUpdates = 0;
+    m_statsRects.clear();
 }
 
 bool VncClient::parseRect()
@@ -380,9 +483,68 @@ bool VncClient::parseRect()
     const int x = u16(0), y = u16(2), w = u16(4), h = u16(6);
     const qint32 encoding = qint32(u32(8));
     const QRect rect(x, y, w, h);
+    QElapsedTimer decoding;
+    decoding.start();
     const bool inside = m_image.rect().contains(rect) || rect.isEmpty();
 
     switch (encoding) {
+    case kEncTight:
+        if (!inside) {
+            fail(tr("Update outside the screen"));
+            return false;
+        }
+        if (!parseTight(rect))
+            return false;
+        m_statsPixels += qint64(w) * h;
+        m_statsDecodeNs += decoding.nsecsElapsed();
+        emit updated(rect);
+        return true;
+
+    case kEncZrle:
+    case kEncZlib: {
+        if (!available(16))
+            return false;
+        const quint32 length = u32(12);
+        if (!available(16 + qsizetype(length)))
+            return false;
+        if (!inside) {
+            fail(tr("Update outside the screen"));
+            return false;
+        }
+        QByteArray data;
+        Inflater &inflater = encoding == kEncZrle ? *m_zrle : *m_zlib;
+        const qsizetype raw = qsizetype(w) * h * 4;
+        if (!inflater.inflate(m_in.constData() + m_pos + 16, length, &data,
+                              encoding == kEncZlib ? raw : 0)) {
+            fail(tr("Corrupt compressed update"));
+            return false;
+        }
+        m_pos += 16 + length;
+        ++m_statsRects[encodingName(encoding)];
+        m_statsPixels += qint64(w) * h;
+        if (encoding == kEncZrle) {
+            if (!decodeZrle(data, rect)) {
+                fail(tr("Corrupt ZRLE update"));
+                return false;
+            }
+        } else {
+            // zlib: raw pixels, compressed.
+            if (data.size() < raw) {
+                fail(tr("Corrupt zlib update"));
+                return false;
+            }
+            const char *src = data.constData();
+            for (int row = 0; row < h; ++row) {
+                auto *dst = reinterpret_cast<quint32 *>(m_image.scanLine(y + row)) + x;
+                for (int col = 0; col < w; ++col, src += 4)
+                    dst[col] = qFromUnaligned<quint32>(src) | 0xff000000u;
+            }
+        }
+        m_statsDecodeNs += decoding.nsecsElapsed();
+        emit updated(rect);
+        return true;
+    }
+
     case kEncRaw: {
         const qsizetype size = 12 + qsizetype(w) * h * 4;
         if (!available(size))
@@ -400,6 +562,9 @@ bool VncClient::parseRect()
                 dst[col] = qFromUnaligned<quint32>(src) | 0xff000000u;
         }
         m_pos += size;
+        ++m_statsRects[encodingName(encoding)];
+        m_statsPixels += qint64(w) * h;
+        m_statsDecodeNs += decoding.nsecsElapsed();
         emit updated(rect);
         return true;
     }
@@ -472,6 +637,278 @@ bool VncClient::parseRect()
         fail(tr("Unsupported update encoding %1").arg(encoding));
         return false;
     }
+}
+
+bool VncClient::decodeZrle(const QByteArray &data, const QRect &rect)
+{
+    // 64-pixel tiles, row by row. Pixels are "compressed": the three bytes
+    // of our 0x00RRGGBB that carry colour, least significant first.
+    const auto *p = reinterpret_cast<const uchar *>(data.constData());
+    const uchar *end = p + data.size();
+    const auto pixel = [&p, end](quint32 *out) {
+        if (end - p < 3)
+            return false;
+        *out = p[0] | (p[1] << 8) | (p[2] << 16) | 0xff000000u;
+        p += 3;
+        return true;
+    };
+    // A run's length: bytes added up while they are 255, plus one.
+    const auto runLength = [&p, end](int *out) {
+        int length = 1;
+        while (true) {
+            if (p == end)
+                return false;
+            const uchar b = *p++;
+            length += b;
+            if (b != 255)
+                break;
+        }
+        *out = length;
+        return true;
+    };
+
+    // Each tile is decoded into `tile`, row after row, then copied in whole rows.
+    uchar *bits = m_image.bits();
+    const qsizetype stride = m_image.bytesPerLine();
+    quint32 tile[64 * 64];
+    for (int ty = rect.top(); ty <= rect.bottom(); ty += 64) {
+        for (int tx = rect.left(); tx <= rect.right(); tx += 64) {
+            const int tw = qMin(64, rect.right() + 1 - tx);
+            const int th = qMin(64, rect.bottom() + 1 - ty);
+            const auto put = [&tile](int index, quint32 colour) { tile[index] = colour; };
+            if (p == end)
+                return false;
+            const int sub = *p++;
+            quint32 palette[128];
+            const int paletteSize = sub >= 130 ? sub - 128 : sub >= 2 && sub <= 16 ? sub : 0;
+            for (int i = 0; i < paletteSize; ++i) {
+                if (!pixel(&palette[i]))
+                    return false;
+            }
+            const int count = tw * th;
+            if (sub == 0) {   // raw
+                for (int i = 0; i < count; ++i) {
+                    quint32 c;
+                    if (!pixel(&c))
+                        return false;
+                    put(i, c);
+                }
+            } else if (sub == 1) {   // one colour
+                quint32 c;
+                if (!pixel(&c))
+                    return false;
+                std::fill_n(tile, count, c);
+            } else if (sub <= 16) {   // palette indices, packed, rows byte-aligned
+                const int bits = paletteSize == 2 ? 1 : paletteSize <= 4 ? 2 : 4;
+                const int rowBytes = (tw * bits + 7) / 8;
+                if (end - p < qsizetype(rowBytes) * th)
+                    return false;
+                for (int row = 0; row < th; ++row) {
+                    for (int col = 0; col < tw; ++col) {
+                        const int bit = col * bits;
+                        const int index = (p[bit / 8] >> (8 - bits - bit % 8)) & ((1 << bits) - 1);
+                        if (index >= paletteSize)
+                            return false;
+                        put(row * tw + col, palette[index]);
+                    }
+                    p += rowBytes;
+                }
+            } else if (sub == 128) {   // runs of a colour
+                for (int i = 0; i < count;) {
+                    quint32 c;
+                    int length;
+                    if (!pixel(&c) || !runLength(&length) || length > count - i)
+                        return false;
+                    for (; length > 0; --length)
+                        put(i++, c);
+                }
+            } else if (sub >= 130) {   // runs of a palette entry, or single entries
+                for (int i = 0; i < count;) {
+                    if (p == end)
+                        return false;
+                    const int index = *p & 0x7f;
+                    const bool run = *p++ & 0x80;
+                    if (index >= paletteSize)
+                        return false;
+                    int length = 1;
+                    if (run && (!runLength(&length) || length > count - i))
+                        return false;
+                    for (; length > 0; --length)
+                        put(i++, palette[index]);
+                }
+            } else {
+                return false;   // 17-127 and 129 are unused
+            }
+            for (int row = 0; row < th; ++row)
+                std::memcpy(bits + (ty + row) * stride + tx * 4, tile + row * tw, tw * 4);
+        }
+    }
+    return true;
+}
+
+bool VncClient::readCompactLength(qsizetype at, quint32 *length, int *size) const
+{
+    // Seven bits a byte, the top one saying another follows; the third has eight.
+    quint32 value = 0;
+    for (int i = 0; i < 3; ++i) {
+        if (!available(at + i + 1))
+            return false;
+        const quint8 b = u8(at + i);
+        value |= quint32(i < 2 ? (b & 0x7f) : b) << (7 * i);
+        if (i == 2 || !(b & 0x80)) {
+            *length = value;
+            *size = i + 1;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool VncClient::parseTight(const QRect &rect)
+{
+    // Everything is read before anything is consumed, so that a rectangle
+    // that hasn't all come in yet is read again whole next time.
+    const int w = rect.width(), h = rect.height();
+    qsizetype at = 12;
+    if (!available(at + 1))
+        return false;
+    const quint8 control = u8(at++);
+    const int kind = control >> 4;
+
+    const auto resetStreams = [this, control]() {
+        for (int i = 0; i < 4; ++i) {
+            if (control & (1 << i))
+                m_tight[i] = std::make_unique<Inflater>();
+        }
+    };
+    const auto rows = [this, &rect](int row) {
+        return reinterpret_cast<quint32 *>(m_image.scanLine(rect.y() + row)) + rect.x();
+    };
+
+    if (kind == 8) {   // fill
+        if (!available(at + 3))
+            return false;
+        const quint32 colour = tightPixel(reinterpret_cast<const uchar *>(m_in.constData() + m_pos + at));
+        m_pos += at + 3;
+        resetStreams();
+        for (int row = 0; row < h; ++row)
+            std::fill_n(rows(row), w, colour);
+        ++m_statsRects[QStringLiteral("tight")];
+        return true;
+    }
+
+    if (kind == 9) {   // JPEG
+        quint32 length;
+        int lengthSize;
+        if (!readCompactLength(at, &length, &lengthSize) || !available(at + lengthSize + length))
+            return false;
+        const QByteArray jpeg = QByteArray::fromRawData(m_in.constData() + m_pos + at + lengthSize,
+                                                        length);
+        QImage image = QImage::fromData(jpeg, "JPEG");
+        m_pos += at + lengthSize + length;
+        resetStreams();
+        if (image.size() != rect.size()) {
+            fail(tr("Corrupt JPEG update"));
+            return false;
+        }
+        image.convertTo(QImage::Format_RGB32);
+        for (int row = 0; row < h; ++row)
+            std::memcpy(rows(row), image.constScanLine(row), w * 4);
+        ++m_statsRects[QStringLiteral("tight-jpeg")];
+        return true;
+    }
+
+    if (kind > 7) {
+        fail(tr("Unsupported Tight compression %1").arg(kind));
+        return false;
+    }
+
+    // Basic: pixels through a filter, zlib-compressed unless few.
+    const int stream = kind & 3;
+    int filter = 0;   // copy
+    if (kind & 4) {
+        if (!available(at + 1))
+            return false;
+        filter = u8(at++);
+    }
+    quint32 palette[256];
+    int colours = 0;
+    if (filter == 1) {   // palette
+        if (!available(at + 1))
+            return false;
+        colours = u8(at++) + 1;
+        if (!available(at + 3 * colours))
+            return false;
+        for (int i = 0; i < colours; ++i)
+            palette[i] = tightPixel(reinterpret_cast<const uchar *>(m_in.constData() + m_pos + at + 3 * i));
+        at += 3 * colours;
+    } else if (filter > 2) {
+        fail(tr("Unsupported Tight filter %1").arg(filter));
+        return false;
+    }
+    const qsizetype rowBytes = filter != 1 ? qsizetype(w) * 3 : colours <= 2 ? (w + 7) / 8 : w;
+    const qsizetype rawSize = rowBytes * h;
+
+    QByteArray data;
+    if (rawSize < 12) {   // too little to be worth compressing
+        if (!available(at + rawSize))
+            return false;
+        data = m_in.mid(m_pos + at, rawSize);
+        m_pos += at + rawSize;
+        resetStreams();
+    } else {
+        quint32 length;
+        int lengthSize;
+        if (!readCompactLength(at, &length, &lengthSize) || !available(at + lengthSize + length))
+            return false;
+        const qsizetype start = m_pos + at + lengthSize;
+        m_pos += at + lengthSize + length;
+        resetStreams();
+        if (!m_tight[stream]->inflate(m_in.constData() + start, length, &data, rawSize)
+            || data.size() < rawSize) {
+            fail(tr("Corrupt Tight update"));
+            return false;
+        }
+    }
+
+    const auto *src = reinterpret_cast<const uchar *>(data.constData());
+    if (filter == 0) {   // copy
+        for (int row = 0; row < h; ++row) {
+            quint32 *dst = rows(row);
+            for (int col = 0; col < w; ++col, src += 3)
+                dst[col] = tightPixel(src);
+        }
+    } else if (filter == 1) {   // palette indices: a bit each for two colours, else a byte
+        for (int row = 0; row < h; ++row, src += rowBytes) {
+            quint32 *dst = rows(row);
+            for (int col = 0; col < w; ++col) {
+                const int index = colours <= 2 ? (src[col / 8] >> (7 - col % 8)) & 1 : src[col];
+                if (index >= colours) {
+                    fail(tr("Corrupt Tight update"));
+                    return false;
+                }
+                dst[col] = palette[index];
+            }
+        }
+    } else {   // gradient: each pixel is the difference from a prediction
+        std::vector<uchar> previous(size_t(w) * 3, 0), current(size_t(w) * 3);
+        for (int row = 0; row < h; ++row) {
+            quint32 *dst = rows(row);
+            for (int col = 0; col < w; ++col, src += 3) {
+                for (int c = 0; c < 3; ++c) {
+                    const int left = col ? current[(col - 1) * 3 + c] : 0;
+                    const int above = previous[col * 3 + c];
+                    const int aboveLeft = col ? previous[(col - 1) * 3 + c] : 0;
+                    const int estimate = qBound(0, left + above - aboveLeft, 255);
+                    current[col * 3 + c] = uchar(estimate + src[c]);
+                }
+                dst[col] = tightPixel(&current[col * 3]);
+            }
+            previous.swap(current);
+        }
+    }
+    ++m_statsRects[QStringLiteral("tight")];
+    return true;
 }
 
 void VncClient::resizeFramebuffer(int width, int height)
@@ -584,13 +1021,28 @@ void VncClient::sendSetup()
     put8(out, 0);    // blue shift
     out.append(3, '\0');
 
-    const qint32 encodings[] = {
-        kEncCopyRect, kEncRaw, kEncDesktopSize, kEncExtendedDesktopSize,
-        kEncCursor, kEncQemuKeys,
-    };
+    // Compressed over a network, where bandwidth is what's short. On this
+    // machine (a VM, a tunnel) compressing only costs the server time, and
+    // raw is quicker.
+    const bool local = m_socket->peerAddress().isLoopback();
+    QList<qint32> encodings =
+        local ? QList<qint32>{kEncCopyRect, kEncRaw, kEncZrle, kEncZlib, kEncTight}
+              : QList<qint32>{kEncTight, kEncZrle, kEncCopyRect, kEncZlib, kEncRaw, kEncJpegQuality};
+    if (const QString only = qEnvironmentVariable("SUPERTERM_VNC_ENCODINGS"); !only.isEmpty()) {
+        const QHash<QString, qint32> names = {
+            {QStringLiteral("tight"), kEncTight}, {QStringLiteral("zrle"), kEncZrle},
+            {QStringLiteral("copyrect"), kEncCopyRect}, {QStringLiteral("zlib"), kEncZlib},
+            {QStringLiteral("raw"), kEncRaw}, {QStringLiteral("jpeg"), kEncJpegQuality},
+        };
+        encodings.clear();
+        for (const QString &name : only.split(QLatin1Char(','), Qt::SkipEmptyParts))
+            encodings << names.value(name.trimmed().toLower(), kEncRaw);
+    }
+    qCDebug(lcVnc) << (local ? "local server" : "remote server") << "- encodings" << encodings;
+    encodings << kEncDesktopSize << kEncExtendedDesktopSize << kEncCursor << kEncQemuKeys;
     put8(out, 2);    // SetEncodings
     put8(out, 0);
-    put16(out, quint16(std::size(encodings)));
+    put16(out, quint16(encodings.size()));
     for (qint32 encoding : encodings)
         put32(out, quint32(encoding));
     m_socket->write(out);

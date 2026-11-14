@@ -8,8 +8,12 @@
 
 #include <QByteArray>
 #include <QImage>
+#include <QElapsedTimer>
+#include <QHash>
 #include <QObject>
 #include <QPoint>
+
+#include <memory>
 
 class QTcpSocket;
 
@@ -19,8 +23,10 @@ class QTcpSocket;
  *
  * Kept to what a VM on the same machine needs, plus logging in to a Mac:
  * no authentication (QEMU's default), a VNC password, or Apple's (ARD)
- * account login; and raw and CopyRect updates, which are cheap
- * to decode and fast enough over a local link. It follows the remote
+ * account login. Over a network updates come Tight-compressed (JPEG for
+ * what looks like a photo, zlib for the rest), else ZRLE or zlib, as a
+ * Mac's Retina screen is tens of megabytes a frame raw; from this machine
+ * they come raw, which is quicker there. CopyRect is used for moves. It follows the remote
  * screen's size (DesktopSize, ExtendedDesktopSize) and cursor shape
  * (Cursor), and takes
  * keys as scan codes where the server can (QEMU's extended key events), so
@@ -90,6 +96,12 @@ private:
     /* Handle one message (or part) from the buffer; false if more is needed. */
     bool parseOne();
     bool parseRect();
+    /* ZRLE's tiles, from the inflated data of one rectangle. */
+    bool decodeZrle(const QByteArray &data, const QRect &rect);
+    /* A Tight rectangle, whose header has been read; false if more is needed. */
+    bool parseTight(const QRect &rect);
+    /* Tight's 1-3 byte length at `at`; false if not all in yet. */
+    bool readCompactLength(qsizetype at, quint32 *length, int *size) const;
     void fail(const QString &reason);
 
     /* Answer the VNC challenge or Apple's key exchange. */
@@ -99,6 +111,7 @@ private:
     void sendClientInit();
     void sendSetup();
     void requestUpdate(bool incremental);
+    void logStats();
     void resizeFramebuffer(int width, int height);
 
     bool available(qsizetype n) const { return m_in.size() - m_pos >= n; }
@@ -124,6 +137,20 @@ private:
     QByteArray m_ardPrime;
     QByteArray m_ardServerKey;
     bool m_authFailed = false;
+
+    // Each zlib-based encoding has one stream for the whole connection.
+    struct Inflater;
+    std::unique_ptr<Inflater> m_zrle;
+    std::unique_ptr<Inflater> m_zlib;
+    std::unique_ptr<Inflater> m_tight[4];   // Tight has four, which it can reset
+    // What updates cost, logged every few seconds (superterm.vnc).
+    QElapsedTimer m_statsTimer;
+    qint64 m_statsBytes = 0;
+    qint64 m_statsPixels = 0;     // updated, to set against the screen's size
+    qint64 m_statsDecodeNs = 0;
+    int m_statsUpdates = 0;
+    QHash<QString, int> m_statsRects;   // by encoding (and Tight's JPEG apart)
+
     QImage m_image;
     QString m_name;
 };
