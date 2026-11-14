@@ -13,6 +13,7 @@
 
 class QLabel;
 class QLineEdit;
+class QTimer;
 class VncClient;
 
 /*
@@ -93,6 +94,9 @@ private:
     QRectF imageRect() const;
     QPoint toRemote(const QPointF &pos) const;
     void sendPointer(const QPointF &pos, Qt::MouseButtons buttons);
+    /* Prods the server into looking at its screen again (see the timer). */
+    void startNudging();
+    void nudge();
     void sendKey(QKeyEvent *event, bool down);
     void releaseKeys();
     void setStatus(const QString &status);
@@ -114,6 +118,9 @@ private:
     QPoint m_wheel;               // angle delta not yet sent as wheel clicks
     int m_buttons = 0;            // VNC button mask last sent
     QPoint m_lastPos;
+    QTimer *m_nudgeTimer = nullptr;
+    int m_nudgeStep = 0;
+    bool m_nudge = true;
     QString m_sentClipboard;      // last clipboard text exchanged either way
     QImage m_cursor;
     QPoint m_cursorHotspot;

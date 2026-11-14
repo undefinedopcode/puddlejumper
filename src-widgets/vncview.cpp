@@ -228,6 +228,10 @@ QCursor dotCursor()
     return QCursor(QPixmap::fromImage(dot), 2, 2);
 }
 
+// After a click, the waits between prods of the server (see the
+// constructor): often at first, while things open, then less (1.5 s in all).
+constexpr int kNudgeDelays[] = {80, 150, 250, 400, 620};
+
 } // namespace
 
 VncView::VncView(QWidget *parent)
@@ -238,6 +242,20 @@ VncView::VncView(QWidget *parent)
     setAttribute(Qt::WA_OpaquePaintEvent);
     setAttribute(Qt::WA_InputMethodEnabled, false);   // keys, not composed text
     setCursor(dotCursor());
+
+    /*
+     * A Mac's Screen Sharing looks at the screen again when the pointer
+     * moves, and otherwise only now and then: what a click brings up a moment
+     * later (a menu fading in, a window opening) can take a second or two to
+     * be sent. So for a while after a click, the pointer is moved a pixel over
+     * and back now and then (the pointer sent again where it is, or a part of
+     * the screen asked for afresh, aren't enough). SUPERTERM_VNC_NUDGE=off
+     * stops it.
+     */
+    m_nudge = qgetenv("SUPERTERM_VNC_NUDGE") != "off";
+    m_nudgeTimer = new QTimer(this);
+    m_nudgeTimer->setSingleShot(true);
+    connect(m_nudgeTimer, &QTimer::timeout, this, &VncView::nudge);
 
     // The login prompt, shown over the view when the server asks.
     auto *prompt = new QFrame(this);
@@ -539,11 +557,31 @@ void VncView::mousePressEvent(QMouseEvent *event)
         return;
     }
     sendPointer(event->position(), event->buttons());
+    startNudging();
 }
 
 void VncView::mouseReleaseEvent(QMouseEvent *event)
 {
     sendPointer(event->position(), event->buttons());
+    startNudging();
+}
+
+void VncView::startNudging()
+{
+    if (!m_nudge)
+        return;
+    m_nudgeStep = 0;
+    m_nudgeTimer->start(kNudgeDelays[0]);
+}
+
+void VncView::nudge()
+{
+    if (m_client->isConnected()) {
+        m_client->sendPointer(m_lastPos + QPoint(m_lastPos.x() > 0 ? -1 : 1, 0), m_buttons);
+        m_client->sendPointer(m_lastPos, m_buttons);
+    }
+    if (++m_nudgeStep < int(std::size(kNudgeDelays)))
+        m_nudgeTimer->start(kNudgeDelays[m_nudgeStep]);
 }
 
 void VncView::mouseMoveEvent(QMouseEvent *event)
