@@ -81,6 +81,39 @@ appears in your launcher. (Installing to `~/.local` also gives xdg-desktop-
 portal an app id to match, which silences the startup portal warning you get
 when running straight from the build tree.)
 
+### macOS
+
+On macOS the build is an app bundle, `build/SuperTerm.app` (`open
+build/SuperTerm.app`, or run `build/SuperTerm.app/Contents/MacOS/SuperTerm`
+to see its output). To build one to hand round:
+
+```sh
+packaging/macos/build-app.sh            # dist/SuperTerm.app and dist/SuperTerm-<version>-<arch>.dmg
+packaging/macos/build-app.sh --no-dmg   # just the app
+```
+
+It needs only Apple's command line tools (it offers to install them), not
+Xcode, and sets up the rest itself the first time: Miniforge in `~/miniforge3`
+and a conda environment with Qt from `packaging/macos/environment.yml`. Then it
+builds in release, copies Qt and the other libraries into the app with
+`macdeployqt`, checks the app needs nothing outside itself, signs it ad hoc and
+makes the disk image (open it and drag SuperTerm onto Applications).
+
+Things to know:
+
+- **One architecture.** The app is built for the Mac it's built on: an Intel
+  Mac (or the VM) makes an x86_64 app, which runs on Apple Silicon through
+  Rosetta. For a native Apple Silicon app, build it on one.
+- **Signed ad hoc, not notarised.** The Mac it was built on runs it as is. On
+  another, Gatekeeper refuses a downloaded copy the first time: Control-click
+  the app and choose Open, or clear the quarantine with
+  `xattr -dr com.apple.quarantine /Applications/SuperTerm.app`.
+- **Opened from the Finder**, an app gets a bare environment. So that shells
+  get what Terminal's do, SuperTerm starts them as login shells (reading
+  `/etc/zprofile` and `~/.zprofile`, where Homebrew sets up its `PATH`), sets
+  `LANG` from the system's language and region if no locale is set, and
+  starts them at home rather than in `/`.
+
 ## Settings
 
 Settings live in a centered modal (`Ctrl+,` or the toolbar's settings button),
@@ -832,7 +865,7 @@ default), so chrome and terminal stay visually distinct.
 | Platform | Status |
 | --- | --- |
 | Linux / X11 / Wayland | ✅ tested |
-| macOS | ✅ expected (QMLTermWidget supports it) |
+| macOS | ✅ tested (macOS 14, Intel); app built by `packaging/macos/build-app.sh` |
 | FreeBSD et al. | ✅ expected |
 | Windows | ❌ no pty backend |
 

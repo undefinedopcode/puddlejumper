@@ -99,11 +99,28 @@ target_link_libraries(superterm PRIVATE
 
 set_target_properties(superterm PROPERTIES AUTOMOC ON)
 
-# macOS: the toolbar in the title bar (src-widgets/macwindow.h).
+# macOS: the toolbar in the title bar (src-widgets/macwindow.h), and an app
+# bundle, build/SuperTerm.app. packaging/macos/build-app.sh makes it a
+# self-contained one, in a disk image.
 if(APPLE)
     enable_language(OBJCXX)
     target_sources(superterm PRIVATE src-widgets/macwindow.mm)
     target_link_libraries(superterm PRIVATE "-framework AppKit")
+
+    set(SUPERTERM_ICNS icons/superterm.icns)
+    set_source_files_properties(${SUPERTERM_ICNS} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    target_sources(superterm PRIVATE ${SUPERTERM_ICNS})
+    set_target_properties(superterm PROPERTIES
+        MACOSX_BUNDLE TRUE
+        OUTPUT_NAME SuperTerm
+        MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/data/macos/Info.plist.in
+        MACOSX_BUNDLE_BUNDLE_NAME SuperTerm
+        MACOSX_BUNDLE_GUI_IDENTIFIER com.superterm.superterm   # as the settings' domain
+        MACOSX_BUNDLE_ICON_FILE superterm.icns
+        MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
+        MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
+        MACOSX_BUNDLE_COPYRIGHT "GNU General Public License v2 or later"
+    )
 endif()
 
 # Embed the icon so the window and taskbar get it without an install step.

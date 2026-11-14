@@ -134,6 +134,15 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings,
                                                       : QString());
     if (!program.isEmpty())
         m_terminal->setShellProgram(program);
+#ifdef Q_OS_MACOS
+    // As Terminal does, a login shell: an app opened from the Finder has only
+    // launchd's bare PATH, and it's /etc/zprofile (path_helper) and
+    // ~/.zprofile (where Homebrew is set up) that add to it.
+    if (program.isEmpty()) {
+        m_terminal->setShellProgram(qEnvironmentVariable("SHELL", QStringLiteral("/bin/zsh")));
+        m_terminal->setArgs({QStringLiteral("-l")});
+    }
+#endif
 
     // Arguments only make sense with an explicit program; passing them to the
     // login shell would silently change its behaviour.

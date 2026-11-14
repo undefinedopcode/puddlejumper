@@ -1,0 +1,11 @@
+# The build environment for macOS (see build-app.sh): Qt and the tools, from
+# conda-forge. Homebrew's Qt would do too, but needs Apple Silicon, and
+# MacPorts' needs the full Xcode; this needs only the command line tools.
+name: superterm
+channels:
+  - conda-forge
+dependencies:
+  - qt6-main >=6.5
+  - yaml-cpp >=0.7
+  - cmake >=3.21
+  - ninja

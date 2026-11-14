@@ -14,7 +14,9 @@
 #include <QTimer>
 #include <QDebug>
 #include <QDir>
+#include <QFile>
 #include <QIcon>
+#include <QLocale>
 #include <QStyle>
 #include <QStyleFactory>
 
@@ -43,6 +45,24 @@ int main(int argc, char *argv[])
         qunsetenv(name);
     qputenv("TERM_PROGRAM", "superterm");
     qputenv("TERM_PROGRAM_VERSION", app.applicationVersion().toUtf8());
+
+    // Started from a launcher (the Finder, the Dock, a desktop entry), the
+    // working directory is /: shells start at home instead.
+    if (QDir::currentPath() == QDir::rootPath())
+        QDir::setCurrent(QDir::homePath());
+
+#ifdef Q_OS_MACOS
+    // An app opened from the Finder has no locale in its environment, and
+    // shells without one fall back to ASCII. Terminal sets one from the
+    // system's language and region; so do we, unless one is set.
+    if (qEnvironmentVariableIsEmpty("LANG") && qEnvironmentVariableIsEmpty("LC_ALL")
+        && qEnvironmentVariableIsEmpty("LC_CTYPE")) {
+        QString locale = QLocale::system().name() + QStringLiteral(".UTF-8");
+        if (!QFile::exists(QStringLiteral("/usr/share/locale/") + locale))
+            locale = QStringLiteral("en_US.UTF-8");
+        qputenv("LANG", locale.toUtf8());
+    }
+#endif
 
     /*
      * Register the user scheme directory before anything reads the scheme
