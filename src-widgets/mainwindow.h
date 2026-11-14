@@ -18,16 +18,19 @@
 
 class QTabWidget;
 class QSplitter;
+class QKeyEvent;
 class QLabel;
 class QMenu;
 class QTimer;
 class QToolButton;
+class Tab;
 class TerminalTab;
 class TerminalWidget;
 class TmuxSession;
 class SettingsDialog;
 class TabStrip;
 class ThumbnailSidebar;
+class VncTab;
 
 /*
  * Main window: tabs (or thumbnail sidebar) around a set of terminals.
@@ -49,6 +52,8 @@ public:
      * one in the workspace directories.
      */
     void openWorkspaceTarget(const QString &target);
+    /* A tab showing the screen at `address` (host[:port|:display]) over VNC. */
+    void openVnc(const QString &address);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -67,6 +72,10 @@ private slots:
 private:
     /* The active pane of the current tab: what window actions act on. */
     TerminalWidget *currentTerminal() const;
+    /* The current tab or one by index, whatever it shows... */
+    Tab *currentPage() const;
+    Tab *pageAt(int index) const;
+    /* ...or only if it shows terminals. */
     TerminalTab *currentTab() const;
     TerminalTab *tabAt(int index) const;
     /* The tab holding `pane`, and its index (-1 if none). */
@@ -79,25 +88,27 @@ private:
      * Workspaces. The tab widget holds the shown workspace's tabs; the
      * others' are parked (hidden, still running) in their Workspace.
      */
+    QList<Tab *> allPages() const;
+    /* Those of them showing terminals. */
     QList<TerminalTab *> allTabs() const;
     /* The workspace a tab is in, as an index; -1 if none. */
-    int workspaceOf(const TerminalTab *tab) const;
+    int workspaceOf(const Tab *tab) const;
     int workspaceIndex(const QString &id) const;
     void switchWorkspace(int index);
     /* Bring a tab on screen, switching workspace if need be. */
-    void showTab(TerminalTab *tab);
+    void showTab(Tab *tab);
     /* Ask for a new workspace's details; its index, or -1 if cancelled.
      * `show` switches to it, which opens its first tab. */
     int newWorkspace(bool show);
     void editWorkspace(int index);
     void closeWorkspace(int index);
     /* Move a tab (a tmux tab: its whole session) to another workspace. */
-    void moveTabToWorkspace(TerminalTab *tab, int index);
+    void moveTabToWorkspace(Tab *tab, int index);
     void rebuildWorkspaceMenu();
     /* Workspace name and colour on the toolbar, sidebar and menu. */
     void updateWorkspaceChrome();
     /* Mark a tab as having output that hasn't been seen. */
-    void markTabBusy(TerminalTab *tab);
+    void markTabBusy(Tab *tab);
     void onCurrentTabChanged(int index);
 
     /*
@@ -140,19 +151,23 @@ private:
                              const QString &directory = QString());
     /* Add a tab to the window and hook up its signals and its first panes. */
     /* `workspace`: an index, or -1 for the shown one. */
-    int addTab(TerminalTab *tab, const QString &text, const QString &toolTip,
+    int addTab(Tab *tab, const QString &text, const QString &toolTip,
                int workspace = -1);
     void wireTab(TerminalTab *tab);
     void wirePane(TerminalWidget *pane);
-    /* Tab text, tooltip and window title from the tab's active pane. */
-    void syncTabFromActivePane(TerminalTab *tab);
+    void wireVncTab(VncTab *tab);
+    /* Tab text, tooltip and window title: from a terminal tab's active pane,
+     * or the remote desktop's name. */
+    void syncTabText(Tab *tab);
+    /* Whether a key is one of the window's shortcuts (a VNC tab lets those by). */
+    bool isAppShortcut(const QKeyEvent *event) const;
 
     /*
      * tmux. A session attached in control mode shows its windows as tabs and
      * its panes as panes; actions on those become tmux commands. These find
      * the session behind a tab or pane (null for local ones).
      */
-    TmuxSession *tmuxSessionFor(const TerminalTab *tab) const;
+    TmuxSession *tmuxSessionFor(const Tab *tab) const;
     TmuxSession *tmuxSessionFor(const TerminalWidget *pane) const;
     /* Before closing a tmux tab or pane: false to leave it open (cancelled,
      * or detached instead because it would end the session). */
@@ -170,7 +185,7 @@ private:
     void splitPane(TerminalWidget *pane, Qt::Orientation orientation);
     void closePane(TerminalWidget *pane);
     /* Take a tab out of the window (its panes are gone or going). */
-    void removeTab(TerminalTab *tab);
+    void removeTab(Tab *tab);
     void syncTabTitles();
 
     /*

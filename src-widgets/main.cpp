@@ -8,7 +8,6 @@
 
 #include "colorscheme.h"
 #include "settings.h"
-#include "vncview.h"
 
 #include <QApplication>
 #include <QCommandLineParser>
@@ -84,8 +83,7 @@ int main(int argc, char *argv[])
     parser.addOption(styleOpt);
     QCommandLineOption vncOpt(
         QStringLiteral("vnc"),
-        QStringLiteral("Also open a VNC viewer on this address (host, host:port or "
-                       "host:display)."),
+        QStringLiteral("Open a VNC tab on this address (host, host:port or host:display)."),
         QStringLiteral("address"));
     parser.addOption(vncOpt);
     parser.addPositionalArgument(
@@ -108,14 +106,8 @@ int main(int argc, char *argv[])
     }
     MainWindow window;
     window.show();
-    if (parser.isSet(vncOpt)) {
-        QString host;
-        quint16 port;
-        if (VncView::parseAddress(parser.value(vncOpt), &host, &port))
-            VncView::openWindow(host, port);
-        else
-            qWarning() << "not a VNC address:" << parser.value(vncOpt);
-    }
+    if (parser.isSet(vncOpt))
+        window.openVnc(parser.value(vncOpt));
     if (const QStringList args = parser.positionalArguments(); !args.isEmpty()) {
         // Once the window is up, so dialogs (variables, trust) have a parent.
         const QString target = args.first();

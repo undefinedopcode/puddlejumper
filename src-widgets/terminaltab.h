@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include "tab.h"
 #include "terminalwidget.h"
 
 #include <QJsonObject>
@@ -47,7 +48,7 @@ struct PaneLayout
  * every pane and handle to whole character cells so each pane shows exactly
  * the grid tmux gave it.
  */
-class TerminalTab : public QWidget
+class TerminalTab : public Tab
 {
     Q_OBJECT
 
@@ -107,23 +108,22 @@ public:
     static TerminalTab *restoreLayout(const QJsonObject &layout,
                                       const std::function<TerminalWidget *(const QJsonObject &)> &makePane);
 
-    bool hasNewOutput() const;
-    void clearNewOutput();
+    bool hasNewOutput() const override;
+    void clearNewOutput() override;
     /*
      * A picture of the tab exactly `size` (logical pixels): each pane's screen
      * in its share of the box, drawn from the panes' screens so it works while
      * the tab is hidden.
      */
-    QPixmap previewPixmap(const QSize &size, qreal devicePixelRatio = 1.0) const;
+    QPixmap previewPixmap(const QSize &size, qreal devicePixelRatio = 1.0) const override;
 
     /* The terminal background, for padding and splitter handles. */
-    QColor backgroundColour() const;
+    QColor backgroundColour() const override;
     /* The terminal's default text colour. */
-    QColor foregroundColour() const;
+    QColor foregroundColour() const override;
 
-    /* A name the user gave the tab, shown instead of its title; empty if none. */
-    QString customTitle() const { return m_customTitle; }
-    void setCustomTitle(const QString &title) { m_customTitle = title; }
+    /* To the active pane. */
+    void focusContent() override;
 
 signals:
     void activePaneChanged(TerminalWidget *pane);
@@ -173,5 +173,4 @@ private:
     int m_padding = 0;
     QString m_layoutShape;          // applyLayout(): structure of the last layout
     bool m_applyingLayout = false;
-    QString m_customTitle;
 };

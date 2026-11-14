@@ -13,7 +13,6 @@
 #include <QKeyEvent>
 #include <QPainter>
 #include <QRegularExpression>
-#include <QScreen>
 
 #include <algorithm>
 
@@ -234,15 +233,11 @@ VncView::VncView(QWidget *parent)
     setCursor(dotCursor());
 
     connect(m_client, &VncClient::connected, this, [this]() {
+        m_connecting = false;
         setStatus(QString());
         emit titleChanged(title());
     });
-    connect(m_client, &VncClient::resized, this, [this](const QSize &size) {
-        if (isWindow()) {
-            // Fit the window to the screen it shows, within this display.
-            const QRect avail = screen()->availableGeometry();
-            resize(size.boundedTo(avail.size() * 0.9));
-        }
+    connect(m_client, &VncClient::resized, this, [this]() {
         updateCursor();
         update();
     });
@@ -263,16 +258,21 @@ VncView::VncView(QWidget *parent)
         QGuiApplication::clipboard()->setText(text);
     });
     connect(m_client, &VncClient::disconnected, this, [this](const QString &reason) {
+        m_connecting = false;
         m_held.clear();
         m_buttons = 0;
-        setStatus(reason.isEmpty() ? tr("Disconnected from %1").arg(m_address)
-                                   : tr("Disconnected from %1: %2").arg(m_address, reason));
+        const QString what = reason.isEmpty() ? tr("Disconnected from %1.").arg(m_address)
+                                              : tr("Disconnected from %1: %2").arg(m_address, reason);
+        setStatus(what + QLatin1Char('\n') + tr("Click or press Return to connect again."));
         emit titleChanged(title());
     });
 }
 
 void VncView::connectToHost(const QString &host, quint16 port)
 {
+    m_host = host;
+    m_port = port;
+    m_connecting = true;
     m_address = host.contains(QLatin1Char(':')) ? QStringLiteral("[%1]:%2").arg(host).arg(port)
                                                  : QStringLiteral("%1:%2").arg(host).arg(port);
     setStatus(tr("Connecting to %1…").arg(m_address));
@@ -323,16 +323,10 @@ bool VncView::parseAddress(const QString &text, QString *host, quint16 *port)
     return true;
 }
 
-VncView *VncView::openWindow(const QString &host, quint16 port)
+void VncView::reconnect()
 {
-    auto *view = new VncView;
-    view->setAttribute(Qt::WA_DeleteOnClose);
-    connect(view, &VncView::titleChanged, view, [view](const QString &title) {
-        view->setWindowTitle(title);
-    });
-    view->connectToHost(host, port);
-    view->show();
-    return view;
+    if (!m_host.isEmpty())
+        connectToHost(m_host, m_port);
 }
 
 QRectF VncView::imageRect() const
@@ -418,6 +412,11 @@ void VncView::sendPointer(const QPointF &pos, Qt::MouseButtons buttons)
 
 void VncView::mousePressEvent(QMouseEvent *event)
 {
+    if (!m_client->isConnected()) {
+        if (event->button() == Qt::LeftButton && !m_connecting)
+            reconnect();
+        return;
+    }
     sendPointer(event->position(), event->buttons());
 }
 
@@ -458,8 +457,11 @@ void VncView::wheelEvent(QWheelEvent *event)
 bool VncView::event(QEvent *event)
 {
     // Every key is the remote end's while this has the focus: let no
-    // shortcut take it first.
+    // shortcut take it first, but those kept for the application.
     if (event->type() == QEvent::ShortcutOverride) {
+        auto *key = static_cast<QKeyEvent *>(event);
+        if (!m_client->isConnected() || (m_shortcutFilter && m_shortcutFilter(key)))
+            return QWidget::event(event);
         event->accept();
         return true;
     }
@@ -510,6 +512,13 @@ void VncView::sendKey(QKeyEvent *event, bool down)
 
 void VncView::keyPressEvent(QKeyEvent *event)
 {
+    if (!m_client->isConnected()) {
+        if ((event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) && !m_connecting)
+            reconnect();
+        else
+            QWidget::keyPressEvent(event);
+        return;
+    }
     sendKey(event, true);
     event->accept();
 }

@@ -44,6 +44,7 @@ qt_add_executable(superterm
     src-widgets/mainwindow.h
     src-widgets/settingsdialog.cpp
     src-widgets/settingsdialog.h
+    src-widgets/tab.h
     src-widgets/terminaltab.cpp
     src-widgets/terminaltab.h
     src-widgets/terminalwidget.cpp
@@ -74,6 +75,8 @@ qt_add_executable(superterm
     src-widgets/vncclient.h
     src-widgets/vncview.cpp
     src-widgets/vncview.h
+    src-widgets/vnctab.cpp
+    src-widgets/vnctab.h
     src-widgets/workspace.cpp
     src-widgets/workspace.h
     src-widgets/workspacefile.cpp

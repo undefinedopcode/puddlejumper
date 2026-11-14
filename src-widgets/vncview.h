@@ -9,16 +9,19 @@
 #include <QHash>
 #include <QWidget>
 
+#include <functional>
+
 class VncClient;
 
 /*
  * A remote screen over VNC: draws the framebuffer scaled to fit (never
  * enlarged), and sends the mouse and keyboard to it.
  *
- * While it has the focus every key goes to the remote end, application
- * shortcuts included; keys go as scan codes where the server takes them, so
- * the remote keyboard layout applies. Keys still held when the focus leaves
- * are released, so none stay stuck down on the remote end.
+ * While it has the focus every key goes to the remote end but those
+ * setShortcutFilter() keeps for the application; keys go as scan codes where
+ * the server takes them, so the remote keyboard layout applies. Keys still
+ * held when the focus leaves are released, so none stay stuck down on the
+ * remote end. Once disconnected, a click or Return connects again.
  */
 class VncView : public QWidget
 {
@@ -28,9 +31,18 @@ public:
     explicit VncView(QWidget *parent = nullptr);
 
     void connectToHost(const QString &host, quint16 port);
+    void reconnect();
     VncClient *client() const { return m_client; }
+    /* host:port, as connected to. */
+    QString address() const { return m_address; }
     /* The remote desktop's name, or where it is while connecting. */
     QString title() const;
+
+    /* Keys for which `filter` is true are left to the application's shortcuts. */
+    void setShortcutFilter(std::function<bool(const QKeyEvent *)> filter)
+    {
+        m_shortcutFilter = std::move(filter);
+    }
 
     QSize sizeHint() const override;
 
@@ -40,8 +52,6 @@ public:
      * isn't one of those.
      */
     static bool parseAddress(const QString &text, QString *host, quint16 *port);
-    /* A window of its own, deleted on close. */
-    static VncView *openWindow(const QString &host, quint16 port);
 
 signals:
     void titleChanged(const QString &title);
@@ -77,8 +87,12 @@ private:
     void updateCursor();
 
     VncClient *m_client = nullptr;
+    QString m_host;
+    quint16 m_port = 0;
     QString m_address;            // host:port
+    std::function<bool(const QKeyEvent *)> m_shortcutFilter;
     QString m_status;             // shown instead of the screen; empty once up
+    bool m_connecting = false;
     QHash<quint32, HeldKey> m_held;   // by the key's identity (see sendKey())
     QPoint m_wheel;               // angle delta not yet sent as wheel clicks
     int m_buttons = 0;            // VNC button mask last sent

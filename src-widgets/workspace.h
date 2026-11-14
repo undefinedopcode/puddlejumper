@@ -16,7 +16,7 @@
 
 class QButtonGroup;
 class QLineEdit;
-class TerminalTab;
+class Tab;
 
 /*
  * A workspace: a named group of tabs, such as one per project. The window
@@ -37,7 +37,7 @@ struct Workspace
 
     // While another workspace is shown: its tabs, in order, and which was
     // current. (The shown workspace's tabs are the tab widget's.)
-    QList<QPointer<TerminalTab>> parked;
+    QList<QPointer<Tab>> parked;
     int currentTab = 0;
     // Output arrived in one of its tabs while another workspace was shown.
     bool unseenOutput = false;

@@ -79,7 +79,7 @@ QString layoutShape(const PaneLayout &node)
 } // namespace
 
 TerminalTab::TerminalTab(TerminalWidget *firstPane, QWidget *parent)
-    : QWidget(parent)
+    : Tab(parent)
 {
     m_layout = new QVBoxLayout(this);
     m_layout->setContentsMargins(0, 0, 0, 0);
@@ -413,6 +413,12 @@ void TerminalTab::clearNewOutput()
 {
     for (TerminalWidget *pane : panes())
         pane->clearNewOutput();
+}
+
+void TerminalTab::focusContent()
+{
+    if (m_active)
+        m_active->focusTerminal();
 }
 
 QColor TerminalTab::foregroundColour() const
