@@ -225,6 +225,4 @@ private:
     bool m_dirty = false;
     quint64 m_outputSeq = 0;
     quint64 m_reportedSeq = 0;
-
-    bool m_canCopy = false;
 };

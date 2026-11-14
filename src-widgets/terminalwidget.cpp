@@ -71,11 +71,6 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings,
         emit sessionFinished();
     });
 
-    // Track whether there is a selection, so the context menu can enable Copy.
-    connect(m_terminal, &QTermWidget::copyAvailable, this, [this](bool available) {
-        m_canCopy = available;
-    });
-
     // Right-click menu: our own, built from QTermWidget's public actions. It
     // is assembled on demand (see showContextMenu) so Copy reflects selection.
     m_terminal->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -508,9 +503,11 @@ void TerminalWidget::showContextMenu(const QPoint &globalPos)
 {
     QMenu menu(this);
 
-    // Copy is enabled only while the terminal reports a live selection.
+    // Copy is enabled only while there is a selection, asked now: the
+    // terminal's copyAvailable() signal is never emitted, so it can't be
+    // followed. (A right click leaves the selection be.)
     QAction *copyAct = menu.addAction(tr("&Copy"), m_terminal, &QTermWidget::copyClipboard);
-    copyAct->setEnabled(m_canCopy);
+    copyAct->setEnabled(!m_terminal->selectedText(false).isEmpty());
     copyAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+C")));
 
     QAction *pasteAct = menu.addAction(tr("&Paste"), m_terminal, &QTermWidget::pasteClipboard);
