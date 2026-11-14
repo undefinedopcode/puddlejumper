@@ -18,9 +18,10 @@ class QTcpSocket;
  * framebuffer, with no widgets.
  *
  * Kept to what a VM on the same machine needs: no authentication (QEMU's
- * default), and raw and CopyRect updates, which are cheap to decode and fast
- * enough over a local link. It follows the remote screen's size
- * (DesktopSize, ExtendedDesktopSize) and cursor shape (Cursor), and takes
+ * default) or a VNC password, and raw and CopyRect updates, which are cheap
+ * to decode and fast enough over a local link. It follows the remote
+ * screen's size (DesktopSize, ExtendedDesktopSize) and cursor shape
+ * (Cursor), and takes
  * keys as scan codes where the server can (QEMU's extended key events), so
  * the remote keyboard layout decides what a key types, not ours.
  */
@@ -42,6 +43,16 @@ public:
     /* Whether sendKey()'s scan code reaches the server (else only the keysym). */
     bool hasScanCodes() const { return m_scanCodes; }
 
+    /*
+     * The password, for servers that ask for one (only its first 8
+     * characters count). Asked for with passwordRequested() when none was
+     * set; answering then carries on with the connection. Forgotten once the
+     * server turns it down.
+     */
+    void setPassword(const QString &password);
+    /* The last connection ended because the password was wrong. */
+    bool authenticationFailed() const { return m_authFailed; }
+
     /* `buttons`: 1 left, 2 middle, 4 right, 8/16 wheel up/down, 32/64 left/right. */
     void sendPointer(const QPoint &pos, int buttons);
     /*
@@ -53,6 +64,8 @@ public:
     void sendClipboard(const QString &text);
 
 signals:
+    /* The server wants a password and none is set: call setPassword(). */
+    void passwordRequested();
     void connected();
     /* The framebuffer has a new size (and is blank until updated). */
     void resized(const QSize &size);
@@ -66,8 +79,8 @@ signals:
 
 private:
     enum class State {
-        Idle, Version, SecurityTypes, SecurityType33, SecurityResult, ServerInit,
-        Normal, Rects, Closed,
+        Idle, Version, SecurityTypes, SecurityType33, Challenge, AwaitingPassword,
+        SecurityResult, ServerInit, Normal, Rects, Closed,
     };
 
     void onReadyRead();
@@ -76,6 +89,7 @@ private:
     bool parseRect();
     void fail(const QString &reason);
 
+    void sendChallengeResponse();
     void sendClientInit();
     void sendSetup();
     void requestUpdate(bool incremental);
@@ -96,6 +110,10 @@ private:
     int m_rectsLeft = 0;          // in the FramebufferUpdate being read
     bool m_fullUpdate = false;    // ask for everything next (after a resize)
     bool m_scanCodes = false;
+    QString m_password;
+    QByteArray m_challenge;
+    bool m_authenticating = false;    // VNC authentication chosen
+    bool m_authFailed = false;
     QImage m_image;
     QString m_name;
 };

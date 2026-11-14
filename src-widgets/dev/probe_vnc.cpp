@@ -8,6 +8,9 @@
  * "Meta+Space", or "text:hello" to type it) and the screen is saved again as
  * <prefix>-<n>.png. The events are synthetic, so they take VncView's
  * no-native-code path.
+ *
+ * PROBE_VNC_PASSWORDS="wrong,right" answers the password prompt with each
+ * in turn, as typed into it.
  */
 
 #include "../vncclient.h"
@@ -18,6 +21,8 @@
 #include <QEventLoop>
 #include <QKeyEvent>
 #include <QKeySequence>
+#include <QLabel>
+#include <QLineEdit>
 #include <QHash>
 #include <QTimer>
 
@@ -74,6 +79,7 @@ void press(QWidget *w, const QString &spec)
 
 int main(int argc, char *argv[])
 {
+    std::setvbuf(stdout, nullptr, _IOLBF, 0);
     QApplication app(argc, argv);
     const QStringList args = app.arguments();
     if (args.size() < 3) {
@@ -101,11 +107,31 @@ int main(int argc, char *argv[])
         ++shapes[QStringLiteral("%1x%2@%3,%4").arg(r.width()).arg(r.height()).arg(r.x()).arg(r.y())];
         lastUpdate.start();
     });
+    QStringList passwords = qEnvironmentVariable("PROBE_VNC_PASSWORDS").split(QLatin1Char(','),
+                                                                             Qt::SkipEmptyParts);
     QString failure;
     bool closed = false;
     QObject::connect(view.client(), &VncClient::disconnected, [&](const QString &reason) {
+        std::printf("disconnected: %s\n", qPrintable(reason));
+        // A wrong password is asked for again, not the end.
+        if (view.client()->authenticationFailed() && !passwords.isEmpty())
+            return;
         failure = reason;
         closed = true;
+    });
+    QObject::connect(view.client(), &VncClient::passwordRequested, &view, [&]() {
+        // The view shows its prompt first; answer it as a user would.
+        QTimer::singleShot(100, &view, [&]() {
+            auto *label = view.findChild<QLabel *>();
+            auto *edit = view.findChild<QLineEdit *>();
+            std::printf("prompt: %s\n", qPrintable(label ? label->text().replace(QLatin1Char('\n'), QLatin1String(" / ")) : QString()));
+            if (!edit || passwords.isEmpty() || !edit->isVisible())
+                return;
+            const QString password = passwords.takeFirst();
+            std::printf("typing password \"%s\"\n", qPrintable(password));
+            edit->setText(password);
+            emit edit->returnPressed();
+        });
     });
     QElapsedTimer total;
     total.start();

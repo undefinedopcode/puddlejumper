@@ -11,6 +11,8 @@
 
 #include <functional>
 
+class QLabel;
+class QLineEdit;
 class VncClient;
 
 /*
@@ -22,6 +24,9 @@ class VncClient;
  * the server takes them, so the remote keyboard layout applies. Keys still
  * held when the focus leaves are released, so none stay stuck down on the
  * remote end. Once disconnected, a click or Return connects again.
+ *
+ * A server that wants a password gets one from a prompt over the view; it is
+ * kept (in memory only) for reconnecting, and asked for again if wrong.
  */
 class VncView : public QWidget
 {
@@ -85,6 +90,9 @@ private:
     void releaseKeys();
     void setStatus(const QString &status);
     void updateCursor();
+    void showPasswordPrompt(const QString &error);
+    void submitPassword();
+    void placePasswordPrompt();
 
     VncClient *m_client = nullptr;
     QString m_host;
@@ -100,4 +108,9 @@ private:
     QString m_sentClipboard;      // last clipboard text exchanged either way
     QImage m_cursor;
     QPoint m_cursorHotspot;
+    QString m_password;           // null until given
+    QString m_passwordError;      // why it is being asked for again
+    QWidget *m_passwordPrompt = nullptr;
+    QLabel *m_passwordLabel = nullptr;
+    QLineEdit *m_passwordEdit = nullptr;
 };

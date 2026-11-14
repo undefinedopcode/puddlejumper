@@ -10,9 +10,16 @@
 
 #include <QApplication>
 #include <QClipboard>
+#include <QFrame>
+#include <QHBoxLayout>
 #include <QKeyEvent>
+#include <QLabel>
+#include <QLineEdit>
 #include <QPainter>
+#include <QPushButton>
 #include <QRegularExpression>
+#include <QTimer>
+#include <QVBoxLayout>
 
 #include <algorithm>
 
@@ -232,7 +239,37 @@ VncView::VncView(QWidget *parent)
     setAttribute(Qt::WA_InputMethodEnabled, false);   // keys, not composed text
     setCursor(dotCursor());
 
+    // The password prompt, shown over the view when the server asks.
+    auto *prompt = new QFrame(this);
+    prompt->setFrameShape(QFrame::StyledPanel);
+    prompt->setAutoFillBackground(true);
+    prompt->setCursor(Qt::ArrowCursor);
+    m_passwordLabel = new QLabel(prompt);
+    m_passwordLabel->setWordWrap(true);
+    m_passwordEdit = new QLineEdit(prompt);
+    m_passwordEdit->setEchoMode(QLineEdit::Password);
+    m_passwordEdit->setPlaceholderText(tr("Password"));
+    m_passwordEdit->setMinimumWidth(220);
+    auto *connectButton = new QPushButton(tr("Connect"), prompt);
+    auto *row = new QHBoxLayout;
+    row->addWidget(m_passwordEdit, 1);
+    row->addWidget(connectButton);
+    auto *column = new QVBoxLayout(prompt);
+    column->addWidget(m_passwordLabel);
+    column->addLayout(row);
+    connect(m_passwordEdit, &QLineEdit::returnPressed, this, &VncView::submitPassword);
+    connect(connectButton, &QPushButton::clicked, this, &VncView::submitPassword);
+    prompt->hide();
+    m_passwordPrompt = prompt;
+
+    connect(m_client, &VncClient::passwordRequested, this, [this]() {
+        if (!m_password.isNull())
+            m_client->setPassword(m_password);   // reconnecting
+        else
+            showPasswordPrompt(m_passwordError);
+    });
     connect(m_client, &VncClient::connected, this, [this]() {
+        m_passwordError.clear();
         m_connecting = false;
         setStatus(QString());
         emit titleChanged(title());
@@ -261,6 +298,17 @@ VncView::VncView(QWidget *parent)
         m_connecting = false;
         m_held.clear();
         m_buttons = 0;
+        m_passwordPrompt->hide();
+        if (m_client->authenticationFailed()) {
+            // Ask again, saying why: on a new connection, once this one is
+            // done with.
+            m_password = QString();
+            m_passwordError = reason;
+            m_connecting = true;
+            setStatus(tr("Connecting to %1…").arg(m_address));
+            QTimer::singleShot(0, this, &VncView::reconnect);
+            return;
+        }
         const QString what = reason.isEmpty() ? tr("Disconnected from %1.").arg(m_address)
                                               : tr("Disconnected from %1: %2").arg(m_address, reason);
         setStatus(what + QLatin1Char('\n') + tr("Click or press Return to connect again."));
@@ -321,6 +369,39 @@ bool VncView::parseAddress(const QString &text, QString *host, quint16 *port)
     *host = h;
     *port = quint16(n);
     return true;
+}
+
+void VncView::showPasswordPrompt(const QString &error)
+{
+    QString text = tr("%1 wants a password.").arg(m_address);
+    if (!error.isEmpty())
+        text = error + QLatin1Char('\n') + text;
+    m_passwordLabel->setText(text);
+    m_passwordEdit->clear();
+    setStatus(QString());
+    m_passwordPrompt->show();
+    placePasswordPrompt();
+    if (hasFocus() || window()->isActiveWindow())
+        m_passwordEdit->setFocus();
+    emit titleChanged(title());
+}
+
+void VncView::submitPassword()
+{
+    m_password = m_passwordEdit->text();
+    m_passwordEdit->clear();
+    m_passwordPrompt->hide();
+    setFocus();
+    setStatus(tr("Connecting to %1…").arg(m_address));
+    m_client->setPassword(m_password);
+}
+
+void VncView::placePasswordPrompt()
+{
+    m_passwordPrompt->adjustSize();
+    const QSize size = m_passwordPrompt->size().boundedTo(this->size());
+    m_passwordPrompt->setGeometry(QRect(QPoint((width() - size.width()) / 2,
+                                               (height() - size.height()) / 2), size));
 }
 
 void VncView::reconnect()
@@ -389,6 +470,8 @@ void VncView::paintEvent(QPaintEvent *event)
 void VncView::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
+    if (m_passwordPrompt->isVisible())
+        placePasswordPrompt();
     updateCursor();
 }
 
@@ -543,6 +626,10 @@ void VncView::releaseKeys()
 void VncView::focusInEvent(QFocusEvent *event)
 {
     QWidget::focusInEvent(event);
+    if (m_passwordPrompt->isVisible()) {
+        m_passwordEdit->setFocus();
+        return;
+    }
     // Hand over what was copied here while away (Latin-1 is all VNC carries).
     const QString text = QGuiApplication::clipboard()->text();
     if (!text.isEmpty() && text != m_sentClipboard) {

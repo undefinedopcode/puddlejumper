@@ -6,6 +6,8 @@
 
 #include "vncclient.h"
 
+#include "des.h"
+
 #include <QSysInfo>
 #include <QTcpSocket>
 #include <QtEndian>
@@ -69,6 +71,8 @@ void VncClient::connectToHost(const QString &host, quint16 port)
     m_in.clear();
     m_pos = 0;
     m_scanCodes = false;
+    m_authenticating = false;
+    m_authFailed = false;
     m_state = State::Idle;
     m_socket->connectToHost(host, port);
 }
@@ -165,19 +169,21 @@ bool VncClient::parseOne()
             password |= u8(1 + i) == 2;
         }
         m_pos += 1 + count;
-        if (!none) {
-            fail(password ? tr("The server wants a password, which isn't supported yet")
-                          : tr("The server offers no supported security type"));
+        if (!none && !password) {
+            fail(tr("The server offers no supported security type"));
             return false;
         }
         QByteArray choice;
-        put8(choice, 1);
+        put8(choice, none ? 1 : 2);
         m_socket->write(choice);
-        // 3.7 only sends a result for types that authenticate.
-        if (m_minor >= 8)
+        if (!none) {
+            m_authenticating = true;
+            m_state = State::Challenge;
+        } else if (m_minor >= 8) {
             m_state = State::SecurityResult;
-        else
-            sendClientInit();
+        } else {
+            sendClientInit();   // 3.7 only sends a result for types that authenticate
+        }
         return true;
     }
 
@@ -194,24 +200,50 @@ bool VncClient::parseOne()
             return false;
         }
         m_pos += 4;
+        if (type == 2) {
+            m_authenticating = true;
+            m_state = State::Challenge;
+            return true;
+        }
         if (type != 1) {
-            fail(type == 2 ? tr("The server wants a password, which isn't supported yet")
-                           : tr("The server offers no supported security type"));
+            fail(tr("The server offers no supported security type"));
             return false;
         }
         sendClientInit();
         return true;
     }
 
+    case State::Challenge:
+        if (!available(16))
+            return false;
+        m_challenge = m_in.mid(m_pos, 16);
+        m_pos += 16;
+        if (m_password.isNull()) {
+            m_state = State::AwaitingPassword;
+            emit passwordRequested();
+            return false;
+        }
+        sendChallengeResponse();
+        return true;
+
+    case State::AwaitingPassword:
+        return false;
+
     case State::SecurityResult: {
         if (!available(4))
             return false;
         if (u32(0) != 0) {
+            // Only 3.8 says why.
             QString reason;
             qsizetype size;
-            if (!readString(4, &reason, &size))
+            if (m_minor >= 8 && !readString(4, &reason, &size))
                 return false;
-            fail(reason.isEmpty() ? tr("The server refused the connection") : reason);
+            m_authFailed = m_authenticating;
+            if (m_authFailed)
+                m_password = QString();   // never sent again
+            if (reason.isEmpty())
+                reason = m_authenticating ? tr("Wrong password") : tr("The server refused the connection");
+            fail(reason);
             return false;
         }
         m_pos += 4;
@@ -409,6 +441,36 @@ void VncClient::resizeFramebuffer(int width, int height)
     m_image.fill(Qt::black);
     m_fullUpdate = true;
     emit resized(m_image.size());
+}
+
+void VncClient::setPassword(const QString &password)
+{
+    m_password = password.isNull() ? QStringLiteral("") : password;
+    if (m_state == State::AwaitingPassword) {
+        sendChallengeResponse();
+        onReadyRead();   // anything that came in while waiting
+    }
+}
+
+void VncClient::sendChallengeResponse()
+{
+    // The challenge encrypted with the password as the DES key, each of its
+    // bytes bit-reversed (an accident of the original implementation that
+    // every server keeps).
+    quint8 key[8] = {};
+    const QByteArray latin1 = m_password.toLatin1().left(8);
+    for (int i = 0; i < latin1.size(); ++i) {
+        quint8 b = quint8(latin1.at(i)), reversed = 0;
+        for (int bit = 0; bit < 8; ++bit)
+            reversed |= ((b >> bit) & 1) << (7 - bit);
+        key[i] = reversed;
+    }
+    QByteArray response = m_challenge;
+    auto *blocks = reinterpret_cast<quint8 *>(response.data());
+    desEncryptBlock(key, blocks);
+    desEncryptBlock(key, blocks + 8);
+    m_socket->write(response);
+    m_state = State::SecurityResult;
 }
 
 void VncClient::sendClientInit()
