@@ -41,6 +41,9 @@ public:
     VncClient *client() const { return m_client; }
     /* host:port, as connected to. */
     QString address() const { return m_address; }
+    /* 16-bit colour, for slow links (see VncClient); reconnects if connected. */
+    void setReducedColour(bool on);
+
     /* The account name for a Mac's login, as last given (offered next time). */
     QString username() const { return m_username; }
     void setUsername(const QString &username) { m_username = username; }

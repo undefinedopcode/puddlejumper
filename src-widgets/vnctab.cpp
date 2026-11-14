@@ -12,7 +12,7 @@
 #include <QPainter>
 #include <QVBoxLayout>
 
-VncTab::VncTab(const QString &host, quint16 port, QWidget *parent)
+VncTab::VncTab(const QString &host, quint16 port, bool reducedColour, QWidget *parent)
     : Tab(parent), m_view(new VncView(this))
 {
     auto *layout = new QVBoxLayout(this);
@@ -27,7 +27,19 @@ VncTab::VncTab(const QString &host, quint16 port, QWidget *parent)
         m_newOutput = true;
         emit screenUpdated();
     });
+    m_view->setReducedColour(reducedColour);
     m_view->connectToHost(host, port);
+}
+
+bool VncTab::reducedColour() const
+{
+    return m_view->client()->reducedColour();
+}
+
+void VncTab::setReducedColour(bool on)
+{
+    m_view->setReducedColour(on);
+    emit changed();
 }
 
 QString VncTab::address() const
@@ -60,7 +72,10 @@ QString VncTab::details() const
     if (!isConnected())
         return tr("%1  ·  not connected").arg(address());
     const QSize size = m_view->client()->framebuffer().size();
-    return tr("%1  ·  %2 × %3").arg(address()).arg(size.width()).arg(size.height());
+    QString text = tr("%1  ·  %2 × %3").arg(address()).arg(size.width()).arg(size.height());
+    if (reducedColour())
+        text += tr("  ·  16-bit colour");
+    return text;
 }
 
 QPixmap VncTab::previewPixmap(const QSize &size, qreal devicePixelRatio) const

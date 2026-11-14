@@ -431,6 +431,17 @@ void VncView::placeLoginPrompt()
                                                (height() - size.height()) / 2), size));
 }
 
+void VncView::setReducedColour(bool on)
+{
+    if (on == m_client->reducedColour())
+        return;
+    m_client->setReducedColour(on);
+    // The format is settled when connecting: a connection being set up
+    // picks it up, one already up starts again with it.
+    if (m_client->isConnected())
+        reconnect();
+}
+
 void VncView::reconnect()
 {
     if (!m_host.isEmpty())

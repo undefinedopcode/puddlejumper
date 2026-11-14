@@ -51,6 +51,14 @@ public:
     bool hasScanCodes() const { return m_scanCodes; }
 
     /*
+     * Ask for 16-bit colour (RGB565) rather than 24: a third less to send,
+     * for slow links, at the cost of banding in gradients and photos. Takes
+     * effect from the next connection's setup.
+     */
+    void setReducedColour(bool on) { m_reducedColour = on; }
+    bool reducedColour() const { return m_reducedColour; }
+
+    /*
      * What to log in with, for servers that ask: a VNC password (only its
      * first 8 characters count) or, for Apple's login, an account's name
      * and password. Asked for with credentialsRequested() when no password
@@ -102,6 +110,13 @@ private:
     bool parseTight(const QRect &rect);
     /* Tight's 1-3 byte length at `at`; false if not all in yet. */
     bool readCompactLength(qsizetype at, quint32 *length, int *size) const;
+
+    /* Pixels as the server sends them, as RGB32: whole ones (raw, zlib, the
+     * cursor), ZRLE's and Tight's compacted ones, of compactPixelSize(). */
+    quint32 pixel(const uchar *p) const;
+    quint32 zrlePixel(const uchar *p) const;
+    quint32 tightPixel(const uchar *p) const;
+    int compactPixelSize() const { return m_bytesPerPixel == 4 ? 3 : 2; }
     void fail(const QString &reason);
 
     /* Answer the VNC challenge or Apple's key exchange. */
@@ -129,6 +144,8 @@ private:
     int m_rectsLeft = 0;          // in the FramebufferUpdate being read
     bool m_fullUpdate = false;    // ask for everything next (after a resize)
     bool m_scanCodes = false;
+    bool m_reducedColour = false;
+    int m_bytesPerPixel = 4;      // as set up for this connection: 4, or 2 for 16-bit
     QString m_username;
     QString m_password;           // null: ask for it
     int m_securityType = 0;       // as chosen: 1 none, 2 VNC, 30 Apple

@@ -11,6 +11,7 @@
  *
  * PROBE_VNC_PASSWORDS="wrong,right" answers the login prompt with each in
  * turn, as typed into it, and PROBE_VNC_USER fills its name field if shown.
+ * PROBE_VNC_16BIT asks for 16-bit colour.
  */
 
 #include "../vncclient.h"
@@ -142,6 +143,8 @@ int main(int argc, char *argv[])
     });
     QElapsedTimer total;
     total.start();
+    if (qEnvironmentVariableIsSet("PROBE_VNC_16BIT"))
+        view.client()->setReducedColour(true);
     view.connectToHost(host, port);
 
     // Up, and no updates for a moment (or 10 s at most).

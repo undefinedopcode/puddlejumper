@@ -19,7 +19,8 @@ class VncTab : public Tab
     Q_OBJECT
 
 public:
-    explicit VncTab(const QString &host, quint16 port, QWidget *parent = nullptr);
+    explicit VncTab(const QString &host, quint16 port, bool reducedColour = false,
+                    QWidget *parent = nullptr);
 
     VncView *view() const { return m_view; }
     /* host:port, as connected to (and saved). */
@@ -27,6 +28,9 @@ public:
     /* The account name for a Mac's login, kept with the tab (its password isn't). */
     QString username() const;
     void setUsername(const QString &username);
+    /* 16-bit colour, for slow links; kept with the tab. */
+    bool reducedColour() const;
+    void setReducedColour(bool on);
     /* The remote desktop's name, or the address until it has said. */
     QString title() const;
     bool isConnected() const;

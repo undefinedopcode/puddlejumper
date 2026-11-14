@@ -1561,6 +1561,20 @@ void MainWindow::showTabMenu(int index, const QPoint &globalPos)
         });
         others->setEnabled(m_tabs->count() > 1);
 
+        // A remote screen's colour depth, for a slow link.
+        if (auto *vnc = qobject_cast<VncTab *>(pageAt(index))) {
+            menu.addSeparator();
+            QAction *reduced = menu.addAction(tr("Reduced Colour (16-bit)"));
+            reduced->setCheckable(true);
+            reduced->setChecked(vnc->reducedColour());
+            QPointer<VncTab> tab = vnc;
+            connect(reduced, &QAction::toggled, this, [tab](bool on) {
+                if (tab)
+                    tab->setReducedColour(on);
+            });
+            menu.addSeparator();
+        }
+
         // A tmux session lives in one workspace, so its tabs move together.
         QMenu *move = menu.addMenu(tmuxSessionFor(pageAt(index)) ? tr("&Move Session to Workspace")
                                                                  : tr("&Move to Workspace"));
@@ -2196,6 +2210,8 @@ void MainWindow::saveSession()
                 };
                 if (!vnc->username().isEmpty())
                     saved.insert(QStringLiteral("user"), vnc->username());
+                if (vnc->reducedColour())
+                    saved.insert(QStringLiteral("reducedColour"), true);
                 savedTabs.append(saved);
                 continue;
             }
@@ -2302,7 +2318,8 @@ bool MainWindow::restoreSession()
                 quint16 port;
                 if (!VncView::parseAddress(address, &host, &port))
                     continue;
-                auto *vnc = new VncTab(host, port);
+                auto *vnc = new VncTab(host, port,
+                                       savedTab.value(QStringLiteral("reducedColour")).toBool());
                 vnc->setCustomTitle(savedTab.value(QStringLiteral("title")).toString());
                 vnc->setUsername(savedTab.value(QStringLiteral("user")).toString());
                 addTab(vnc, address, QString(), i);
