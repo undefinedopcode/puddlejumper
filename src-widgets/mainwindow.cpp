@@ -566,6 +566,8 @@ void MainWindow::buildMenus()
     // Filled each time it opens, since tmux sessions come and go outside.
     m_tmuxMenu = menuBar()->addMenu(tr("t&mux"));
     connect(m_tmuxMenu, &QMenu::aboutToShow, this, &MainWindow::rebuildTmuxMenu);
+    // (Not left empty until then: macOS keeps an empty menu off the menu bar.)
+    m_tmuxMenu->addAction(tr("No sessions running"))->setEnabled(false);
 
     auto *zoomIn = view->addAction(tr("Zoom &In"));
     zoomIn->setShortcut(QKeySequence(QStringLiteral("Ctrl+=")));
