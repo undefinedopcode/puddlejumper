@@ -678,7 +678,7 @@ private:
     // draws a section of text, all the text in this section
     // has a common color and style
     void drawTextFragment(QPainter& painter, const QRect& rect,
-                          const std::wstring& text, const Character* style, bool tooWide,
+                          const std::u32string& text, const Character* style, bool tooWide,
                           bool backgroundPass);
     // draws the background for a text fragment
     // if useOpacitySetting is true then the color's alpha value will be set to
@@ -690,12 +690,12 @@ private:
     void drawCursor(QPainter& painter, const QRect& rect , const QColor& foregroundColor,
                                        const QColor& backgroundColor , bool& invertColors);
     // draws the characters or line graphics in a text fragment
-    void drawCharacters(QPainter& painter, const QRect& rect,  const std::wstring& text,
+    void drawCharacters(QPainter& painter, const QRect& rect,  const std::u32string& text,
                                            const Character* style, bool invertCharacterColor,
                                            bool tooWide = false);
     // draws a string of line graphics
     void drawLineCharString(QPainter& painter, int x, int y,
-                            const std::wstring& str, const Character* attributes) const;
+                            const std::u32string& str, const Character* attributes) const;
 
     // draws the preedit string for input methods
     void drawInputMethodPreeditString(QPainter& painter , const QRect& rect);
@@ -745,7 +745,7 @@ private:
     bool handleShortcutOverrideEvent(QKeyEvent* event);
 
     bool isLineChar(Character c) const;
-    bool isLineCharString(const std::wstring& string) const;
+    bool isLineCharString(const std::u32string& string) const;
 
     void hideStaleMouse() const; // conditionally hides the mouse cursor
 
@@ -872,7 +872,7 @@ private:
 
     struct InputMethodData
     {
-        std::wstring preeditString;
+        std::u32string preeditString;
         QRect previousPreeditRect;
     };
     InputMethodData _inputMethodData;

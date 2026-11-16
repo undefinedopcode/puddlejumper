@@ -27,7 +27,10 @@
 #include <cstdlib>
 #include <cstdio>
 #include <sys/types.h>
+#include <QtGlobal>
+#ifndef Q_OS_WIN
 #include <sys/mman.h>
+#endif
 #include <unistd.h>
 #include <cerrno>
 
@@ -113,6 +116,11 @@ void HistoryFile::map()
 {
     Q_ASSERT( fileMap == nullptr );
 
+#ifdef Q_OS_WIN
+    // superterm: not mapped there; get() reads the file instead.
+    readWriteBalance = 0;
+    return;
+#else
     fileMap = (char*)mmap( nullptr , length , PROT_READ , MAP_PRIVATE , ion , 0 );
 
     //if mmap'ing fails, fall back to the read-lseek combination
@@ -122,12 +130,15 @@ void HistoryFile::map()
             fileMap = nullptr;
             //qDebug() << __FILE__ << __LINE__ << ": mmap'ing history failed.  errno = " << errno;
     }
+#endif
 }
 
 void HistoryFile::unmap()
 {
+#ifndef Q_OS_WIN
     int result = munmap( fileMap , length );
     Q_ASSERT( result == 0 ); Q_UNUSED( result )
+#endif
 
     fileMap = nullptr;
 }

@@ -90,7 +90,7 @@ void PlainTextDecoder::decodeLine(const Character* const characters, int count, 
     //note:  we build up a QString and send it to the text stream rather writing into the text
     //stream a character at a time because it is more efficient.
     //(since QTextStream always deals with QStrings internally anyway)
-    std::wstring plainText;
+    std::u32string plainText;
     plainText.reserve(count);
 
     int outputCount = count;
@@ -116,7 +116,7 @@ void PlainTextDecoder::decodeLine(const Character* const characters, int count, 
             const uint* chars = ExtendedCharTable::instance.lookupExtendedChar(characters[i].character, extendedCharLength);
             if (chars)
             {
-                std::wstring str;
+                std::u32string str;
                 for (ushort nchar = 0; nchar < extendedCharLength; nchar++)
                 {
                     str.push_back(chars[nchar]);
@@ -135,7 +135,7 @@ void PlainTextDecoder::decodeLine(const Character* const characters, int count, 
             i += qMax(1, konsole_wcwidth(characters[i].character));
         }
     }
-    *_output << QString::fromStdWString(plainText);
+    *_output << QString::fromStdU32String(plainText);
 }
 
 HTMLDecoder::HTMLDecoder() :
@@ -151,23 +151,23 @@ void HTMLDecoder::begin(QTextStream* output)
 {
     _output = output;
 
-    std::wstring text;
+    std::u32string text;
 
     //open monospace span
     openSpan(text,QLatin1String("font-family:monospace"));
 
-    *output << QString::fromStdWString(text);
+    *output << QString::fromStdU32String(text);
 }
 
 void HTMLDecoder::end()
 {
     Q_ASSERT( _output );
 
-    std::wstring text;
+    std::u32string text;
 
     closeSpan(text);
 
-    *_output << QString::fromStdWString(text);
+    *_output << QString::fromStdU32String(text);
 
     _output = nullptr;
 
@@ -179,7 +179,7 @@ void HTMLDecoder::decodeLine(const Character* const characters, int count, LineP
 {
     Q_ASSERT( _output );
 
-    std::wstring text;
+    std::u32string text;
 
     int spaceCount = 0;
 
@@ -254,18 +254,18 @@ void HTMLDecoder::decodeLine(const Character* const characters, int count, LineP
             else
             {
                 //escape HTML tag characters and just display others as they are
-                wchar_t ch(characters[i].character);
+                char32_t ch(characters[i].character);
                 if ( ch == '<' )
                 {
-                    text.append(L"&lt;");
+                    text.append(U"&lt;");
                 }
                 else if (ch == '>')
                 {
-                    text.append(L"&gt;");
+                    text.append(U"&gt;");
                 }
                 else if (ch == '&')
                 {
-                    text.append(L"&amp;");
+                    text.append(U"&amp;");
                 }
                 else
                 {
@@ -277,7 +277,7 @@ void HTMLDecoder::decodeLine(const Character* const characters, int count, LineP
         {
             // HTML truncates multiple spaces, so use a space marker instead
             // Use &#160 instead of &nbsp so xmllint will work.
-            text.append(L"&#160;");
+            text.append(U"&#160;");
         }
 
     }
@@ -287,18 +287,18 @@ void HTMLDecoder::decodeLine(const Character* const characters, int count, LineP
         closeSpan(text);
 
     //start new line
-    text.append(L"<br>");
+    text.append(U"<br>");
 
-    *_output << QString::fromStdWString(text);
+    *_output << QString::fromStdU32String(text);
 }
-void HTMLDecoder::openSpan(std::wstring& text , const QString& style)
+void HTMLDecoder::openSpan(std::u32string& text , const QString& style)
 {
-    text.append( QString(QLatin1String("<span style=\"%1\">")).arg(style).toStdWString() );
+    text.append( QString(QLatin1String("<span style=\"%1\">")).arg(style).toStdU32String() );
 }
 
-void HTMLDecoder::closeSpan(std::wstring& text)
+void HTMLDecoder::closeSpan(std::u32string& text)
 {
-    text.append(L"</span>");
+    text.append(U"</span>");
 }
 
 void HTMLDecoder::setColorTable(const ColorEntry* table)

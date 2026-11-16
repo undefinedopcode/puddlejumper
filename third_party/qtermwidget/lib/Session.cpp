@@ -36,6 +36,7 @@
 #include <QSysInfo>
 #include <QtDebug>
 #include <QRegularExpression>
+#include <QStandardPaths>
 
 #ifdef Q_OS_MACOS
 #include <libproc.h>   // superterm: currentWorkingDirectory() on macOS
@@ -84,7 +85,11 @@ Session::Session(QObject* parent) :
 
     //create teletype for I/O with shell process
     _shellProcess = new Pty();
+#ifdef Q_OS_WIN
+    ptySlaveFd = -1;   // superterm: a pseudoconsole has no such thing
+#else
     ptySlaveFd = _shellProcess->pty()->slaveFd();
+#endif
 
     //create emulation backend
     _emulation = new Vt102Emulation();
@@ -161,7 +166,11 @@ QString Session::currentWorkingDirectory()
 {
     if (_reportedWorkingUrl.isValid() && _reportedWorkingUrl.isLocalFile()
         && (_reportedWorkingUrl.host().length() == 0 || _reportedWorkingUrl.host().compare(QSysInfo::machineHostName(), Qt::CaseInsensitive) == 0)) {
+#ifdef Q_OS_WIN
+        return _reportedWorkingUrl.toLocalFile();   // superterm: C:/..., not /C:/...
+#else
         return _reportedWorkingUrl.path();
+#endif
     }
 
 #ifdef Q_OS_LINUX
@@ -293,6 +302,19 @@ void Session::run()
     // if 'exec' is not specified, fall back to default shell.  if that
     // is not set then fall back to /bin/sh
 
+#ifdef Q_OS_WIN
+    // superterm: no $SHELL here. PowerShell, the newer one if installed, or
+    // failing that the command interpreter.
+    if (exec.isEmpty()) {
+        for (const char *shell : {"pwsh.exe", "powershell.exe"}) {
+            exec = QStandardPaths::findExecutable(QLatin1String(shell));
+            if (!exec.isEmpty())
+                break;
+        }
+        if (exec.isEmpty())
+            exec = qEnvironmentVariable("COMSPEC", QStringLiteral("cmd.exe"));
+    }
+#else
     // here we expect full path. If there is no fullpath let's expect it's
     // a custom shell (eg. python, etc.) available in the PATH.
     if (exec.startsWith(QLatin1Char('/')) || exec.isEmpty())
@@ -310,6 +332,7 @@ void Session::run()
             exec = defaultShell;
         }
     }
+#endif
 
     // _arguments sometimes contain ("") so isEmpty()
     // or count() does not work as expected...
@@ -606,6 +629,11 @@ bool Session::sendSignal(int signal)
         return false;
     }
 
+#ifdef Q_OS_WIN
+    // superterm: no signals here; close() closes the pseudoconsole instead.
+    Q_UNUSED(signal)
+    return false;
+#else
     int result = ::kill(static_cast<pid_t>(_shellProcess->processId()), signal);
 
      if ( result == 0 )
@@ -616,6 +644,7 @@ bool Session::sendSignal(int signal)
      {
          return false;
      }
+#endif
 }
 
 void Session::close()
@@ -623,6 +652,14 @@ void Session::close()
     _autoClose = true;
     _wantedClose = true;
 
+#ifdef Q_OS_WIN
+    // superterm: closing the pseudoconsole is the hangup. Its programs are
+    // told to exit and ended if they don't; done() follows.
+    if (isRunning())
+    {
+        _shellProcess->closePty();
+    }
+#else
     if (isRunning())
     {
         // Try SIGHUP, and if unsuccessful, do a hard kill.
@@ -644,6 +681,7 @@ void Session::close()
             }
         }
     }
+#endif
     else
     {
         // terminal process has finished, just close the session

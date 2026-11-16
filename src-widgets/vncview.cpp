@@ -27,8 +27,8 @@ namespace {
 
 /*
  * XT (set 1) scan codes, 0xE0nn for the extended ones, from what the
- * platform reports for a key: the macOS virtual key code, or the X/xkb
- * keycode (evdev + 8) on Linux under X11 and Wayland alike.
+ * platform reports for a key: the macOS virtual key code, Windows' scan
+ * code, or the X/xkb keycode (evdev + 8) on Linux under X11 and Wayland alike.
  */
 #ifdef Q_OS_MACOS
 quint32 scanCodeForNative(quint32 kvk)
@@ -52,6 +52,12 @@ quint32 scanCodeForNative(quint32 kvk)
         0, 0x66, 0xe052, 0xe047, 0xe049, 0xe053, 0x3e, 0xe04f, 0x3c, 0xe051, 0x3b, 0xe04b, 0xe04d, 0xe050, 0xe048, 0,
     };
     return kvk < 128 ? table[kvk] : 0;
+}
+#elif defined(Q_OS_WIN)
+quint32 scanCodeForNative(quint32 code)
+{
+    // The XT code itself, the extended ones marked by bit 8.
+    return (code & 0x100) ? 0xe000 | (code & 0xff) : code & 0xff;
 }
 #else
 quint32 scanCodeForNative(quint32 xkbKeycode)

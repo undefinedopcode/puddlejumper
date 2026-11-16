@@ -239,7 +239,7 @@ bool TerminalDisplay::isLineChar(Character c) const {
     return !(c.rendition & RE_EXTENDED_CHAR) && isDrawnChar(c.character, _drawLineChars);
 }
 
-bool TerminalDisplay::isLineCharString(const std::wstring& string) const {
+bool TerminalDisplay::isLineCharString(const std::u32string& string) const {
     return string.length() > 0 && isDrawnChar(static_cast<uint>(string[0]), _drawLineChars);
 }
 
@@ -810,7 +810,7 @@ static void drawPowerlineGlyph(QPainter& paint, int x, int y, int w, int h, uint
     paint.restore();
 }
 
-void TerminalDisplay::drawLineCharString(    QPainter& painter, int x, int y, const std::wstring& str,
+void TerminalDisplay::drawLineCharString(    QPainter& painter, int x, int y, const std::u32string& str,
                                     const Character* attributes) const
 {
         const QPen& currentPen = painter.pen();
@@ -971,7 +971,7 @@ void TerminalDisplay::drawCursor(QPainter& painter,
 
 void TerminalDisplay::drawCharacters(QPainter& painter,
                                      const QRect& rect,
-                                     const std::wstring& text,
+                                     const std::u32string& text,
                                      const Character* style,
                                      bool invertCharacterColor,
                                      bool tooWide)
@@ -1031,7 +1031,7 @@ void TerminalDisplay::drawCharacters(QPainter& painter,
         // A single-cell character whose glyph has a much wider advance (a
         // fallback font's symbol, typically) is also centred on its cell, as
         // the font would otherwise put its ink over the next cell.
-        const QString str = QString::fromStdWString(text);
+        const QString str = QString::fromStdU32String(text);
         const auto wideRect = [&]() {
             QRect drawRect(rect.topLeft(), rect.size());
             drawRect.setHeight(rect.height() + _drawTextAdditionHeight);
@@ -1060,7 +1060,7 @@ void TerminalDisplay::drawCharacters(QPainter& painter,
 
 void TerminalDisplay::drawTextFragment(QPainter& painter ,
                                        const QRect& rect,
-                                       const std::wstring& text,
+                                       const std::u32string& text,
                                        const Character* style,
                                        bool tooWide,
                                        bool backgroundPass)
@@ -1325,7 +1325,7 @@ void TerminalDisplay::updateImage()
   const int linesToUpdate = qMin(this->_lines, qMax(0,lines  ));
   const int columnsToUpdate = qMin(this->_columns,qMax(0,columns));
 
-  wchar_t *disstrU = new wchar_t[columnsToUpdate];
+  char32_t *disstrU = new char32_t[columnsToUpdate];
   char *dirtyMask = new char[columnsToUpdate+2];
   QRegion dirtyRegion;
 
@@ -1362,7 +1362,7 @@ void TerminalDisplay::updateImage()
       // where characters exceed their cell width.
       if (dirtyMask[x])
       {
-        wchar_t c = newLine[x+0].character;
+        char32_t c = newLine[x+0].character;
         if ( !c )
             continue;
         int p = 0;
@@ -1403,7 +1403,7 @@ void TerminalDisplay::updateImage()
           disstrU[p++] = c; //fontMap(c);
         }
 
-        std::wstring unistr(disstrU, p);
+        std::u32string unistr(disstrU, p);
 
         bool saveFixedFont = _fixedFont;
         if (lineDraw)
@@ -1929,7 +1929,7 @@ void TerminalDisplay::drawContents(QPainter &paint, const QRect &rect, bool back
 
   QFontMetrics fm(font());
   const int numberOfColumns = _usedColumns;
-  std::wstring unistr;
+  std::u32string unistr;
   unistr.reserve(numberOfColumns);
   for (int y = luy; y <= rly; y++)
   {
@@ -3055,12 +3055,12 @@ QChar TerminalDisplay::charClass(const Character &ch) const
         const uint* chars = ExtendedCharTable::instance.lookupExtendedChar(ch.character, extendedCharLength);
         if (chars && extendedCharLength > 0)
         {
-            std::wstring str;
+            std::u32string str;
             for (ushort nchar = 0; nchar < extendedCharLength; nchar++)
             {
                 str.push_back(chars[nchar]);
             }
-            const QString s = QString::fromStdWString(str);
+            const QString s = QString::fromStdU32String(str);
             if (_wordCharacters.contains(s, Qt::CaseInsensitive))
                 return QLatin1Char('a');
             bool allLetterOrNumber = true;
@@ -3294,7 +3294,7 @@ void TerminalDisplay::inputMethodEvent( QInputMethodEvent* event )
     QKeyEvent keyEvent(QEvent::KeyPress,0,Qt::NoModifier,event->commitString());
     emit keyPressedSignal(&keyEvent, false);
 
-    _inputMethodData.preeditString = event->preeditString().toStdWString();
+    _inputMethodData.preeditString = event->preeditString().toStdU32String();
     update(preeditRect() | _inputMethodData.previousPreeditRect);
 
     event->accept();

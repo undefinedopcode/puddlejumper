@@ -95,6 +95,17 @@ QString shellQuote(const QString &arg)
     return QLatin1Char('\'') + out + QLatin1Char('\'');
 }
 
+/* The program and arguments that run @p script: a shell's -c. */
+QStringList scriptCommand(const QString &script)
+{
+#ifdef Q_OS_WIN
+    return {QStringLiteral("powershell.exe"), QStringLiteral("-NoLogo"), QStringLiteral("-NoProfile"),
+            QStringLiteral("-Command"), script};
+#else
+    return {QStringLiteral("/bin/sh"), QStringLiteral("-c"), script};
+#endif
+}
+
 constexpr int kDefaultSidebarWidth = 220;
 
 // On a tab: it has output that hasn't been seen (kept while it is parked).
@@ -1038,6 +1049,13 @@ void MainWindow::wirePane(TerminalWidget *term)
     connect(term, &TerminalWidget::sessionFinished, this, [this, term]() {
         closePane(term);
     });
+
+    // The status bar's columns and lines. (Queued: the terminal inside takes
+    // its new size after the pane does.)
+    connect(term, &TerminalWidget::resized, this, [this, term]() {
+        if (term == currentTerminal())
+            updateStatus();
+    }, Qt::QueuedConnection);
 
     connect(term, &TerminalWidget::splitRequested, this, [this, term](Qt::Orientation o) {
         splitPane(term, o);
@@ -2556,8 +2574,9 @@ TerminalTab *MainWindow::makeWindowTab(const WorkspaceSpec &spec, const Workspac
         // exec: the commands are the pane's program, and it closes with them.
         const bool exec = leaf.value(QStringLiteral("exec")).toBool() && !commands.isEmpty();
         if (exec) {
-            profile.shellProgram = QStringLiteral("/bin/sh");
-            profile.shellArgs = QStringList{QStringLiteral("-c"), commands.join(QLatin1Char('\n'))};
+            const QStringList shell = scriptCommand(commands.join(QLatin1Char('\n')));
+            profile.shellProgram = shell.first();
+            profile.shellArgs = shell.mid(1);
         }
         profile.environment = spec.environment;
 
@@ -2738,6 +2757,11 @@ void MainWindow::editWorkspaceFile()
     const QString path = m_workspaces.at(m_currentWorkspace).definition;
     if (path.isEmpty())
         return;
+#ifdef Q_OS_WIN
+    // No $EDITOR there, nor one shell to ask for it.
+    QProcess::startDetached(QStringLiteral("notepad.exe"), {QDir::toNativeSeparators(path)});
+    return;
+#endif
     // In the terminal's own editor, in a tab of its own.
     newTabWithProfile(QString());
     if (TerminalWidget *pane = currentTerminal()) {
@@ -2780,7 +2804,8 @@ bool MainWindow::runSetupCommands(const QStringList &commands, const QString &di
         connect(&proc, &QProcess::finished, &loop, &QEventLoop::quit);
         connect(&proc, &QProcess::errorOccurred, &loop, &QEventLoop::quit);
         connect(&progress, &QProgressDialog::canceled, &loop, &QEventLoop::quit);
-        proc.start(QStringLiteral("/bin/sh"), {QStringLiteral("-c"), command});
+        const QStringList shell = scriptCommand(command);
+        proc.start(shell.first(), shell.mid(1));
         if (proc.state() != QProcess::NotRunning)
             loop.exec();
 

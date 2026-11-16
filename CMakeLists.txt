@@ -123,6 +123,16 @@ if(APPLE)
     )
 endif()
 
+# Windows: a GUI program (no console window of its own), SuperTerm.exe.
+# packaging/windows/build-app.sh makes a self-contained folder of it, zipped.
+if(WIN32)
+    target_sources(superterm PRIVATE data/windows/superterm.rc)
+    set_target_properties(superterm PROPERTIES
+        WIN32_EXECUTABLE TRUE
+        OUTPUT_NAME SuperTerm
+    )
+endif()
+
 # Embed the icon so the window and taskbar get it without an install step.
 qt_add_resources(superterm "app_icons"
     PREFIX "/"
@@ -141,12 +151,14 @@ install(TARGETS superterm
 
 # Desktop entry and icon, so the app appears in launchers and the xdg portal
 # recognises its app id (which also silences the startup portal warning).
-install(FILES data/superterm.desktop
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
-)
-install(FILES icons/superterm.svg
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
-)
+if(UNIX AND NOT APPLE)
+    install(FILES data/superterm.desktop
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
+    )
+    install(FILES icons/superterm.svg
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
+    )
+endif()
 
 # ---------------------------------------------------------------------------
 # probe-vnc — drives the VNC view against a live server. Dev tool only; never

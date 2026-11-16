@@ -54,6 +54,9 @@ QString resolveMonoFamily()
         QStringLiteral("DejaVu Sans Mono"),
         QStringLiteral("Liberation Mono"),
         QStringLiteral("Noto Sans Mono"),
+        // Windows' own (its "fixed font" below is Courier New).
+        QStringLiteral("Cascadia Mono"),
+        QStringLiteral("Consolas"),
     };
     const QStringList families = QFontDatabase::families();
     for (const QString &c : candidates) {

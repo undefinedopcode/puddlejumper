@@ -20,11 +20,6 @@ add_library(qtermwidget STATIC
     lib/HistorySearch.cpp
     lib/KeyboardTranslator.cpp
     lib/konsole_wcwidth.cpp
-    lib/kprocess.cpp
-    lib/kpty.cpp
-    lib/kptydevice.cpp
-    lib/kptyprocess.cpp
-    lib/Pty.cpp
     lib/qtermwidget.cpp
     lib/Screen.cpp
     lib/ScreenWindow.cpp
@@ -37,6 +32,22 @@ add_library(qtermwidget STATIC
     lib/tools.cpp
     lib/Vt102Emulation.cpp
 )
+
+# The terminal process: in a pty, or on Windows in a pseudoconsole (ConPTY).
+if(WIN32)
+    target_sources(qtermwidget PRIVATE lib/Pty_win.cpp)
+    # The pseudoconsole API is declared from Windows 10 1809 on.
+    target_compile_definitions(qtermwidget PRIVATE
+        _WIN32_WINNT=0x0A00 NTDDI_VERSION=0x0A000006)
+else()
+    target_sources(qtermwidget PRIVATE
+        lib/kprocess.cpp
+        lib/kpty.cpp
+        lib/kptydevice.cpp
+        lib/kptyprocess.cpp
+        lib/Pty.cpp
+    )
+endif()
 
 set_target_properties(qtermwidget PROPERTIES
     AUTOMOC ON

@@ -668,12 +668,12 @@ void Screen::checkSelection(int from, int to)
         clearSelection();
 }
 
-static inline bool isRegionalIndicator(wchar_t c)
+static inline bool isRegionalIndicator(char32_t c)
 {
     return (c >= 0x1F1E6 && c <= 0x1F1FF); // for creating flag codes
 }
 
-void Screen::displayCharacter(wchar_t c)
+void Screen::displayCharacter(char32_t c)
 {
     // Note that VT100 does wrapping BEFORE putting the character.
     // This has impact on the assumption of valid cursor positions.

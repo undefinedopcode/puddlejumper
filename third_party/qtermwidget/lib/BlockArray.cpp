@@ -27,8 +27,14 @@
 #include "BlockArray.h"
 
 // System
+#ifdef Q_OS_WIN
+// superterm: no mmap there. A block is read into memory instead of mapped.
+#include <cstdlib>
+#define getpagesize() 4096
+#else
 #include <sys/mman.h>
 #include <sys/param.h>
+#endif
 #include <unistd.h>
 #include <cstdio>
 
@@ -151,12 +157,21 @@ const Block * BlockArray::at(size_t i)
     Q_ASSERT(j < size);
     unmap();
 
+#ifdef Q_OS_WIN
+    Block * block = (Block *)malloc(blocksize);
+    if (!block || lseek(ion, j * blocksize, SEEK_SET) < 0 || read(ion, block, blocksize) < 0) {
+        perror("BlockArray::at");
+        free(block);
+        return nullptr;
+    }
+#else
     Block * block = (Block *)mmap(nullptr, blocksize, PROT_READ, MAP_PRIVATE, ion, j * blocksize);
 
     if (block == (Block *)-1) {
         perror("mmap");
         return nullptr;
     }
+#endif
 
     lastmap = block;
     lastmap_index = i;
@@ -167,10 +182,14 @@ const Block * BlockArray::at(size_t i)
 void BlockArray::unmap()
 {
     if (lastmap) {
+#ifdef Q_OS_WIN
+        free(lastmap);
+#else
         int res = munmap((char *)lastmap, blocksize);
         if (res < 0) {
             perror("munmap");
         }
+#endif
     }
     lastmap = nullptr;
     lastmap_index = size_t(-1);

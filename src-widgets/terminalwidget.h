@@ -197,8 +197,12 @@ signals:
     void splitRequested(Qt::Orientation orientation);
     void closePaneRequested();
 
+    /* The pane changed size (and so, soon, the terminal's columns and lines). */
+    void resized();
+
 protected:
     void paintEvent(QPaintEvent *event) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     /* QTermWidget's display widget, which it doesn't expose. */

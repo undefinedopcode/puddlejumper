@@ -173,7 +173,7 @@ QString Emulation::keyBindings() const
   return _keyTranslator->name();
 }
 
-void Emulation::receiveChar(wchar_t c)
+void Emulation::receiveChar(char32_t c)
 // process application unicode input to terminal
 // this is a trivial scanner
 {
@@ -230,7 +230,7 @@ void Emulation::receiveData(const char* text, int length)
      */
     QByteArray ba(text, length);
     QString str = _toUtf16(ba);
-    std::wstring unicodeText = str.toStdWString();
+    std::u32string unicodeText = str.toStdU32String();
 
     //send characters to terminal emulator
     for (size_t i=0;i<unicodeText.length();i++)

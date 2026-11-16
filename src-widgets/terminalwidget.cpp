@@ -27,7 +27,9 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
+#ifndef Q_OS_WIN
 #include <unistd.h>   // getpgid
+#endif
 
 #include <Emulation.h>
 #include <TerminalDisplay.h>
@@ -360,6 +362,12 @@ void TerminalWidget::setPaneFrame(PaneFrame frame)
     update();
 }
 
+void TerminalWidget::resizeEvent(QResizeEvent *event)
+{
+    QWidget::resizeEvent(event);
+    emit resized();
+}
+
 void TerminalWidget::paintEvent(QPaintEvent *)
 {
     if (m_frame == PaneFrame::None)
@@ -416,11 +424,17 @@ bool TerminalWidget::hasRunningProcess() const
     if (shellPid <= 0 || fgPgrp <= 0)
         return false;
 
+#ifdef Q_OS_WIN
+    // No process groups there: the "foreground" is the newest process under
+    // the shell, or the shell itself at its prompt.
+    return fgPgrp != shellPid;
+#else
     // getpgid() rather than a direct shellPid comparison, so a shell that is
     // not its own group leader is still recognised as "at the prompt".
     const int shellPgrp = ::getpgid(shellPid);
     const int reference = (shellPgrp > 0) ? shellPgrp : shellPid;
     return fgPgrp != reference;
+#endif
 }
 
 QString TerminalWidget::foregroundProgramName() const

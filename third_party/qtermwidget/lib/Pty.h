@@ -28,6 +28,11 @@
     02110-1301  USA.
 */
 
+#ifdef _WIN32
+// superterm: Windows has its own Pty, on the pseudoconsole API.
+#include "Pty_win.h"
+#else
+
 #ifndef PTY_H
 #define PTY_H
 
@@ -219,3 +224,5 @@ Q_OBJECT
 }
 
 #endif // PTY_H
+
+#endif // _WIN32

@@ -13,8 +13,8 @@
 // Standard
 #include <string>
 
-int konsole_wcwidth(wchar_t ucs);
+int konsole_wcwidth(char32_t ucs);
 
-int string_width( const std::wstring & wstr );
+int string_width( const std::u32string & wstr );
 
 #endif
