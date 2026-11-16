@@ -84,6 +84,8 @@ qt_add_executable(superterm
     src-widgets/workspace.h
     src-widgets/workspacefile.cpp
     src-widgets/workspacefile.h
+    src-widgets/wsl.cpp
+    src-widgets/wsl.h
 )
 
 target_link_libraries(superterm PRIVATE

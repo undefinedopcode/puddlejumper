@@ -20,6 +20,7 @@
 #include "vncclient.h"
 #include "vnctab.h"
 #include "vncview.h"
+#include "wsl.h"
 
 #include <QAction>
 #include <QActionGroup>
@@ -84,7 +85,16 @@ QStringList tmuxProgram()
 {
     const QString env = QString::fromLocal8Bit(qgetenv("SUPERTERM_TMUX")).trimmed();
     const QStringList cmd = env.isEmpty() ? QStringList() : QProcess::splitCommand(env);
-    return cmd.isEmpty() ? QStringList{QStringLiteral("tmux")} : cmd;
+    if (!cmd.isEmpty())
+        return cmd;
+#ifdef Q_OS_WIN
+    // Windows has no tmux of its own: the default WSL distribution's, if any
+    // (unless one is on the path after all, as MSYS2's can be).
+    if (QStandardPaths::findExecutable(QStringLiteral("tmux")).isEmpty()
+        && !wsl::distributions().isEmpty())
+        return {QStringLiteral("wsl.exe"), QStringLiteral("-e"), QStringLiteral("tmux")};
+#endif
+    return {QStringLiteral("tmux")};
 }
 
 /* Quote for a POSIX shell (the remote one, for ssh). */
@@ -1409,6 +1419,23 @@ void MainWindow::newTabWithProfile(const QString &profileId)
     term->focusTerminal();
 }
 
+void MainWindow::newWslTab(const QString &distribution)
+{
+    // The default profile's looks, the distribution's shell.
+    TerminalProfile profile = m_profiles.defaultProfile();
+    const QStringList command = wsl::shellCommand(distribution);
+    profile.shellProgram = command.first();
+    profile.shellArgs = command.mid(1);
+    profile.workingDirectory.reset();
+
+    auto *term = makePane(profile, QString());
+    auto *tab = new TerminalTab(term);
+    const int index = addTab(tab, tr("Terminal"),
+                             tr("%1 — %2").arg(tr("%1 (WSL)").arg(distribution), tr("Terminal")));
+    m_tabs->setCurrentIndex(index);
+    term->focusTerminal();
+}
+
 void MainWindow::closeTab(int index)
 {
     if (auto *page = pageAt(index); page && !tabAt(index)) {
@@ -1758,6 +1785,15 @@ void MainWindow::refreshProfiles()
                     act->setToolTip(tr("The default profile — what New Tab opens"));
                 connect(act, &QAction::triggered, this,
                         [this, id]() { newTabWithProfile(id); });
+            }
+        }
+        // And the WSL distributions (Windows): a shell in each.
+        if (const QStringList distributions = wsl::distributions(); !distributions.isEmpty()) {
+            m_newTabWithProfileMenu->setEnabled(true);
+            m_newTabWithProfileMenu->addSeparator();
+            for (const QString &name : distributions) {
+                QAction *act = m_newTabWithProfileMenu->addAction(tr("%1 (WSL)").arg(name));
+                connect(act, &QAction::triggered, this, [this, name]() { newWslTab(name); });
             }
         }
     }

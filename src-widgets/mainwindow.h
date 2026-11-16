@@ -64,6 +64,7 @@ private slots:
     void newTab();
     /* Open a tab using a specific profile id; falls back to the default. */
     void newTabWithProfile(const QString &profileId);
+    void newWslTab(const QString &distribution);
     void closeTab(int index);
     void applyAppearanceToAll();
     void updateStatus();
