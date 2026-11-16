@@ -763,6 +763,7 @@ private:
     int  _fontWidth;     // width
     int  _fontAscent;     // ascend
     bool _boldIntense;   // Whether intense colors should be rendered with bold font
+    qreal _boldLetterSpacing = 0; // superterm: letter spacing fitting the bold face to the cell
     int  _drawTextAdditionHeight;   // additional height to prevent font trancation
     bool _drawTextTestFlag;         // indicate it is a testing or not
 

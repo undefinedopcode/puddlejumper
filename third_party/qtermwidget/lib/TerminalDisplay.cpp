@@ -352,6 +352,18 @@ void TerminalDisplay::setVTFont(const QFont& f)
   if (monospaced && advance > 0)
     font.setLetterSpacing(QFont::AbsoluteSpacing, qMax(1, qRound(advance)) - advance);
 
+  // The bold face has an advance of its own, often wider (Ubuntu Sans Mono's
+  // is, on Windows): it gets its own spacing, to the same cell.
+  _boldLetterSpacing = font.letterSpacing();
+  if (monospaced && advance > 0 && !font.bold()) {
+    QFont bold(font);
+    bold.setBold(true);
+    bold.setLetterSpacing(QFont::AbsoluteSpacing, 0);
+    const qreal boldAdvance = QFontMetricsF(bold).horizontalAdvance(QLatin1Char(REPCHAR[0]));
+    if (boldAdvance > 0)
+      _boldLetterSpacing = qMax(1, qRound(advance)) - boldAdvance;
+  }
+
   QWidget::setFont(font);
   fontChange(font);
 }
@@ -998,6 +1010,8 @@ void TerminalDisplay::drawCharacters(QPainter& painter,
          || font.strikeOut() != useStrikeOut
          || font.overline() != useOverline) {
        font.setBold(useBold);
+       font.setLetterSpacing(QFont::AbsoluteSpacing,
+                             useBold ? _boldLetterSpacing : this->font().letterSpacing());
        font.setUnderline(useUnderline);
        font.setItalic(useItalic);
        font.setStrikeOut(useStrikeOut);
