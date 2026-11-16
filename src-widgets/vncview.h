@@ -14,7 +14,7 @@
 class QLabel;
 class QLineEdit;
 class QTimer;
-class VncClient;
+class RemoteClient;
 
 /*
  * A remote screen over VNC: draws the framebuffer scaled to fit (never
@@ -35,11 +35,12 @@ class VncView : public QWidget
     Q_OBJECT
 
 public:
-    explicit VncView(QWidget *parent = nullptr);
+    /* `client`: the connection to show (taken over); a VNC one if none. */
+    explicit VncView(QWidget *parent = nullptr, RemoteClient *client = nullptr);
 
     void connectToHost(const QString &host, quint16 port);
     void reconnect();
-    VncClient *client() const { return m_client; }
+    RemoteClient *client() const { return m_client; }
     /* host:port, as connected to. */
     QString address() const { return m_address; }
     /* 16-bit colour, for slow links (see VncClient); reconnects if connected. */
@@ -107,7 +108,7 @@ private:
     /* Into the prompt: its name field, unless the name is known. */
     void focusLoginPrompt();
 
-    VncClient *m_client = nullptr;
+    RemoteClient *m_client = nullptr;
     QString m_host;
     quint16 m_port = 0;
     QString m_address;            // host:port

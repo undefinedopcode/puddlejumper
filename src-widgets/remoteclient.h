@@ -1,0 +1,61 @@
+/*
+ * superterm — Qt Widgets port.
+ *
+ * Distributed under the terms of the GNU General Public License v2 or later.
+ */
+
+#pragma once
+
+#include <QImage>
+#include <QObject>
+#include <QPoint>
+
+/*
+ * A connection to a remote screen, with no widgets: what the view (VncView)
+ * needs of one, whatever the protocol. VncClient speaks VNC; RdpClient, RDP.
+ */
+class RemoteClient : public QObject
+{
+    Q_OBJECT
+
+public:
+    using QObject::QObject;
+
+    virtual void connectToHost(const QString &host, quint16 port) = 0;
+    virtual void disconnectFromHost() = 0;
+
+    virtual bool isConnected() const = 0;
+    /* The remote screen, as last updated. Null until connected. */
+    virtual const QImage &framebuffer() const = 0;
+    virtual QString desktopName() const = 0;
+
+    /* 16-bit colour, for slow links; from the next connection. */
+    virtual void setReducedColour(bool) {}
+    virtual bool reducedColour() const { return false; }
+
+    /* What to log in with; answers credentialsRequested(). */
+    virtual void setCredentials(const QString &username, const QString &password) = 0;
+    /* The last connection ended because the login was turned down. */
+    virtual bool authenticationFailed() const = 0;
+
+    /* `buttons`: 1 left, 2 middle, 4 right, 8/16 wheel up/down, 32/64 left/right. */
+    virtual void sendPointer(const QPoint &pos, int buttons) = 0;
+    /* A key going down or up: an X keysym and an XT scan code (0xE0xx extended). */
+    virtual void sendKey(bool down, quint32 keysym, quint32 scanCode) = 0;
+    virtual void sendClipboard(const QString &text) = 0;
+
+signals:
+    /* The server wants a login and no password is set: call setCredentials().
+     * `needsUsername` when it takes an account name too. */
+    void credentialsRequested(bool needsUsername);
+    void connected();
+    /* The framebuffer has a new size (and is blank until updated). */
+    void resized(const QSize &size);
+    void updated(const QRect &rect);
+    /* A null image hides the cursor. */
+    void cursorChanged(const QImage &image, const QPoint &hotspot);
+    void bell();
+    void clipboardReceived(const QString &text);
+    /* `reason` is empty when the server just closed the connection. */
+    void disconnected(const QString &reason);
+};

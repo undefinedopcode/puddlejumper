@@ -24,6 +24,12 @@ add_subdirectory(third_party/qtermwidget EXCLUDE_FROM_ALL)
 find_package(yaml-cpp 0.7 REQUIRED)
 find_package(ZLIB REQUIRED)   # VNC's compressed updates
 
+# RDP tabs, where FreeRDP 3 is to be had (a spike, so far).
+find_package(PkgConfig)
+if(PkgConfig_FOUND)
+    pkg_check_modules(FREERDP IMPORTED_TARGET freerdp3 winpr3)
+endif()
+
 # The UI's icons: Lucide (ISC, see icons/lucide/LICENSE), compiled in and
 # drawn in the palette's text colour by src-widgets/appicon.cpp.
 file(GLOB LUCIDE_ICONS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" icons/lucide/*.svg)
@@ -74,6 +80,7 @@ qt_add_executable(superterm
     src-widgets/tmuxworkspace.h
     src-widgets/vncclient.cpp
     src-widgets/vncclient.h
+    src-widgets/remoteclient.h
     src-widgets/vnccrypto.cpp
     src-widgets/vnccrypto.h
     src-widgets/vncview.cpp
@@ -171,6 +178,7 @@ qt_add_executable(probe-vnc
     src-widgets/vnccrypto.cpp src-widgets/vnccrypto.h
     src-widgets/vncclient.cpp src-widgets/vncclient.h
     src-widgets/vncview.cpp src-widgets/vncview.h
+    src-widgets/remoteclient.h
 )
 target_link_libraries(probe-vnc PRIVATE
     Qt6::Core
@@ -180,6 +188,14 @@ target_link_libraries(probe-vnc PRIVATE
     ZLIB::ZLIB
 )
 set_target_properties(probe-vnc PROPERTIES AUTOMOC ON)
+
+foreach(target superterm probe-vnc)
+    if(FREERDP_FOUND)
+        target_sources(${target} PRIVATE src-widgets/rdpclient.cpp src-widgets/rdpclient.h)
+        target_compile_definitions(${target} PRIVATE SUPERTERM_RDP)
+        target_link_libraries(${target} PRIVATE PkgConfig::FREERDP)
+    endif()
+endforeach()
 
 # ---------------------------------------------------------------------------
 # probe-settingsdialog — offscreen diagnostics for the Settings dialog. Dev

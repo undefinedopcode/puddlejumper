@@ -54,6 +54,8 @@ public:
     void openWorkspaceTarget(const QString &target);
     /* A tab showing the screen at `address` (host[:port|:display]) over VNC. */
     void openVnc(const QString &address);
+    /* The same over RDP: host or host:port. */
+    void openRdp(const QString &address);
 
 protected:
     void closeEvent(QCloseEvent *event) override;

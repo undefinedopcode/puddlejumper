@@ -18,6 +18,9 @@
 #include "tmuxsession.h"
 #include "tmuxworkspace.h"
 #include "vncclient.h"
+#ifdef SUPERTERM_RDP
+#include "rdpclient.h"
+#endif
 #include "vnctab.h"
 #include "vncview.h"
 #include "wsl.h"
@@ -958,6 +961,29 @@ void MainWindow::openVnc(const QString &address)
     m_tabs->setCurrentIndex(index);
     syncTabText(tab);
     tab->focusContent();
+}
+
+void MainWindow::openRdp(const QString &address)
+{
+#ifdef SUPERTERM_RDP
+    // host or host:port (not VNC's display numbers). SPIKE: no menu entry,
+    // and the tab is saved and restored as a VNC one.
+    const int colon = address.lastIndexOf(QLatin1Char(':'));
+    const QString host = colon > 0 ? address.left(colon) : address;
+    const int port = colon > 0 ? address.mid(colon + 1).toInt() : 3389;
+    if (host.isEmpty() || port <= 0 || port > 65535) {
+        QMessageBox::warning(this, tr("New RDP Tab"), tr("“%1” isn't an address.").arg(address));
+        return;
+    }
+    auto *tab = new VncTab(host, quint16(port), false, nullptr, new RdpClient);
+    const int index = addTab(tab, tab->title(), QString());
+    m_tabs->setCurrentIndex(index);
+    syncTabText(tab);
+    tab->focusContent();
+#else
+    QMessageBox::warning(this, tr("New RDP Tab"),
+                         tr("This build has no RDP support (%1).").arg(address));
+#endif
 }
 
 void MainWindow::wireVncTab(VncTab *tab)
@@ -2260,6 +2286,9 @@ void MainWindow::saveSession()
             if (t == currentTab)
                 savedCurrent = savedTabs.size();
             if (auto *vnc = qobject_cast<VncTab *>(page)) {
+                // SPIKE: an RDP tab isn't saved (it would come back as VNC).
+                if (!qobject_cast<VncClient *>(vnc->view()->client()))
+                    continue;
                 QJsonObject saved{
                     {QStringLiteral("title"), vnc->customTitle()},
                     {QStringLiteral("vnc"), vnc->address()},

@@ -106,6 +106,11 @@ int main(int argc, char *argv[])
         QStringLiteral("Open a VNC tab on this address (host, host:port or host:display)."),
         QStringLiteral("address"));
     parser.addOption(vncOpt);
+    QCommandLineOption rdpOpt(
+        QStringLiteral("rdp"),
+        QStringLiteral("Open an RDP tab on this address (host or host:port)."),
+        QStringLiteral("address"));
+    parser.addOption(rdpOpt);
     parser.addPositionalArgument(
         QStringLiteral("workspace"),
         QStringLiteral("A workspace to open: a folder (its .superterm.yml or .smug.yml, "
@@ -128,6 +133,8 @@ int main(int argc, char *argv[])
     window.show();
     if (parser.isSet(vncOpt))
         window.openVnc(parser.value(vncOpt));
+    if (parser.isSet(rdpOpt))
+        window.openRdp(parser.value(rdpOpt));
     if (const QStringList args = parser.positionalArguments(); !args.isEmpty()) {
         // Once the window is up, so dialogs (variables, trust) have a parent.
         const QString target = args.first();

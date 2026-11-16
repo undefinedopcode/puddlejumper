@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "remoteclient.h"
+
 #include <QByteArray>
 #include <QImage>
 #include <QElapsedTimer>
@@ -32,7 +34,7 @@ class QTcpSocket;
  * keys as scan codes where the server can (QEMU's extended key events), so
  * the remote keyboard layout decides what a key types, not ours.
  */
-class VncClient : public QObject
+class VncClient : public RemoteClient
 {
     Q_OBJECT
 
@@ -40,13 +42,13 @@ public:
     explicit VncClient(QObject *parent = nullptr);
     ~VncClient() override;
 
-    void connectToHost(const QString &host, quint16 port);
-    void disconnectFromHost();
+    void connectToHost(const QString &host, quint16 port) override;
+    void disconnectFromHost() override;
 
-    bool isConnected() const { return m_state == State::Normal || m_state == State::Rects; }
+    bool isConnected() const override { return m_state == State::Normal || m_state == State::Rects; }
     /* The remote screen, as last updated. Null until connected. */
-    const QImage &framebuffer() const { return m_image; }
-    QString desktopName() const { return m_name; }
+    const QImage &framebuffer() const override { return m_image; }
+    QString desktopName() const override { return m_name; }
     /* Whether sendKey()'s scan code reaches the server (else only the keysym). */
     bool hasScanCodes() const { return m_scanCodes; }
 
@@ -55,8 +57,8 @@ public:
      * for slow links, at the cost of banding in gradients and photos. Takes
      * effect from the next connection's setup.
      */
-    void setReducedColour(bool on) { m_reducedColour = on; }
-    bool reducedColour() const { return m_reducedColour; }
+    void setReducedColour(bool on) override { m_reducedColour = on; }
+    bool reducedColour() const override { return m_reducedColour; }
 
     /*
      * What to log in with, for servers that ask: a VNC password (only its
@@ -65,34 +67,19 @@ public:
      * was set; answering then carries on with the connection. The password
      * is forgotten once the server turns it down.
      */
-    void setCredentials(const QString &username, const QString &password);
+    void setCredentials(const QString &username, const QString &password) override;
     /* The last connection ended because the login was turned down. */
-    bool authenticationFailed() const { return m_authFailed; }
+    bool authenticationFailed() const override { return m_authFailed; }
 
     /* `buttons`: 1 left, 2 middle, 4 right, 8/16 wheel up/down, 32/64 left/right. */
-    void sendPointer(const QPoint &pos, int buttons);
+    void sendPointer(const QPoint &pos, int buttons) override;
     /*
      * A key going down or up, as an X keysym and an XT scan code (0xE0xx for
      * the extended ones). Either may be 0 when unknown; with scan codes the
      * server goes by the code, otherwise by the keysym.
      */
-    void sendKey(bool down, quint32 keysym, quint32 scanCode);
-    void sendClipboard(const QString &text);
-
-signals:
-    /* The server wants a login and no password is set: call setCredentials().
-     * `needsUsername` for Apple's login, which takes an account name too. */
-    void credentialsRequested(bool needsUsername);
-    void connected();
-    /* The framebuffer has a new size (and is blank until updated). */
-    void resized(const QSize &size);
-    void updated(const QRect &rect);
-    /* A null image hides the cursor. */
-    void cursorChanged(const QImage &image, const QPoint &hotspot);
-    void bell();
-    void clipboardReceived(const QString &text);
-    /* `reason` is empty when the server just closed the connection. */
-    void disconnected(const QString &reason);
+    void sendKey(bool down, quint32 keysym, quint32 scanCode) override;
+    void sendClipboard(const QString &text) override;
 
 private:
     enum class State {

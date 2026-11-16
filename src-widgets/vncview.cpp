@@ -240,9 +240,10 @@ constexpr int kNudgeDelays[] = {80, 150, 250, 400, 620};
 
 } // namespace
 
-VncView::VncView(QWidget *parent)
-    : QWidget(parent), m_client(new VncClient(this))
+VncView::VncView(QWidget *parent, RemoteClient *client)
+    : QWidget(parent), m_client(client ? client : new VncClient(this))
 {
+    m_client->setParent(this);
     setFocusPolicy(Qt::StrongFocus);
     setMouseTracking(true);
     setAttribute(Qt::WA_OpaquePaintEvent);
@@ -293,39 +294,39 @@ VncView::VncView(QWidget *parent)
     prompt->hide();
     m_loginPrompt = prompt;
 
-    connect(m_client, &VncClient::credentialsRequested, this, [this](bool needsUsername) {
+    connect(m_client, &RemoteClient::credentialsRequested, this, [this](bool needsUsername) {
         if (!m_password.isNull())
             m_client->setCredentials(m_username, m_password);   // reconnecting
         else
             showLoginPrompt(needsUsername, m_loginError);
     });
-    connect(m_client, &VncClient::connected, this, [this]() {
+    connect(m_client, &RemoteClient::connected, this, [this]() {
         m_loginError.clear();
         m_connecting = false;
         setStatus(QString());
         emit titleChanged(title());
     });
-    connect(m_client, &VncClient::resized, this, [this]() {
+    connect(m_client, &RemoteClient::resized, this, [this]() {
         updateCursor();
         update();
     });
-    connect(m_client, &VncClient::updated, this, [this](const QRect &rect) {
+    connect(m_client, &RemoteClient::updated, this, [this](const QRect &rect) {
         const QRectF box = imageRect();
         const qreal scale = box.width() / m_client->framebuffer().width();
         update(QRectF(box.topLeft() + rect.topLeft() * scale, rect.size() * scale)
                    .toAlignedRect().adjusted(-1, -1, 1, 1));
     });
-    connect(m_client, &VncClient::cursorChanged, this, [this](const QImage &image, const QPoint &hotspot) {
+    connect(m_client, &RemoteClient::cursorChanged, this, [this](const QImage &image, const QPoint &hotspot) {
         m_cursor = image;
         m_cursorHotspot = hotspot;
         updateCursor();
     });
-    connect(m_client, &VncClient::bell, this, []() { QApplication::beep(); });
-    connect(m_client, &VncClient::clipboardReceived, this, [this](const QString &text) {
+    connect(m_client, &RemoteClient::bell, this, []() { QApplication::beep(); });
+    connect(m_client, &RemoteClient::clipboardReceived, this, [this](const QString &text) {
         m_sentClipboard = text;
         QGuiApplication::clipboard()->setText(text);
     });
-    connect(m_client, &VncClient::disconnected, this, [this](const QString &reason) {
+    connect(m_client, &RemoteClient::disconnected, this, [this](const QString &reason) {
         m_connecting = false;
         m_held.clear();
         m_buttons = 0;

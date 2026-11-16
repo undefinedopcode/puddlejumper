@@ -8,6 +8,7 @@
 
 #include "tab.h"
 
+class RemoteClient;
 class VncView;
 
 /*
@@ -19,8 +20,9 @@ class VncTab : public Tab
     Q_OBJECT
 
 public:
+    /* `client`: the connection to show (see VncView); a VNC one if none. */
     explicit VncTab(const QString &host, quint16 port, bool reducedColour = false,
-                    QWidget *parent = nullptr);
+                    QWidget *parent = nullptr, RemoteClient *client = nullptr);
 
     VncView *view() const { return m_view; }
     /* host:port, as connected to (and saved). */

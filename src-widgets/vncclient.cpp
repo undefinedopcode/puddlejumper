@@ -137,7 +137,7 @@ struct VncClient::Inflater
 };
 
 VncClient::VncClient(QObject *parent)
-    : QObject(parent), m_socket(new QTcpSocket(this))
+    : RemoteClient(parent), m_socket(new QTcpSocket(this))
 {
     connect(m_socket, &QTcpSocket::connected, this, [this]() {
         m_socket->setSocketOption(QAbstractSocket::LowDelayOption, 1);

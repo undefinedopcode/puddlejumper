@@ -16,11 +16,15 @@
 
 #include "../vncclient.h"
 #include "../vncview.h"
+#ifdef SUPERTERM_RDP
+#include "../rdpclient.h"
+#endif
 
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QEventLoop>
 #include <QKeyEvent>
+#include <QMouseEvent>
 #include <QKeySequence>
 #include <QLabel>
 #include <QLineEdit>
@@ -50,6 +54,20 @@ void press(QWidget *w, const QString &spec)
 {
     if (spec.startsWith(QLatin1String("wait:"))) {
         wait(spec.mid(5).toInt() * 1000);
+        return;
+    }
+    if (spec.startsWith(QLatin1String("click:"))) {
+        // click:x,y in the view's own coordinates
+        const QStringList xy = spec.mid(6).split(QLatin1Char(','));
+        const QPointF pos(xy.value(0).toInt(), xy.value(1).toInt());
+        for (QEvent::Type type : {QEvent::MouseMove, QEvent::MouseButtonPress, QEvent::MouseButtonRelease}) {
+            const Qt::MouseButton button = type == QEvent::MouseMove ? Qt::NoButton : Qt::LeftButton;
+            QMouseEvent event(type, pos, w->mapToGlobal(pos), button,
+                              type == QEvent::MouseButtonPress ? Qt::LeftButton : Qt::NoButton,
+                              Qt::NoModifier);
+            QCoreApplication::sendEvent(w, &event);
+            wait(60);
+        }
         return;
     }
     if (spec.startsWith(QLatin1String("text:"))) {
@@ -95,14 +113,22 @@ int main(int argc, char *argv[])
     }
     const QString prefix = args.at(2);
 
-    VncView view;
+    // PROBE_RDP: the address is an RDP server's (as given: no display numbers).
+    RemoteClient *client = nullptr;
+#ifdef SUPERTERM_RDP
+    if (qEnvironmentVariableIsSet("PROBE_RDP")) {
+        client = new RdpClient;
+        port = quint16(args.at(1).section(QLatin1Char(':'), -1).toInt());
+    }
+#endif
+    VncView view(nullptr, client);
     view.resize(1280, 800);
     view.show();
     int updates = 0;
     QElapsedTimer lastUpdate;
     qint64 area = 0;
     QHash<QString, int> shapes;
-    QObject::connect(view.client(), &VncClient::updated, [&](const QRect &r) {
+    QObject::connect(view.client(), &RemoteClient::updated, [&](const QRect &r) {
         ++updates;
         area += qint64(r.width()) * r.height();
         ++shapes[QStringLiteral("%1x%2@%3,%4").arg(r.width()).arg(r.height()).arg(r.x()).arg(r.y())];
@@ -112,7 +138,7 @@ int main(int argc, char *argv[])
                                                                              Qt::SkipEmptyParts);
     QString failure;
     bool closed = false;
-    QObject::connect(view.client(), &VncClient::disconnected, [&](const QString &reason) {
+    QObject::connect(view.client(), &RemoteClient::disconnected, [&](const QString &reason) {
         std::printf("disconnected: %s\n", qPrintable(reason));
         // A wrong password is asked for again, not the end.
         if (view.client()->authenticationFailed())
@@ -120,7 +146,7 @@ int main(int argc, char *argv[])
         failure = reason;
         closed = true;
     });
-    QObject::connect(view.client(), &VncClient::credentialsRequested, &view, [&]() {
+    QObject::connect(view.client(), &RemoteClient::credentialsRequested, &view, [&]() {
         // The view shows its prompt first; answer it as a user would.
         QTimer::singleShot(100, &view, [&]() {
             auto *label = view.findChild<QLabel *>();
@@ -158,7 +184,9 @@ int main(int argc, char *argv[])
     const QImage &fb = view.client()->framebuffer();
     std::printf("connected: name=\"%s\" size=%dx%d scanCodes=%d updates=%d in %lld ms\n",
                 qPrintable(view.client()->desktopName()), fb.width(), fb.height(),
-                view.client()->hasScanCodes(), updates, total.elapsed());
+                qobject_cast<VncClient *>(view.client())
+                    && static_cast<VncClient *>(view.client())->hasScanCodes(),
+                updates, total.elapsed());
     int lit = 0;
     for (int y = 0; y < fb.height(); y += 4)
         for (int x = 0; x < fb.width(); x += 4)

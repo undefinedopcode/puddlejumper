@@ -12,18 +12,19 @@
 #include <QPainter>
 #include <QVBoxLayout>
 
-VncTab::VncTab(const QString &host, quint16 port, bool reducedColour, QWidget *parent)
-    : Tab(parent), m_view(new VncView(this))
+VncTab::VncTab(const QString &host, quint16 port, bool reducedColour, QWidget *parent,
+               RemoteClient *client)
+    : Tab(parent), m_view(new VncView(this, client))
 {
     auto *layout = new QVBoxLayout(this);
     layout->setContentsMargins(0, 0, 0, 0);
     layout->addWidget(m_view);
     setFocusProxy(m_view);
 
-    VncClient *client = m_view->client();
+    client = m_view->client();
     connect(m_view, &VncView::titleChanged, this, &VncTab::changed);
-    connect(client, &VncClient::resized, this, &VncTab::changed);
-    connect(client, &VncClient::updated, this, [this]() {
+    connect(client, &RemoteClient::resized, this, &VncTab::changed);
+    connect(client, &RemoteClient::updated, this, [this]() {
         m_newOutput = true;
         emit screenUpdated();
     });
