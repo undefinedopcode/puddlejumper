@@ -27,6 +27,8 @@
 #include <QMouseEvent>
 #include <QKeySequence>
 #include <QAbstractButton>
+#include <QClipboard>
+#include <QFocusEvent>
 #include <QMessageBox>
 #include <QLabel>
 #include <QLineEdit>
@@ -56,6 +58,22 @@ void press(QWidget *w, const QString &spec)
 {
     if (spec.startsWith(QLatin1String("wait:"))) {
         wait(spec.mid(5).toInt() * 1000);
+        return;
+    }
+    if (spec.startsWith(QLatin1String("resize:"))) {
+        // resize:WxH, the view itself (an RDP desktop follows)
+        const QStringList wh = spec.mid(7).split(QLatin1Char('x'));
+        w->resize(wh.value(0).toInt(), wh.value(1).toInt());
+        wait(3000);
+        return;
+    }
+    if (spec.startsWith(QLatin1String("clip:"))) {
+        // clip:text becomes the clipboard here, handed over as on focus
+        QGuiApplication::clipboard()->setText(spec.mid(5));
+        QFocusEvent out(QEvent::FocusOut), in(QEvent::FocusIn);
+        QCoreApplication::sendEvent(w, &out);
+        QCoreApplication::sendEvent(w, &in);
+        wait(500);
         return;
     }
     if (spec.startsWith(QLatin1String("click:"))) {
@@ -144,6 +162,12 @@ int main(int argc, char *argv[])
         std::printf("cursor: %dx%d hotspot %d,%d\n", image.width(), image.height(), hot.x(), hot.y());
         if (!image.isNull())
             image.save(prefix + QStringLiteral("-cursor.png"));
+    });
+    QObject::connect(view.client(), &RemoteClient::resized, [&](const QSize &size) {
+        std::printf("resized: %dx%d\n", size.width(), size.height());
+    });
+    QObject::connect(view.client(), &RemoteClient::clipboardReceived, [&](const QString &text) {
+        std::printf("clipboard: \"%s\"\n", qPrintable(text));
     });
     QObject::connect(view.client(), &RemoteClient::disconnected, [&](const QString &reason) {
         std::printf("disconnected: %s\n", qPrintable(reason));

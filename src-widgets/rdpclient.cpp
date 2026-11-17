@@ -15,6 +15,13 @@
 #include <QWaitCondition>
 
 #include <freerdp/freerdp.h>
+#include <freerdp/channels/cliprdr.h>
+#include <freerdp/channels/disp.h>
+#include <freerdp/addin.h>
+#include <freerdp/client.h>
+#include <freerdp/client/channels.h>
+#include <freerdp/client/cliprdr.h>
+#include <freerdp/client/disp.h>
 #include <freerdp/codec/color.h>
 #include <freerdp/gdi/gdi.h>
 #include <freerdp/graphics.h>
@@ -36,6 +43,8 @@ public:
     QString host;
     quint16 port = 3389;
     QString username, domain, password;
+    QSize desktopSize;        // to start with
+    int desktopScale = 100;   // percent
 
     void stop()
     {
@@ -64,6 +73,23 @@ public:
         if (m_instance && m_up)
             freerdp_input_send_keyboard_event(m_instance->context->input, flags, code);
     }
+    /* Our clipboard's text: told of now, fetched by the server when pasted. */
+    void setClipboard(const QString &text)
+    {
+        QMutexLocker lock(&m_mutex);
+        m_clipboard = text;
+        if (m_cliprdr && m_clipboardReady)
+            announceClipboard();
+    }
+    /* The desktop's size, as soon as the server takes such requests. */
+    void resizeDesktop(const QSize &size, int scale)
+    {
+        QMutexLocker lock(&m_mutex);
+        desktopSize = size;
+        desktopScale = scale;
+        if (m_disp && m_dispReady)
+            sendLayout();
+    }
 
 signals:
     void up();
@@ -72,6 +98,8 @@ signals:
     void painted(const QImage &part, const QPoint &at);
     /* The pointer's shape; null for the usual one, empty (transparent) for none. */
     void cursor(const QImage &image, const QPoint &hotspot);
+    /* Text copied on the remote desktop. */
+    void clipboard(const QString &text);
     /* The server's certificate is to be judged: answerCertificate(). */
     void certificate(const QString &name, const QString &fingerprint);
     void down(const QString &reason, bool loginRefused);
@@ -81,7 +109,7 @@ protected:
 
 private:
     struct Context {
-        rdpContext context;   // first: FreeRDP's own
+        rdpClientContext context;   // first: FreeRDP's own (its channels' too)
         RdpWorker *worker;
     };
     static RdpWorker *of(rdpContext *context) { return reinterpret_cast<Context *>(context)->worker; }
@@ -98,6 +126,12 @@ private:
     static BOOL beginPaint(rdpContext *context);
     static BOOL endPaint(rdpContext *context);
     static BOOL desktopResize(rdpContext *context);
+    static void channelConnected(void *context, const ChannelConnectedEventArgs *e);
+    static void channelDisconnected(void *context, const ChannelDisconnectedEventArgs *e);
+
+    // With the lock held.
+    UINT announceClipboard();
+    void sendLayout();
 
     QMutex m_mutex;
     freerdp *m_instance = nullptr;
@@ -106,7 +140,167 @@ private:
     QWaitCondition m_certificateAnswered;
     int m_certificateAnswer = -1;
     bool m_certificateRefused = false;
+    CliprdrClientContext *m_cliprdr = nullptr;
+    bool m_clipboardReady = false;
+    QString m_clipboard;
+    DispClientContext *m_disp = nullptr;
+    bool m_dispReady = false;
+    QSize m_sentSize;
+    int m_sentScale = 0;
 };
+
+namespace {
+
+const UINT32 kUnicodeText = 13;   // CF_UNICODETEXT
+
+/* What RDP takes for a desktop: 200 to 8192 a side, the width even. */
+QSize validDesktopSize(const QSize &size)
+{
+    return QSize(qBound(200, size.width(), 8192) & ~1, qBound(200, size.height(), 8192));
+}
+
+}   // namespace
+
+UINT RdpWorker::announceClipboard()
+{
+    CLIPRDR_FORMAT text = {kUnicodeText, nullptr};
+    CLIPRDR_FORMAT_LIST list = {};
+    list.common.msgType = CB_FORMAT_LIST;
+    list.numFormats = m_clipboard.isEmpty() ? 0 : 1;
+    list.formats = &text;
+    return m_cliprdr->ClientFormatList(m_cliprdr, &list);
+}
+
+void RdpWorker::sendLayout()
+{
+    const QSize size = validDesktopSize(desktopSize);
+    if (!desktopSize.isValid() || (size == m_sentSize && desktopScale == m_sentScale))
+        return;
+    m_sentSize = size;
+    m_sentScale = desktopScale;
+    DISPLAY_CONTROL_MONITOR_LAYOUT monitor = {};
+    monitor.Flags = DISPLAY_CONTROL_MONITOR_PRIMARY;
+    monitor.Width = UINT32(size.width());
+    monitor.Height = UINT32(size.height());
+    monitor.PhysicalWidth = monitor.Width;
+    monitor.PhysicalHeight = monitor.Height;
+    monitor.Orientation = ORIENTATION_LANDSCAPE;
+    monitor.DesktopScaleFactor = UINT32(qBound(100, desktopScale, 500));
+    monitor.DeviceScaleFactor = 100;
+    (void)m_disp->SendMonitorLayout(m_disp, 1, &monitor);
+}
+
+void RdpWorker::channelConnected(void *context, const ChannelConnectedEventArgs *e)
+{
+    RdpWorker *worker = of(static_cast<rdpContext *>(context));
+    if (strcmp(e->name, CLIPRDR_SVC_CHANNEL_NAME) == 0) {
+        auto *clip = static_cast<CliprdrClientContext *>(e->pInterface);
+        clip->custom = worker;
+        // Ready: say what we take (long format names, as everything does
+        // now), and whether there is text here to paste.
+        clip->MonitorReady = [](CliprdrClientContext *c, const CLIPRDR_MONITOR_READY *) -> UINT {
+            CLIPRDR_GENERAL_CAPABILITY_SET general = {CB_CAPSTYPE_GENERAL, 12, CB_CAPS_VERSION_2,
+                                                      CB_USE_LONG_FORMAT_NAMES};
+            CLIPRDR_CAPABILITIES capabilities = {};
+            capabilities.cCapabilitiesSets = 1;
+            capabilities.capabilitySets = reinterpret_cast<CLIPRDR_CAPABILITY_SET *>(&general);
+            if (const UINT rc = c->ClientCapabilities(c, &capabilities))
+                return rc;
+            auto *worker = static_cast<RdpWorker *>(c->custom);
+            QMutexLocker lock(&worker->m_mutex);
+            worker->m_clipboardReady = true;
+            return worker->announceClipboard();
+        };
+        clip->ServerCapabilities = [](CliprdrClientContext *, const CLIPRDR_CAPABILITIES *) -> UINT {
+            return CHANNEL_RC_OK;
+        };
+        clip->ServerFormatListResponse = [](CliprdrClientContext *,
+                                            const CLIPRDR_FORMAT_LIST_RESPONSE *) -> UINT {
+            return CHANNEL_RC_OK;
+        };
+        // Something was copied over there: if it has text, fetch it now, to
+        // be the clipboard's here.
+        clip->ServerFormatList = [](CliprdrClientContext *c, const CLIPRDR_FORMAT_LIST *list) -> UINT {
+            CLIPRDR_FORMAT_LIST_RESPONSE response = {};
+            response.common.msgType = CB_FORMAT_LIST_RESPONSE;
+            response.common.msgFlags = CB_RESPONSE_OK;
+            if (const UINT rc = c->ClientFormatListResponse(c, &response))
+                return rc;
+            for (UINT32 i = 0; i < list->numFormats; ++i) {
+                if (list->formats[i].formatId != kUnicodeText)
+                    continue;
+                CLIPRDR_FORMAT_DATA_REQUEST request = {};
+                request.requestedFormatId = kUnicodeText;
+                return c->ClientFormatDataRequest(c, &request);
+            }
+            return CHANNEL_RC_OK;
+        };
+        clip->ServerFormatDataResponse = [](CliprdrClientContext *c,
+                                            const CLIPRDR_FORMAT_DATA_RESPONSE *response) -> UINT {
+            if (!(response->common.msgFlags & CB_RESPONSE_OK) || !response->requestedFormatData)
+                return CHANNEL_RC_OK;
+            // UTF-16, ended by a NUL, lines by CR LF.
+            QString text = QString::fromUtf16(
+                reinterpret_cast<const char16_t *>(response->requestedFormatData),
+                qsizetype(response->common.dataLen / 2));
+            if (const qsizetype end = text.indexOf(QChar(0)); end >= 0)
+                text.truncate(end);
+            text.replace(QLatin1String("\r\n"), QLatin1String("\n"));
+            emit static_cast<RdpWorker *>(c->custom)->clipboard(text);
+            return CHANNEL_RC_OK;
+        };
+        // Pasted over there: our text is wanted.
+        clip->ServerFormatDataRequest = [](CliprdrClientContext *c,
+                                           const CLIPRDR_FORMAT_DATA_REQUEST *request) -> UINT {
+            auto *worker = static_cast<RdpWorker *>(c->custom);
+            QString text;
+            {
+                QMutexLocker lock(&worker->m_mutex);
+                text = worker->m_clipboard;
+            }
+            CLIPRDR_FORMAT_DATA_RESPONSE response = {};
+            if (request->requestedFormatId != kUnicodeText) {
+                response.common.msgFlags = CB_RESPONSE_FAIL;
+                return c->ClientFormatDataResponse(c, &response);
+            }
+            text.replace(QLatin1String("\r\n"), QLatin1String("\n"));
+            text.replace(QLatin1Char('\n'), QLatin1String("\r\n"));
+            response.common.msgFlags = CB_RESPONSE_OK;
+            response.common.dataLen = UINT32((text.size() + 1) * 2);   // with its NUL
+            response.requestedFormatData = reinterpret_cast<const BYTE *>(text.utf16());
+            return c->ClientFormatDataResponse(c, &response);
+        };
+        QMutexLocker lock(&worker->m_mutex);
+        worker->m_cliprdr = clip;
+    } else if (strcmp(e->name, DISP_DVC_CHANNEL_NAME) == 0) {
+        auto *disp = static_cast<DispClientContext *>(e->pInterface);
+        disp->custom = worker;
+        // The server takes sizes from here on: the one wanted by now, if it
+        // isn't the one connected with.
+        disp->DisplayControlCaps = [](DispClientContext *d, UINT32, UINT32, UINT32) -> UINT {
+            auto *worker = static_cast<RdpWorker *>(d->custom);
+            QMutexLocker lock(&worker->m_mutex);
+            worker->m_dispReady = true;
+            worker->sendLayout();
+            return CHANNEL_RC_OK;
+        };
+        QMutexLocker lock(&worker->m_mutex);
+        worker->m_disp = disp;
+    }
+}
+
+void RdpWorker::channelDisconnected(void *context, const ChannelDisconnectedEventArgs *e)
+{
+    RdpWorker *worker = of(static_cast<rdpContext *>(context));
+    QMutexLocker lock(&worker->m_mutex);
+    if (strcmp(e->name, CLIPRDR_SVC_CHANNEL_NAME) == 0) {
+        worker->m_cliprdr = nullptr;
+        worker->m_clipboardReady = false;
+    } else if (strcmp(e->name, DISP_DVC_CHANNEL_NAME) == 0) {
+        worker->m_disp = nullptr;
+        worker->m_dispReady = false;
+    }
+}
 
 DWORD RdpWorker::judgeCertificate(const char *name, const char *fingerprint, DWORD flags)
 {
@@ -222,11 +416,13 @@ BOOL RdpWorker::desktopResize(rdpContext *context)
 
 void RdpWorker::run()
 {
-    // FreeRDP says a great deal on stderr; SUPERTERM_RDP_LOG (a level: debug,
-    // info, warn...) lets it.
+    // Once: FreeRDP says a great deal on stderr; SUPERTERM_RDP_LOG (a level:
+    // debug, info, warn...) lets it.
     static const bool quiet = []() {
         const QByteArray level = qgetenv("SUPERTERM_RDP_LOG");
         WLog_SetStringLogLevel(WLog_GetRoot(), level.isEmpty() ? "OFF" : level.constData());
+        // Where the channels are found: built into the client library.
+        freerdp_register_addin_provider(freerdp_channels_load_static_addin_entry, 0);
         return true;
     }();
     Q_UNUSED(quiet);
@@ -234,6 +430,8 @@ void RdpWorker::run()
     instance->ContextSize = sizeof(Context);
     instance->PostConnect = postConnect;
     instance->PostDisconnect = postDisconnect;
+    // The channels (the clipboard's, the display's) are the client library's.
+    instance->LoadChannels = freerdp_client_load_channels;
     // No asking from in here: a login that is refused ends the connection,
     // and the view asks again.
     instance->AuthenticateEx = [](freerdp *, char **, char **, char **, rdp_auth_reason) -> BOOL {
@@ -268,8 +466,23 @@ void RdpWorker::run()
     freerdp_settings_set_string(settings, FreeRDP_Password, password.toUtf8().constData());
     if (!domain.isEmpty())
         freerdp_settings_set_string(settings, FreeRDP_Domain, domain.toUtf8().constData());
-    freerdp_settings_set_uint32(settings, FreeRDP_DesktopWidth, 1600);
-    freerdp_settings_set_uint32(settings, FreeRDP_DesktopHeight, 900);
+    // The size asked for, which the display channel then keeps up with.
+    {
+        QMutexLocker lock(&m_mutex);
+        const QSize size = desktopSize.isValid() ? validDesktopSize(desktopSize) : QSize(1600, 900);
+        m_sentSize = size;
+        m_sentScale = desktopScale;
+        freerdp_settings_set_uint32(settings, FreeRDP_DesktopWidth, UINT32(size.width()));
+        freerdp_settings_set_uint32(settings, FreeRDP_DesktopHeight, UINT32(size.height()));
+        freerdp_settings_set_uint32(settings, FreeRDP_DesktopScaleFactor,
+                                    UINT32(qBound(100, desktopScale, 500)));
+        freerdp_settings_set_uint32(settings, FreeRDP_DeviceScaleFactor, 100);
+    }
+    freerdp_settings_set_bool(settings, FreeRDP_SupportDisplayControl, TRUE);
+    freerdp_settings_set_bool(settings, FreeRDP_DynamicResolutionUpdate, TRUE);
+    freerdp_settings_set_bool(settings, FreeRDP_RedirectClipboard, TRUE);
+    PubSub_SubscribeChannelConnected(context->pubSub, channelConnected);
+    PubSub_SubscribeChannelDisconnected(context->pubSub, channelDisconnected);
     freerdp_settings_set_uint32(settings, FreeRDP_ColorDepth, 32);
 
     bool stopping;
@@ -368,6 +581,21 @@ void RdpClient::answerCertificate(bool accept)
         m_worker->answerCertificate(accept);
 }
 
+void RdpClient::sendClipboard(const QString &text)
+{
+    m_clipboard = text;
+    if (m_worker)
+        m_worker->setClipboard(text);
+}
+
+void RdpClient::setDesktopSize(const QSize &pixels, qreal scale)
+{
+    m_wantedSize = pixels;
+    m_wantedScale = qRound(scale * 100);
+    if (m_worker)
+        m_worker->resizeDesktop(m_wantedSize, m_wantedScale);
+}
+
 void RdpClient::connectToHost(const QString &host, quint16 port)
 {
     stopWorker();
@@ -398,6 +626,9 @@ void RdpClient::setCredentials(const QString &username, const QString &password)
     m_worker->domain = slash > 0 ? username.left(slash) : QString();
     m_worker->username = username.mid(slash + 1);
     m_worker->password = password;
+    m_worker->desktopSize = m_wantedSize;
+    m_worker->desktopScale = m_wantedScale;
+    m_worker->setClipboard(m_clipboard);
 
     connect(m_worker, &RdpWorker::up, this, [this]() {
         m_connected = true;
@@ -418,6 +649,10 @@ void RdpClient::setCredentials(const QString &username, const QString &password)
         emit updated(rect);
     });
     connect(m_worker, &RdpWorker::cursor, this, &RdpClient::cursorChanged);
+    connect(m_worker, &RdpWorker::clipboard, this, [this](const QString &text) {
+        m_clipboard = text;
+        emit clipboardReceived(text);
+    });
     connect(m_worker, &RdpWorker::certificate, this,
             [this](const QString &name, const QString &fingerprint) {
         const QString trusted = QSettings().value(certificateKey()).toString();

@@ -46,6 +46,12 @@ public:
     virtual void sendPointer(const QPoint &pos, int buttons) = 0;
     /* A key going down or up: an X keysym and an XT scan code (0xE0xx extended). */
     virtual void sendKey(bool down, quint32 keysym, quint32 scanCode) = 0;
+    /*
+     * The size the remote desktop should take, in pixels, and the scale it is
+     * shown at (1: one of its pixels to a point), where the protocol can ask
+     * for one (RDP); otherwise nothing happens, and the view scales.
+     */
+    virtual void setDesktopSize(const QSize &, qreal) {}
     virtual void sendClipboard(const QString &text) = 0;
 
 signals:

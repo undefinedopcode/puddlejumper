@@ -27,7 +27,7 @@ find_package(ZLIB REQUIRED)   # VNC's compressed updates
 # RDP tabs, where FreeRDP 3 is to be had (a spike, so far).
 find_package(PkgConfig)
 if(PkgConfig_FOUND)
-    pkg_check_modules(FREERDP IMPORTED_TARGET freerdp3 winpr3)
+    pkg_check_modules(FREERDP IMPORTED_TARGET freerdp3 freerdp-client3 winpr3)
 endif()
 
 # The UI's icons: Lucide (ISC, see icons/lucide/LICENSE), compiled in and

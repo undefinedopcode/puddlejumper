@@ -75,6 +75,7 @@ protected:
     bool focusNextPrevChild(bool next) override;
     void paintEvent(QPaintEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
+    void showEvent(QShowEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
@@ -98,6 +99,8 @@ private:
     /* Prods the server into looking at its screen again (see the timer). */
     void startNudging();
     void nudge();
+    void wantDesktopSize();
+    void handOverClipboard();
     void sendKey(QKeyEvent *event, bool down);
     void releaseKeys();
     void setStatus(const QString &status);
@@ -120,6 +123,7 @@ private:
     int m_buttons = 0;            // VNC button mask last sent
     QPoint m_lastPos;
     QTimer *m_nudgeTimer = nullptr;
+    QTimer *m_sizeTimer = nullptr;   // the remote desktop follows the view, once it settles
     int m_nudgeStep = 0;
     bool m_nudge = true;
     QString m_sentClipboard;      // last clipboard text exchanged either way

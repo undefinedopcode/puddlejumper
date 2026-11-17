@@ -25,7 +25,10 @@ class RdpWorker;
  * fingerprint for that address (in the settings, rdp/certificates), and
  * asked about again, with a warning, if it ever differs.
  *
- * Not yet: the clipboard, resizing the remote desktop, sound.
+ * The clipboard's text goes both ways, and the remote desktop takes the
+ * size asked for with setDesktopSize(), then and whenever that changes.
+ *
+ * Not yet: sound, files and pictures on the clipboard.
  */
 class RdpClient : public RemoteClient
 {
@@ -50,10 +53,11 @@ public:
     void setCredentials(const QString &username, const QString &password) override;
     bool authenticationFailed() const override { return m_authFailed; }
     void answerCertificate(bool accept) override;
+    void setDesktopSize(const QSize &pixels, qreal scale) override;
 
     void sendPointer(const QPoint &pos, int buttons) override;
     void sendKey(bool down, quint32 keysym, quint32 scanCode) override;
-    void sendClipboard(const QString &) override {}
+    void sendClipboard(const QString &text) override;
 
 private:
     void stopWorker();
@@ -67,4 +71,7 @@ private:
     bool m_authFailed = false;
     int m_buttons = 0;
     QString m_askedFingerprint;
+    QSize m_wantedSize;
+    int m_wantedScale = 100;   // percent
+    QString m_clipboard;       // ours, as last handed over
 };

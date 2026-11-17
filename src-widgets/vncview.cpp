@@ -261,6 +261,10 @@ VncView::VncView(QWidget *parent, RemoteClient *client)
      * stops it.
      */
     m_nudge = m_client->scheme() == QLatin1String("vnc") && qgetenv("SUPERTERM_VNC_NUDGE") != "off";
+    m_sizeTimer = new QTimer(this);
+    m_sizeTimer->setSingleShot(true);
+    m_sizeTimer->setInterval(300);
+    connect(m_sizeTimer, &QTimer::timeout, this, &VncView::wantDesktopSize);
     m_nudgeTimer = new QTimer(this);
     m_nudgeTimer->setSingleShot(true);
     connect(m_nudgeTimer, &QTimer::timeout, this, &VncView::nudge);
@@ -330,6 +334,9 @@ VncView::VncView(QWidget *parent, RemoteClient *client)
         m_loginError.clear();
         m_connecting = false;
         setStatus(QString());
+        m_sentClipboard.clear();   // a new connection knows nothing of it
+        if (hasFocus())
+            handOverClipboard();
         emit titleChanged(title());
     });
     connect(m_client, &RemoteClient::resized, this, [this]() {
@@ -383,6 +390,7 @@ void VncView::connectToHost(const QString &host, quint16 port)
                                                  : QStringLiteral("%1:%2").arg(host).arg(port);
     setStatus(tr("Connecting to %1…").arg(m_address));
     emit titleChanged(title());
+    wantDesktopSize();
     m_client->connectToHost(host, port);
 }
 
@@ -562,6 +570,33 @@ void VncView::resizeEvent(QResizeEvent *event)
     if (m_loginPrompt->isVisible())
         placeLoginPrompt();
     updateCursor();
+    m_sizeTimer->start();
+}
+
+void VncView::showEvent(QShowEvent *event)
+{
+    QWidget::showEvent(event);
+    m_sizeTimer->start();   // for a size taken while hidden
+}
+
+void VncView::wantDesktopSize()
+{
+    // Where the protocol can ask (RDP), the remote desktop is the view's
+    // size, pixel for pixel. Not while hidden: a tab behind another has
+    // whatever size it was left with.
+    if (!isVisible() || width() < 100 || height() < 100)
+        return;
+    const qreal scale = devicePixelRatioF();
+    m_client->setDesktopSize((QSizeF(size()) * scale).toSize(), scale);
+}
+
+void VncView::handOverClipboard()
+{
+    const QString text = QGuiApplication::clipboard()->text();
+    if (!text.isEmpty() && text != m_sentClipboard) {
+        m_sentClipboard = text;
+        m_client->sendClipboard(text);
+    }
 }
 
 /*
@@ -740,11 +775,7 @@ void VncView::focusInEvent(QFocusEvent *event)
         return;
     }
     // Hand over what was copied here while away (Latin-1 is all VNC carries).
-    const QString text = QGuiApplication::clipboard()->text();
-    if (!text.isEmpty() && text != m_sentClipboard) {
-        m_sentClipboard = text;
-        m_client->sendClipboard(text);
-    }
+    handOverClipboard();
 }
 
 void VncView::focusOutEvent(QFocusEvent *event)
