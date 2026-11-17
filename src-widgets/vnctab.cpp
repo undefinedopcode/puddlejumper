@@ -43,6 +43,17 @@ void VncTab::setReducedColour(bool on)
     emit changed();
 }
 
+bool VncTab::adaptiveQuality() const
+{
+    return m_view->client()->adaptiveQuality();
+}
+
+void VncTab::setAdaptiveQuality(bool on)
+{
+    m_view->setAdaptiveQuality(on);
+    emit changed();
+}
+
 QString VncTab::address() const
 {
     return m_view->address();

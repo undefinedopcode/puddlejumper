@@ -1646,7 +1646,8 @@ void MainWindow::showTabMenu(int index, const QPoint &globalPos)
         });
         others->setEnabled(m_tabs->count() > 1);
 
-        // A remote screen's colour depth, for a slow link.
+        // A remote screen's colour depth and a Mac's coarse-then-sharp
+        // picture, for a slow link.
         if (auto *vnc = qobject_cast<VncTab *>(pageAt(index))) {
             menu.addSeparator();
             QAction *reduced = menu.addAction(tr("Reduced Colour (16-bit)"));
@@ -1657,6 +1658,14 @@ void MainWindow::showTabMenu(int index, const QPoint &globalPos)
             connect(reduced, &QAction::toggled, this, [tab](bool on) {
                 if (tab)
                     tab->setReducedColour(on);
+            });
+            QAction *adaptive = menu.addAction(tr("Adaptive Quality (Mac)"));
+            adaptive->setVisible(reduced->isVisible());
+            adaptive->setCheckable(true);
+            adaptive->setChecked(vnc->adaptiveQuality());
+            connect(adaptive, &QAction::toggled, this, [tab](bool on) {
+                if (tab)
+                    tab->setAdaptiveQuality(on);
             });
             menu.addSeparator();
         }
@@ -2308,6 +2317,8 @@ void MainWindow::saveSession()
                     saved.insert(QStringLiteral("user"), vnc->username());
                 if (vnc->reducedColour())
                     saved.insert(QStringLiteral("reducedColour"), true);
+                if (vnc->adaptiveQuality())
+                    saved.insert(QStringLiteral("adaptive"), true);
                 savedTabs.append(saved);
                 continue;
             }
@@ -2416,6 +2427,8 @@ bool MainWindow::restoreSession()
                     continue;
                 auto *vnc = new VncTab(host, port,
                                        savedTab.value(QStringLiteral("reducedColour")).toBool());
+                // Still connecting: its setup picks this up.
+                vnc->setAdaptiveQuality(savedTab.value(QStringLiteral("adaptive")).toBool());
                 vnc->setCustomTitle(savedTab.value(QStringLiteral("title")).toString());
                 vnc->setUsername(savedTab.value(QStringLiteral("user")).toString());
                 addTab(vnc, address, QString(), i);

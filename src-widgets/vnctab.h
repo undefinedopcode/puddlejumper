@@ -33,6 +33,9 @@ public:
     /* 16-bit colour, for slow links; kept with the tab. */
     bool reducedColour() const;
     void setReducedColour(bool on);
+    /* A Mac's Adaptive picture, for slow links; kept with the tab. */
+    bool adaptiveQuality() const;
+    void setAdaptiveQuality(bool on);
     /* The remote desktop's name, or the address until it has said. */
     QString title() const;
     bool isConnected() const;

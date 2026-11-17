@@ -23,7 +23,9 @@
 // The connection's steps, for when a server won't have us, and what updates
 // cost: QT_LOGGING_RULES="superterm.vnc.debug=true". SUPERTERM_VNC_ENCODINGS
 // (e.g. "raw,copyrect", or "tight,jpeg" for Tight with JPEG) limits the
-// encodings asked for, to compare them.
+// encodings asked for, to compare them ("adaptive" is a Mac's own).
+// SUPERTERM_VNC_APPLE=0 speaks plain RFB 3.8 to a Mac, without Apple's
+// revision and what it brings.
 Q_LOGGING_CATEGORY(lcVnc, "superterm.vnc", QtInfoMsg)
 
 namespace {
@@ -39,8 +41,20 @@ constexpr qint32 kEncDesktopSize = -223;
 constexpr qint32 kEncCursor = -239;
 constexpr qint32 kEncQemuKeys = -258;
 constexpr qint32 kEncExtendedDesktopSize = -308;
+// Apple's own, in RFB 003.889. All but the cursor's come one to an update,
+// with no pixels: they are how a Mac says things about itself.
+constexpr qint32 kEncAppleAdaptive = 0x3f3;
+constexpr qint32 kEncAppleCursorPos = 0x44c;
+constexpr qint32 kEncAppleDisplayInfo = 0x44d;
+constexpr qint32 kEncAppleCursor = 0x450;
+constexpr qint32 kEncAppleLayout = 0x451;
+constexpr qint32 kEncAppleKeysyms = 0x453;
+constexpr qint32 kEncAppleKeyboard = 0x455;
 
 constexpr quint32 kMaxText = 16 * 1024 * 1024;   // cut text and reasons
+constexpr quint32 kMaxPasteboard = 100 * 1024 * 1024;   // a Mac's own limit
+constexpr int kMaxCursorSide = 512;
+constexpr quint32 kMaxAdaptive = 100000000;   // one rectangle, as Apple's viewer has it
 
 // Security types.
 constexpr int kSecNone = 1;
@@ -63,6 +77,7 @@ QString encodingName(qint32 encoding)
     case kEncZlib: return QStringLiteral("zlib");
     case kEncTight: return QStringLiteral("tight");
     case kEncZrle: return QStringLiteral("zrle");
+    case kEncAppleAdaptive: return QStringLiteral("adaptive");
     default: return QString::number(encoding);
     }
 }
@@ -163,7 +178,26 @@ VncClient::~VncClient()
 
 void VncClient::connectToHost(const QString &host, quint16 port)
 {
+    m_host = host;
+    m_port = port;
+    m_plainOnly = qEnvironmentVariable("SUPERTERM_VNC_APPLE") == QLatin1String("0");
+    m_adaptiveFailed = false;
+    open();
+}
+
+void VncClient::open()
+{
+    m_state = State::Closed;   // the old connection's end is not news
     m_socket->abort();
+    m_apple = false;
+    m_appleAccepts.clear();
+    m_pushed = false;
+    m_endReason.clear();
+    m_cursors.clear();
+    m_pasteReader.reset();
+    m_pasteLeft = 0;
+    m_macText.clear();
+    m_adaptive.reset();
     m_in.clear();
     m_pos = 0;
     m_scanCodes = false;
@@ -180,7 +214,7 @@ void VncClient::connectToHost(const QString &host, quint16 port)
     m_statsRects.clear();
     m_authFailed = false;
     m_state = State::Idle;
-    m_socket->connectToHost(host, port);
+    m_socket->connectToHost(m_host, m_port);
 }
 
 void VncClient::disconnectFromHost()
@@ -193,7 +227,7 @@ void VncClient::fail(const QString &reason)
 {
     m_state = State::Closed;
     m_socket->abort();
-    emit disconnected(reason);
+    emit disconnected(reason.isEmpty() ? m_endReason : reason);
 }
 
 quint8 VncClient::u8(qsizetype at) const
@@ -252,8 +286,12 @@ bool VncClient::parseOne()
         }
         const int minor = version.mid(8, 3).toInt();
         m_minor = minor >= 8 ? 8 : minor == 7 ? 7 : 3;
-        qCDebug(lcVnc) << "server version" << version.trimmed() << "-> speaking 3." << m_minor;
-        m_socket->write(QByteArrayLiteral("RFB 003.00") + QByteArray::number(m_minor) + '\n');
+        // A Mac, which says more in its own revision.
+        m_apple = minor == 889 && !m_plainOnly;
+        qCDebug(lcVnc) << "server version" << version.trimmed() << "-> speaking 3."
+                       << (m_apple ? 889 : m_minor);
+        m_socket->write(m_apple ? QByteArrayLiteral("RFB 003.889\n")
+                                : QByteArrayLiteral("RFB 003.00") + QByteArray::number(m_minor) + '\n');
         m_state = m_minor == 3 ? State::SecurityType33 : State::SecurityTypes;
         return true;
     }
@@ -287,6 +325,14 @@ bool VncClient::parseOne()
         qCDebug(lcVnc) << "security types offered" << offered << "chose" << m_securityType;
         if (!m_securityType) {
             fail(tr("The server offers no supported security type"));
+            return false;
+        }
+        if (m_apple && m_securityType != kSecArd) {
+            // Apple's revision is only known with its account login: again,
+            // in plain 3.8.
+            qCDebug(lcVnc) << "no account login offered: connecting again without Apple's revision";
+            m_plainOnly = true;
+            open();
             return false;
         }
         QByteArray choice;
@@ -363,7 +409,8 @@ bool VncClient::parseOne()
             // Only 3.8 says why.
             QString reason;
             qsizetype size;
-            if (m_minor >= 8 && !readString(4, &reason, &size))
+            // (Apple's revision gives no reason.)
+            if (m_minor >= 8 && !m_apple && !readString(4, &reason, &size))
                 return false;
             qCDebug(lcVnc) << "security result" << u32(0) << "reason" << reason;
             m_authFailed = m_securityType != kSecNone;
@@ -388,9 +435,24 @@ bool VncClient::parseOne()
         if (!readString(20, &name, &nameSize))
             return false;
         const int width = u16(0), height = u16(2);
+        if (m_apple) {
+            // Asked for with ClientInit: before the name come a zero, flags,
+            // and a bit for each client message the Mac takes.
+            const QByteArray field = m_in.mid(m_pos + 24, nameSize - 4);
+            if (field.size() < 22) {
+                fail(tr("The Mac's answer is not one Screen Sharing gives"));
+                return false;
+            }
+            m_appleAccepts = field.mid(6, 16);
+            name = QString::fromUtf8(field.mid(22));
+            qCDebug(lcVnc) << "Apple: flags" << Qt::hex << qFromBigEndian<quint32>(field.constData() + 2)
+                           << "accepts" << m_appleAccepts.toHex();
+        }
         m_pos += 20 + nameSize;
         m_name = name;
         m_state = State::Normal;
+        if (m_apple)
+            sendApplePrelude();
         sendSetup();
         resizeFramebuffer(width, height);
         requestUpdate(false);
@@ -412,7 +474,9 @@ bool VncClient::parseOne()
             // Ask for the next one now, so the server works on it while
             // this one downloads, rather than after: a round trip less per
             // update. (After a resize the full one is asked for at the end.)
-            requestUpdate(true);
+            // A Mac that pushes its updates needs no asking.
+            if (!m_pushed)
+                requestUpdate(true);
             if (m_rectsLeft == 0)
                 m_state = State::Normal;
             return true;
@@ -444,10 +508,68 @@ bool VncClient::parseOne()
             emit clipboardReceived(text);
             return true;
         }
-        default:
-            fail(tr("Unknown message %1 from the server").arg(u8(0)));
-            return false;
+        case 0x14: {   // Apple: something happened, by number
+            if (!m_apple)
+                break;
+            if (!available(8))
+                return false;
+            const int what = u16(6);
+            m_pos += 8;
+            qCDebug(lcVnc) << "Apple: status" << what;
+            if (what == 1)
+                m_endReason = tr("The session was ended at the Mac.");
+            else if (what == 2)
+                fetchPasteboard(true);   // its pasteboard changed: what holds it now?
+            else if (what == 3 && !m_macText.isEmpty())
+                sendClipboard(m_macText);   // a paste wants what we promised
+            return true;
         }
+        case 0x1f: {   // Apple: the pasteboard, as asked for
+            if (!m_apple)
+                break;
+            if (!available(16))
+                return false;
+            m_pastePromises = u8(2) & 1;
+            m_pasteEcho = u32(4);
+            const quint32 size = u32(8);
+            m_pasteLeft = u32(12);
+            m_pos += 16;
+            qCDebug(lcVnc) << "Apple: pasteboard reply" << m_pasteEcho << "of" << size << "bytes,"
+                           << m_pasteLeft << "compressed" << (m_pastePromises ? "(promises)" : "");
+            // More than a Mac sends is read past, not inflated.
+            m_pasteReader.reset();
+            if (size <= kMaxPasteboard)
+                m_pasteReader = std::make_unique<ApplePasteboard::Reader>(kMaxText);
+            m_state = State::Pasteboard;
+            if (m_pasteLeft == 0) {
+                m_state = State::Normal;
+                finishPasteboard();
+            }
+            return true;
+        }
+        default:
+            break;
+        }
+        fail(tr("Unknown message %1 from the server").arg(u8(0)));
+        return false;
+    }
+
+    case State::Pasteboard: {
+        // As it comes: a copied word can bring megabytes with it.
+        const qsizetype size = qMin(m_in.size() - m_pos, m_pasteLeft);
+        if (size == 0)
+            return false;
+        if (m_pasteReader && !m_pasteReader->feed(m_in.constData() + m_pos, size)) {
+            qCDebug(lcVnc) << "Apple: a corrupt pasteboard, ignored";
+            m_pasteReader.reset();
+        }
+        m_pos += size;
+        m_pasteLeft -= size;
+        if (m_pasteLeft == 0) {
+            m_state = State::Normal;
+            finishPasteboard();
+        }
+        return true;
     }
 
     case State::Rects:
@@ -493,6 +615,13 @@ bool VncClient::parseRect()
     decoding.start();
     const bool inside = m_image.rect().contains(rect) || rect.isEmpty();
 
+    if (m_apple) {
+        bool handled = false;
+        const bool done = parseAppleRect(encoding, rect, &handled);
+        if (handled)
+            return done;
+    }
+
     switch (encoding) {
     case kEncTight:
         if (!inside) {
@@ -505,6 +634,46 @@ bool VncClient::parseRect()
         m_statsDecodeNs += decoding.nsecsElapsed();
         emit updated(rect);
         return true;
+
+    case kEncAppleAdaptive: {
+        if (!m_apple || !m_adaptive) {
+            fail(tr("Unsupported update encoding %1 (0x%2)").arg(encoding).arg(quint32(encoding), 0, 16));
+            return false;
+        }
+        if (!available(16))
+            return false;
+        const quint32 length = u32(12);
+        if (length > kMaxAdaptive) {
+            fail(tr("Corrupt Adaptive update"));
+            return false;
+        }
+        if (!available(16 + qsizetype(length)))
+            return false;
+        bool drew = false;
+        QString error;
+        const bool ok = m_adaptive->decode(rect, reinterpret_cast<const uchar *>(m_in.constData())
+                                                           + m_pos + 16,
+                                                 length, &m_image, &drew, &error);
+        m_pos += 16 + length;
+        ++m_statsRects[encodingName(encoding)];
+        if (drew) {
+            m_statsPixels += qint64(w) * h;
+            m_statsDecodeNs += decoding.nsecsElapsed();
+            emit updated(rect);
+        }
+        if (!ok) {
+            // The Mac codes each update against what the last should have
+            // left, so there is no carrying on with these, and it sends no
+            // whole picture for the asking while it pushes them: again, the
+            // plain way.
+            qCWarning(lcVnc).noquote() << "Adaptive update not decoded:" << error
+                                       << "- connecting again without";
+            m_adaptiveFailed = true;
+            open();
+            return false;
+        }
+        return true;
+    }
 
     case kEncZrle:
     case kEncZlib: {
@@ -637,7 +806,111 @@ bool VncClient::parseRect()
         return true;
 
     default:
-        fail(tr("Unsupported update encoding %1").arg(encoding));
+        fail(tr("Unsupported update encoding %1 (0x%2)").arg(encoding).arg(quint32(encoding), 0, 16));
+        return false;
+    }
+}
+
+/*
+ * What a Mac says about itself, each as a rectangle of an update. `handled`
+ * says the encoding was one of these; the result is parseRect()'s.
+ */
+bool VncClient::parseAppleRect(qint32 encoding, const QRect &rect, bool *handled)
+{
+    *handled = true;
+    switch (encoding) {
+    case kEncAppleCursorPos:   // the header is all of it
+        m_pos += 12;
+        return true;
+
+    case kEncAppleLayout: {
+        // Its screens, at each change of them (a login, a lock). The length
+        // counts what follows it: a version, the desktop in points, the
+        // framebuffer in pixels, and more that is not needed here.
+        if (!available(14))
+            return false;
+        const qsizetype length = u16(12);
+        if (!available(14 + length))
+            return false;
+        if (length < 0x14) {
+            fail(tr("The Mac's display layout is too short"));
+            return false;
+        }
+        const int width = u16(14 + 6), height = u16(14 + 8);
+        m_pos += 14 + length;
+        qCDebug(lcVnc) << "Apple: layout, framebuffer" << width << "x" << height;
+        if (width == 0 || height == 0) {
+            fail(tr("The Mac's display layout has no screen"));
+            return false;
+        }
+        resizeFramebuffer(width, height);
+        // A layout drops the arming of the Mac's pushes: again, each time.
+        armPushes();
+        return true;
+    }
+
+    case kEncAppleKeysyms:
+    case kEncAppleKeyboard: {   // its keyboard, which is its own business
+        if (!available(14))
+            return false;
+        const qsizetype length = u16(12);
+        if (!available(14 + length))
+            return false;
+        m_pos += 14 + length;
+        return true;
+    }
+
+    case kEncAppleDisplayInfo: {   // the layout's older form, for a viewer without it
+        if (!available(22))
+            return false;
+        const qsizetype size = 22 + 0x1c * qsizetype(u16(20));
+        if (!available(size))
+            return false;
+        m_pos += size;
+        return true;
+    }
+
+    case kEncAppleCursor: {
+        // A shape with its number, or (with nothing after it) the number of
+        // one sent before. The header's place is the hotspot.
+        if (!available(20))
+            return false;
+        const quint32 id = u32(12);
+        const quint32 length = u32(16);
+        if (length > kMaxText) {
+            fail(tr("Cursor shape too large"));
+            return false;
+        }
+        if (!available(20 + qsizetype(length)))
+            return false;
+        const int w = rect.width(), h = rect.height();
+        if (length > 0 && w > 0 && h > 0 && w <= kMaxCursorSide && h <= kMaxCursorSide) {
+            // A stream of its own: BGRX pixels, then the alpha, a byte each.
+            QByteArray data;
+            Inflater inflater;
+            const qsizetype pixels = qsizetype(w) * h;
+            if (inflater.inflate(m_in.constData() + m_pos + 20, length, &data, pixels * 5)
+                && data.size() >= pixels * 5) {
+                QImage image(w, h, QImage::Format_ARGB32);
+                const auto *src = reinterpret_cast<const uchar *>(data.constData());
+                const uchar *alpha = src + pixels * 4;
+                for (int row = 0; row < h; ++row) {
+                    auto *dst = reinterpret_cast<quint32 *>(image.scanLine(row));
+                    for (int col = 0; col < w; ++col, src += 4)
+                        dst[col] = qRgba(src[2], src[1], src[0], *alpha++);
+                }
+                m_cursors.insert(id, {image, rect.topLeft()});
+            }
+        }
+        m_pos += 20 + length;
+        // (One never sent leaves the cursor as it is.)
+        if (const auto shape = m_cursors.constFind(id); shape != m_cursors.constEnd())
+            emit cursorChanged(shape->image, shape->hotspot);
+        return true;
+    }
+
+    default:
+        *handled = false;
         return false;
     }
 }
@@ -955,6 +1228,8 @@ void VncClient::resizeFramebuffer(int width, int height)
         return;
     m_image = QImage(width, height, QImage::Format_RGB32);
     m_image.fill(Qt::black);
+    if (m_adaptive)
+        m_adaptive->resize(width, height);
     m_fullUpdate = true;
     emit resized(m_image.size());
 }
@@ -1035,7 +1310,9 @@ void VncClient::sendArdResponse()
 void VncClient::sendClientInit()
 {
     QByteArray init;
-    put8(init, 1);   // shared: leave other viewers (noVNC) connected
+    // Shared: leave other viewers (noVNC) connected. To a Mac, 0x80 asks for
+    // the ServerInit that says what it can do.
+    put8(init, m_apple ? 0x81 : 1);
     m_socket->write(init);
     m_state = State::ServerInit;
 }
@@ -1044,7 +1321,11 @@ void VncClient::sendSetup()
 {
     // SetPixelFormat, in our byte order: 32-bit 0x00RRGGBB, which is
     // QImage's RGB32, or 16-bit RGB565.
-    m_bytesPerPixel = m_reducedColour ? 2 : 4;
+    // A Mac's Adaptive picture is its own format, drawn at full depth.
+    const QString only = qEnvironmentVariable("SUPERTERM_VNC_ENCODINGS");
+    m_adaptiveWanted = m_apple && (only.isEmpty() ? m_adaptiveQuality
+                                                  : only.contains(QLatin1String("adaptive")));
+    m_bytesPerPixel = m_reducedColour && !m_adaptiveWanted ? 2 : 4;
     const bool wide = m_bytesPerPixel == 4;
     QByteArray out;
     put8(out, 0);
@@ -1060,7 +1341,12 @@ void VncClient::sendSetup()
     put8(out, wide ? 8 : 5);     // green shift
     put8(out, 0);                // blue shift
     out.append(3, '\0');
+    m_socket->write(out);
+    sendEncodings();
+}
 
+void VncClient::sendEncodings()
+{
     // Compressed over a network, where bandwidth is what's short. On this
     // machine (a VM, a tunnel) compressing only costs the server time, and
     // raw is quicker.
@@ -1068,18 +1354,41 @@ void VncClient::sendSetup()
     QList<qint32> encodings =
         local ? QList<qint32>{kEncCopyRect, kEncRaw, kEncZrle, kEncZlib, kEncTight}
               : QList<qint32>{kEncTight, kEncZrle, kEncCopyRect, kEncZlib, kEncRaw, kEncJpegQuality};
-    if (const QString only = qEnvironmentVariable("SUPERTERM_VNC_ENCODINGS"); !only.isEmpty()) {
+    const QString only = qEnvironmentVariable("SUPERTERM_VNC_ENCODINGS");
+    if (!only.isEmpty()) {
         const QHash<QString, qint32> names = {
             {QStringLiteral("tight"), kEncTight}, {QStringLiteral("zrle"), kEncZrle},
             {QStringLiteral("copyrect"), kEncCopyRect}, {QStringLiteral("zlib"), kEncZlib},
             {QStringLiteral("raw"), kEncRaw}, {QStringLiteral("jpeg"), kEncJpegQuality},
+            {QStringLiteral("adaptive"), kEncAppleAdaptive},
         };
         encodings.clear();
         for (const QString &name : only.split(QLatin1Char(','), Qt::SkipEmptyParts))
             encodings << names.value(name.trimmed().toLower(), kEncRaw);
     }
+    if (m_apple) {
+        // A Mac sends everything in the first of these it knows. The rest is
+        // how it says its screens' sizes (the layout, for which the older
+        // form must be listed too) and its cursor's shape.
+        if (only.isEmpty() || m_adaptiveFailed)
+            encodings = {kEncZlib, kEncZrle, kEncRaw};
+        encodings.removeAll(kEncAppleAdaptive);
+        if (m_adaptiveWanted && !m_adaptiveFailed) {
+            // Adaptive Quality: its tiles, sent coarse and then refined. A
+            // Mac that has none sends the next it knows.
+            encodings.prepend(kEncAppleAdaptive);
+            if (!m_adaptive) {
+                m_adaptive = std::make_unique<AppleAdaptive>();
+                m_adaptive->resize(m_image.width(), m_image.height());
+            }
+        }
+        encodings << kEncAppleCursorPos << kEncAppleDisplayInfo << kEncAppleCursor
+                  << kEncAppleLayout << kEncAppleKeysyms << kEncAppleKeyboard;
+    } else {
+        encodings << kEncDesktopSize << kEncExtendedDesktopSize << kEncCursor << kEncQemuKeys;
+    }
     qCDebug(lcVnc) << (local ? "local server" : "remote server") << "- encodings" << encodings;
-    encodings << kEncDesktopSize << kEncExtendedDesktopSize << kEncCursor << kEncQemuKeys;
+    QByteArray out;
     put8(out, 2);    // SetEncodings
     put8(out, 0);
     put16(out, quint16(encodings.size()));
@@ -1104,6 +1413,9 @@ void VncClient::sendPointer(const QPoint &pos, int buttons)
 {
     if (!isConnected())
         return;
+    // Apple's revision counts the buttons as a Mac does: left, right, middle.
+    if (m_apple)
+        buttons = (buttons & ~6) | ((buttons & 2) << 1) | ((buttons & 4) >> 1);
     QByteArray out;
     put8(out, 5);
     put8(out, quint8(buttons));
@@ -1136,10 +1448,150 @@ void VncClient::sendKey(bool down, quint32 keysym, quint32 scanCode)
     m_socket->write(out);
 }
 
+bool VncClient::sendScroll(const QPoint &pos, const QPoint &delta)
+{
+    // Apple's second event message, of the scroll-wheel kind. The Mac posts
+    // what it is given: the distance in points, in lines (ten points each,
+    // whole and in 16.16), and that the points are what counts.
+    if (!isConnected() || !m_apple || !acceptsMessage(0x17))
+        return false;
+    const qint32 axes[3] = {-delta.x(), -delta.y(), 0};   // a Mac counts up and left
+    QByteArray out;
+    put8(out, 0x17);
+    put8(out, 0);
+    put16(out, 54);   // what follows
+    put16(out, 1);    // version
+    put16(out, 11);   // a scroll
+    for (qint32 points : axes)
+        put16(out, quint16(qint16(points / 10)));
+    for (qint32 points : axes)
+        put32(out, quint32(qint32(qint64(points) * 65536 / 10)));
+    for (qint32 points : axes)
+        put32(out, quint32(points));
+    out.append(12, '\0');   // no phase, no momentum, no count
+    put32(out, 2);          // continuous
+    put16(out, quint16(qBound(0, pos.x(), m_image.width() - 1)));
+    put16(out, quint16(qBound(0, pos.y(), m_image.height() - 1)));
+    m_socket->write(out);
+    return true;
+}
+
+bool VncClient::acceptsMessage(int type) const
+{
+    return type / 8 < m_appleAccepts.size()
+           && (quint8(m_appleAccepts.at(type / 8)) >> (7 - type % 8) & 1);
+}
+
+void VncClient::sendApplePrelude()
+{
+    // Who is asking (as numbers: a viewer's kind and version, a macOS
+    // version, and a bit for each server message it takes), that it means
+    // to control, and that it wants to hear of the pasteboard changing.
+    // In this order, or the Mac says nothing of its pasteboard; and the
+    // first of exactly this size, or it waits for the rest for good.
+    QByteArray info(66, '\0');
+    auto set32 = [&info](int at, quint32 v) { qToBigEndian(v, info.data() + at); };
+    info[0] = 0x21;
+    qToBigEndian(quint16(62), info.data() + 2);
+    qToBigEndian(quint16(1), info.data() + 4);
+    set32(6, 2);
+    set32(10, 6);    // the viewer's version, 6.1.0
+    set32(14, 1);
+    set32(22, 26);   // and its macOS's, 26.6.2
+    set32(26, 6);
+    set32(30, 2);
+    info[34] = char(0xb0);
+    info[36] = 0x0c;
+    info[37] = 0x03;
+    info[38] = char(0x90);
+    info[44] = 0x40;
+    m_socket->write(info);
+
+    QByteArray out;
+    put8(out, 0x0a);   // SetMode: control
+    put8(out, 0);
+    put16(out, 1);
+    put8(out, 0x15);   // AutoPasteboard: start
+    put8(out, 0);
+    put16(out, 1);
+    put32(out, 0);
+    m_socket->write(out);
+}
+
+void VncClient::armPushes()
+{
+    // AutoFrameBufferUpdate: the whole screen, as soon as it changes (an
+    // interval of 0), as Apple's viewer asks. Asked for one at a time a
+    // Mac's own display answers late.
+    if (!acceptsMessage(0x09))
+        return;
+    QByteArray out;
+    put8(out, 0x09);
+    put8(out, 0);
+    put16(out, 1);   // version
+    put32(out, 0);   // microseconds between them
+    put16(out, 0);
+    put16(out, 0);
+    put16(out, quint16(m_image.width()));
+    put16(out, quint16(m_image.height()));
+    m_socket->write(out);
+    m_pushed = true;
+}
+
+void VncClient::fetchPasteboard(bool promisesOnly)
+{
+    // Promises only: the flavors' names without their data, to see whether
+    // there is text before asking for everything. The number comes back
+    // with the reply.
+    QByteArray out;
+    put8(out, 0x0b);
+    put8(out, promisesOnly);
+    put16(out, 0);
+    put32(out, ++m_pasteCounter);
+    m_socket->write(out);
+}
+
+void VncClient::finishPasteboard()
+{
+    const std::unique_ptr<ApplePasteboard::Reader> reader = std::move(m_pasteReader);
+    if (!reader || m_pasteEcho != m_pasteCounter)
+        return;   // unreadable, or overtaken by a later change
+    if (m_pastePromises) {
+        if (reader->listsText())
+            fetchPasteboard(false);
+        return;
+    }
+    // Text put there by us comes back as a change too: only news is passed on.
+    const QString text = reader->text();
+    if (text.isNull() || text == m_macText)
+        return;
+    m_macText = text;
+    emit clipboardReceived(text);
+}
+
 void VncClient::sendClipboard(const QString &text)
 {
     if (!isConnected())
         return;
+    if (m_apple) {
+        // A Mac ignores cut text. Its pasteboard takes an archive of flavors:
+        // ours has the one, with its data, so nothing is left to ask for.
+        if (text.isEmpty() || !acceptsMessage(0x1f))
+            return;
+        quint32 size = 0;
+        const QByteArray packed = ApplePasteboard::packText(text, &size);
+        if (packed.isEmpty() || size > kMaxText)
+            return;
+        QByteArray out;
+        put8(out, 0x1f);
+        out.append(7, '\0');
+        put32(out, size);
+        put32(out, quint32(packed.size()));
+        out.append(packed);
+        m_socket->write(out);
+        m_macText = text;
+        return;
+    }
     const QByteArray latin1 = text.toLatin1();
     QByteArray out;
     put8(out, 6);

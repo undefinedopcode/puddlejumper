@@ -45,6 +45,8 @@ public:
     QString address() const { return m_address; }
     /* 16-bit colour, for slow links (see VncClient); reconnects if connected. */
     void setReducedColour(bool on);
+    /* A Mac's Adaptive picture, for slow links (see VncClient); likewise. */
+    void setAdaptiveQuality(bool on);
 
     /* The account name for a Mac's login, as last given (offered next time). */
     QString username() const { return m_username; }

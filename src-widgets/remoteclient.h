@@ -34,6 +34,8 @@ public:
     /* 16-bit colour, for slow links; from the next connection. */
     virtual void setReducedColour(bool) {}
     virtual bool reducedColour() const { return false; }
+    virtual void setAdaptiveQuality(bool) {}
+    virtual bool adaptiveQuality() const { return false; }
 
     /* What to log in with; answers credentialsRequested(). */
     virtual void setCredentials(const QString &username, const QString &password) = 0;
@@ -44,6 +46,17 @@ public:
 
     /* `buttons`: 1 left, 2 middle, 4 right, 8/16 wheel up/down, 32/64 left/right. */
     virtual void sendPointer(const QPoint &pos, int buttons) = 0;
+    /*
+     * A scroll by a distance, in the remote screen's pixels (positive right
+     * and down), for servers that take one. False if this one does not:
+     * wheel clicks through sendPointer() are then all there is.
+     */
+    virtual bool sendScroll(const QPoint &pos, const QPoint &delta)
+    {
+        Q_UNUSED(pos);
+        Q_UNUSED(delta);
+        return false;
+    }
     /* A key going down or up: an X keysym and an XT scan code (0xE0xx extended). */
     virtual void sendKey(bool down, quint32 keysym, quint32 scanCode) = 0;
     /*

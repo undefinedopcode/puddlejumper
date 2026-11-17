@@ -76,6 +76,29 @@ void press(QWidget *w, const QString &spec)
         wait(500);
         return;
     }
+    if (spec.startsWith(QLatin1String("scroll:"))) {
+        // scroll:x,y,dy as a trackpad's, in pixels (positive: the content moves down)
+        const QStringList v = spec.mid(7).split(QLatin1Char(','));
+        const QPointF pos(v.value(0).toInt(), v.value(1).toInt());
+        QWheelEvent event(pos, w->mapToGlobal(pos), QPoint(0, v.value(2).toInt()), QPoint(),
+                          Qt::NoButton, Qt::NoModifier, Qt::NoScrollPhase, false);
+        QCoreApplication::sendEvent(w, &event);
+        wait(500);
+        return;
+    }
+    if (spec.startsWith(QLatin1String("rclick:"))) {
+        const QStringList xy = spec.mid(7).split(QLatin1Char(','));
+        const QPointF pos(xy.value(0).toInt(), xy.value(1).toInt());
+        for (QEvent::Type type : {QEvent::MouseMove, QEvent::MouseButtonPress, QEvent::MouseButtonRelease}) {
+            const Qt::MouseButton button = type == QEvent::MouseMove ? Qt::NoButton : Qt::RightButton;
+            QMouseEvent event(type, pos, w->mapToGlobal(pos), button,
+                              type == QEvent::MouseButtonPress ? Qt::RightButton : Qt::NoButton,
+                              Qt::NoModifier);
+            QCoreApplication::sendEvent(w, &event);
+            wait(60);
+        }
+        return;
+    }
     if (spec.startsWith(QLatin1String("click:"))) {
         // click:x,y in the view's own coordinates
         const QStringList xy = spec.mid(6).split(QLatin1Char(','));

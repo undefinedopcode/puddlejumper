@@ -83,6 +83,10 @@ qt_add_executable(superterm
     src-widgets/remoteclient.h
     src-widgets/vnccrypto.cpp
     src-widgets/vnccrypto.h
+    src-widgets/appleadaptive.cpp
+    src-widgets/appleadaptive.h
+    src-widgets/applepasteboard.cpp
+    src-widgets/applepasteboard.h
     src-widgets/vncview.cpp
     src-widgets/vncview.h
     src-widgets/vnctab.cpp
@@ -176,6 +180,8 @@ endif()
 qt_add_executable(probe-vnc
     src-widgets/dev/probe_vnc.cpp
     src-widgets/vnccrypto.cpp src-widgets/vnccrypto.h
+    src-widgets/appleadaptive.cpp src-widgets/appleadaptive.h
+    src-widgets/applepasteboard.cpp src-widgets/applepasteboard.h
     src-widgets/vncclient.cpp src-widgets/vncclient.h
     src-widgets/vncview.cpp src-widgets/vncview.h
     src-widgets/remoteclient.h

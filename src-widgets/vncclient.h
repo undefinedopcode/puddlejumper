@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "appleadaptive.h"
+#include "applepasteboard.h"
 #include "remoteclient.h"
 
 #include <QByteArray>
@@ -33,6 +35,11 @@ class QTcpSocket;
  * (Cursor), and takes
  * keys as scan codes where the server can (QEMU's extended key events), so
  * the remote keyboard layout decides what a key types, not ours.
+ *
+ * A Mac's Screen Sharing is spoken to in Apple's own revision, 003.889
+ * (docs/apple-rfb-889.md): only there does it share its pasteboard, as
+ * Unicode text here, and it pushes its updates unasked, takes a scroll as a
+ * distance, and sends its cursors and its screen's size in forms of its own.
  */
 class VncClient : public RemoteClient
 {
@@ -60,6 +67,14 @@ public:
      */
     void setReducedColour(bool on) override { m_reducedColour = on; }
     bool reducedColour() const override { return m_reducedColour; }
+    /*
+     * Ask a Mac for its Adaptive picture: coarse at once and sharpened as
+     * the screen settles, for slow links. Only Apple's revision has it, at
+     * full colour depth; any other server is unaffected. From the next
+     * connection's setup.
+     */
+    void setAdaptiveQuality(bool on) override { m_adaptiveQuality = on; }
+    bool adaptiveQuality() const override { return m_adaptiveQuality; }
 
     /*
      * What to log in with, for servers that ask: a VNC password (only its
@@ -74,6 +89,7 @@ public:
 
     /* `buttons`: 1 left, 2 middle, 4 right, 8/16 wheel up/down, 32/64 left/right. */
     void sendPointer(const QPoint &pos, int buttons) override;
+    bool sendScroll(const QPoint &pos, const QPoint &delta) override;
     /*
      * A key going down or up, as an X keysym and an XT scan code (0xE0xx for
      * the extended ones). Either may be 0 when unknown; with scan codes the
@@ -85,9 +101,10 @@ public:
 private:
     enum class State {
         Idle, Version, SecurityTypes, SecurityType33, Challenge, ArdParameters,
-        AwaitingCredentials, SecurityResult, ServerInit, Normal, Rects, Closed,
+        AwaitingCredentials, SecurityResult, ServerInit, Normal, Rects, Pasteboard, Closed,
     };
 
+    void open();
     void onReadyRead();
     /* Handle one message (or part) from the buffer; false if more is needed. */
     bool parseOne();
@@ -113,7 +130,15 @@ private:
     void sendArdResponse();
     void sendClientInit();
     void sendSetup();
+    void sendEncodings();
     void requestUpdate(bool incremental);
+    /* Apple's revision: what follows ServerInit, and its own messages. */
+    void sendApplePrelude();
+    void armPushes();
+    bool acceptsMessage(int type) const;
+    void fetchPasteboard(bool promisesOnly);
+    void finishPasteboard();
+    bool parseAppleRect(qint32 encoding, const QRect &rect, bool *handled);
     void logStats();
     void resizeFramebuffer(int width, int height);
 
@@ -129,6 +154,27 @@ private:
     QByteArray m_in;
     qsizetype m_pos = 0;          // next unread byte of m_in
     int m_minor = 8;              // protocol 3.<minor>
+    QString m_host;
+    quint16 m_port = 0;
+    bool m_apple = false;         // speaking Apple's 003.889
+    bool m_plainOnly = false;     // not this time: the Mac offered no account login
+    QByteArray m_appleAccepts;    // the client messages the Mac takes, a bit each
+    bool m_pushed = false;        // the Mac sends updates unasked
+    QString m_endReason;          // why the Mac is about to close, if it said
+    // Cursor shapes come once and are then named by number.
+    struct CursorShape { QImage image; QPoint hotspot; };
+    QHash<quint32, CursorShape> m_cursors;
+    // The pasteboard: what is asked for, and the reply being read.
+    quint32 m_pasteCounter = 0;   // of the last fetch; replies to others are dropped
+    quint32 m_pasteEcho = 0;
+    bool m_pastePromises = false;
+    qsizetype m_pasteLeft = 0;    // compressed bytes of the reply still to come
+    std::unique_ptr<ApplePasteboard::Reader> m_pasteReader;
+    QString m_macText;            // the text last known to be on the Mac's pasteboard
+    bool m_adaptiveQuality = false;
+    bool m_adaptiveWanted = false;   // for this connection
+    bool m_adaptiveFailed = false;   // an update did not decode: no more of them
+    std::unique_ptr<AppleAdaptive> m_adaptive;
     int m_rectsLeft = 0;          // in the FramebufferUpdate being read
     bool m_fullUpdate = false;    // ask for everything next (after a resize)
     bool m_scanCodes = false;

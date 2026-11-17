@@ -501,6 +501,16 @@ void VncView::setReducedColour(bool on)
         reconnect();
 }
 
+void VncView::setAdaptiveQuality(bool on)
+{
+    if (on == m_client->adaptiveQuality())
+        return;
+    m_client->setAdaptiveQuality(on);
+    // Chosen when connecting, like the colour depth.
+    if (m_client->isConnected())
+        reconnect();
+}
+
 void VncView::reconnect()
 {
     if (!m_host.isEmpty())
@@ -659,9 +669,18 @@ void VncView::mouseMoveEvent(QMouseEvent *event)
 
 void VncView::wheelEvent(QWheelEvent *event)
 {
-    // VNC has wheel clicks only: a press and release of a button per 120.
-    m_wheel += event->angleDelta();
     m_lastPos = toRemote(event->position());
+    // By the distance, where the server takes one (a Mac): a trackpad's in
+    // pixels, or a wheel's notch as three lines of ten.
+    QPoint distance = event->pixelDelta();
+    if (distance.isNull())
+        distance = event->angleDelta() / 4;
+    if (m_client->sendScroll(m_lastPos, -distance)) {
+        event->accept();
+        return;
+    }
+    // Otherwise VNC has wheel clicks only: a press and release of a button per 120.
+    m_wheel += event->angleDelta();
     auto click = [this](int button) {
         m_client->sendPointer(m_lastPos, m_buttons | button);
         m_client->sendPointer(m_lastPos, m_buttons);
