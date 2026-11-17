@@ -26,6 +26,8 @@
 #include <QKeyEvent>
 #include <QMouseEvent>
 #include <QKeySequence>
+#include <QAbstractButton>
+#include <QMessageBox>
 #include <QLabel>
 #include <QLineEdit>
 #include <QHash>
@@ -138,6 +140,11 @@ int main(int argc, char *argv[])
                                                                              Qt::SkipEmptyParts);
     QString failure;
     bool closed = false;
+    QObject::connect(view.client(), &RemoteClient::cursorChanged, [&](const QImage &image, const QPoint &hot) {
+        std::printf("cursor: %dx%d hotspot %d,%d\n", image.width(), image.height(), hot.x(), hot.y());
+        if (!image.isNull())
+            image.save(prefix + QStringLiteral("-cursor.png"));
+    });
     QObject::connect(view.client(), &RemoteClient::disconnected, [&](const QString &reason) {
         std::printf("disconnected: %s\n", qPrintable(reason));
         // A wrong password is asked for again, not the end.
@@ -145,6 +152,25 @@ int main(int argc, char *argv[])
             return;
         failure = reason;
         closed = true;
+    });
+    // The certificate question, answered as a user would: PROBE_RDP_CERT=reject
+    // turns it down, anything else trusts.
+    QObject::connect(view.client(), &RemoteClient::certificateRequested, &view,
+                     [&](const QString &name, const QString &fingerprint, bool changed) {
+        std::printf("certificate: name=\"%s\" sha256=%s changed=%d\n", qPrintable(name),
+                    qPrintable(fingerprint), changed);
+        QTimer::singleShot(100, &view, [&]() {
+            auto *box = view.findChild<QMessageBox *>();
+            if (!box)
+                return;
+            box->grab().save(prefix + QStringLiteral("-certificate.png"));
+            const bool reject = qgetenv("PROBE_RDP_CERT") == "reject";
+            std::printf("certificate: %s\n", reject ? "rejecting" : "trusting");
+            if (reject)
+                box->reject();
+            else if (auto *trust = box->findChild<QAbstractButton *>(QStringLiteral("trust")))
+                trust->click();
+        });
     });
     QObject::connect(view.client(), &RemoteClient::credentialsRequested, &view, [&]() {
         // The view shows its prompt first; answer it as a user would.

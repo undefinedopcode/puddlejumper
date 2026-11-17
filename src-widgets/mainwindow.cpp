@@ -447,6 +447,21 @@ void MainWindow::buildMenus()
         settings.setValue(QStringLiteral("vnc/lastAddress"), text.trimmed());
         openVnc(text);
     });
+#ifdef SUPERTERM_RDP
+    auto *rdpAct = file->addAction(tr("New R&DP Tab…"));
+    connect(rdpAct, &QAction::triggered, this, [this]() {
+        QSettings settings;
+        const QString last = settings.value(QStringLiteral("rdp/lastAddress")).toString();
+        bool ok = false;
+        const QString text = QInputDialog::getText(this, tr("New RDP Tab"),
+                                                   tr("Address (host or host:port):"),
+                                                   QLineEdit::Normal, last, &ok);
+        if (!ok || text.trimmed().isEmpty())
+            return;
+        settings.setValue(QStringLiteral("rdp/lastAddress"), text.trimmed());
+        openRdp(text);
+    });
+#endif
 
     auto *closeAct = file->addAction(tr("&Close Tab"));
     closeAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+W")));
@@ -966,16 +981,13 @@ void MainWindow::openVnc(const QString &address)
 void MainWindow::openRdp(const QString &address)
 {
 #ifdef SUPERTERM_RDP
-    // host or host:port (not VNC's display numbers). SPIKE: no menu entry,
-    // and the tab is saved and restored as a VNC one.
-    const int colon = address.lastIndexOf(QLatin1Char(':'));
-    const QString host = colon > 0 ? address.left(colon) : address;
-    const int port = colon > 0 ? address.mid(colon + 1).toInt() : 3389;
-    if (host.isEmpty() || port <= 0 || port > 65535) {
+    QString host;
+    quint16 port;
+    if (!RdpClient::parseAddress(address, &host, &port)) {
         QMessageBox::warning(this, tr("New RDP Tab"), tr("“%1” isn't an address.").arg(address));
         return;
     }
-    auto *tab = new VncTab(host, quint16(port), false, nullptr, new RdpClient);
+    auto *tab = new VncTab(host, port, false, nullptr, new RdpClient);
     const int index = addTab(tab, tab->title(), QString());
     m_tabs->setCurrentIndex(index);
     syncTabText(tab);
@@ -1638,6 +1650,7 @@ void MainWindow::showTabMenu(int index, const QPoint &globalPos)
         if (auto *vnc = qobject_cast<VncTab *>(pageAt(index))) {
             menu.addSeparator();
             QAction *reduced = menu.addAction(tr("Reduced Colour (16-bit)"));
+            reduced->setVisible(vnc->view()->client()->scheme() == QLatin1String("vnc"));
             reduced->setCheckable(true);
             reduced->setChecked(vnc->reducedColour());
             QPointer<VncTab> tab = vnc;
@@ -1707,7 +1720,7 @@ void MainWindow::renameTab(int index)
 void MainWindow::updateStatus()
 {
     if (auto *vnc = qobject_cast<VncTab *>(currentPage())) {
-        m_statusDir->setText(tr("VNC  ·  %1").arg(vnc->title()));
+        m_statusDir->setText(QStringLiteral("%1  ·  %2").arg(vnc->view()->client()->scheme().toUpper(), vnc->title()));
         m_statusInfo->setText(vnc->details());
         return;
     }
@@ -2286,12 +2299,10 @@ void MainWindow::saveSession()
             if (t == currentTab)
                 savedCurrent = savedTabs.size();
             if (auto *vnc = qobject_cast<VncTab *>(page)) {
-                // SPIKE: an RDP tab isn't saved (it would come back as VNC).
-                if (!qobject_cast<VncClient *>(vnc->view()->client()))
-                    continue;
+                // Under its protocol: "vnc" or "rdp".
                 QJsonObject saved{
                     {QStringLiteral("title"), vnc->customTitle()},
-                    {QStringLiteral("vnc"), vnc->address()},
+                    {vnc->view()->client()->scheme(), vnc->address()},
                 };
                 if (!vnc->username().isEmpty())
                     saved.insert(QStringLiteral("user"), vnc->username());
@@ -2412,6 +2423,22 @@ bool MainWindow::restoreSession()
                     syncTabText(vnc);
                 continue;
             }
+#ifdef SUPERTERM_RDP
+            if (const QString address = savedTab.value(QStringLiteral("rdp")).toString();
+                !address.isEmpty()) {
+                QString host;
+                quint16 port;
+                if (!RdpClient::parseAddress(address, &host, &port))
+                    continue;
+                auto *rdp = new VncTab(host, port, false, nullptr, new RdpClient);
+                rdp->setCustomTitle(savedTab.value(QStringLiteral("title")).toString());
+                rdp->setUsername(savedTab.value(QStringLiteral("user")).toString());
+                addTab(rdp, address, QString(), i);
+                if (i == m_currentWorkspace)
+                    syncTabText(rdp);
+                continue;
+            }
+#endif
             TerminalTab *tab = TerminalTab::restoreLayout(
                 savedTab.value(QStringLiteral("layout")).toObject(), makeSavedPane);
             if (!tab)

@@ -20,8 +20,12 @@ class RdpWorker;
  * update. RDP takes the login before it shows anything, so credentials are
  * always asked for first.
  *
- * Not yet: checking the server's certificate (ANY is accepted, so far), the
- * remote cursor's shape, the clipboard, resizing the remote desktop, sound.
+ * A server's certificate is rarely one that can be verified (Windows makes
+ * its own): it is asked about the first time, then remembered by its
+ * fingerprint for that address (in the settings, rdp/certificates), and
+ * asked about again, with a warning, if it ever differs.
+ *
+ * Not yet: the clipboard, resizing the remote desktop, sound.
  */
 class RdpClient : public RemoteClient
 {
@@ -37,10 +41,15 @@ public:
     bool isConnected() const override { return m_connected; }
     const QImage &framebuffer() const override { return m_image; }
     QString desktopName() const override { return m_host; }
+    QString scheme() const override { return QStringLiteral("rdp"); }
+
+    /* host or host:port (or [v6]:port), 3389 if not said. */
+    static bool parseAddress(const QString &text, QString *host, quint16 *port);
 
     /* `username` may be DOMAIN\name. */
     void setCredentials(const QString &username, const QString &password) override;
     bool authenticationFailed() const override { return m_authFailed; }
+    void answerCertificate(bool accept) override;
 
     void sendPointer(const QPoint &pos, int buttons) override;
     void sendKey(bool down, quint32 keysym, quint32 scanCode) override;
@@ -48,6 +57,7 @@ public:
 
 private:
     void stopWorker();
+    QString certificateKey() const;
 
     RdpWorker *m_worker = nullptr;
     QString m_host;
@@ -56,4 +66,5 @@ private:
     bool m_connected = false;
     bool m_authFailed = false;
     int m_buttons = 0;
+    QString m_askedFingerprint;
 };

@@ -15,6 +15,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMessageBox>
 #include <QPainter>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -259,7 +260,7 @@ VncView::VncView(QWidget *parent, RemoteClient *client)
      * the screen asked for afresh, aren't enough). SUPERTERM_VNC_NUDGE=off
      * stops it.
      */
-    m_nudge = qgetenv("SUPERTERM_VNC_NUDGE") != "off";
+    m_nudge = m_client->scheme() == QLatin1String("vnc") && qgetenv("SUPERTERM_VNC_NUDGE") != "off";
     m_nudgeTimer = new QTimer(this);
     m_nudgeTimer->setSingleShot(true);
     connect(m_nudgeTimer, &QTimer::timeout, this, &VncView::nudge);
@@ -299,6 +300,31 @@ VncView::VncView(QWidget *parent, RemoteClient *client)
             m_client->setCredentials(m_username, m_password);   // reconnecting
         else
             showLoginPrompt(needsUsername, m_loginError);
+    });
+    connect(m_client, &RemoteClient::certificateRequested, this,
+            [this](const QString &name, const QString &fingerprint, bool changed) {
+        const QString what = changed
+            ? tr("<b>The certificate of %1 is not the one trusted before.</b><br>It may have "
+                 "been renewed, or something may be intercepting the connection.").arg(m_address)
+            : tr("%1 identifies itself with a certificate that can't be verified, as is usual "
+                 "for a Windows machine's own.").arg(m_address);
+        auto *box = new QMessageBox(QMessageBox::Warning, tr("Remote Desktop"),
+                                    what + QStringLiteral("<br><br>")
+                                        + tr("Name: %1<br>SHA-256 fingerprint:<br><tt>%2</tt>")
+                                              .arg(name.toHtmlEscaped(), fingerprint)
+                                        + QStringLiteral("<br><br>")
+                                        + tr("Trust it, and remember it for this address?"),
+                                    QMessageBox::NoButton, this);
+        box->setAttribute(Qt::WA_DeleteOnClose);
+        QPushButton *trust = box->addButton(tr("Trust"), QMessageBox::AcceptRole);
+        trust->setObjectName(QStringLiteral("trust"));
+        box->setDefaultButton(box->addButton(QMessageBox::Cancel));
+        connect(box, &QMessageBox::finished, this, [this, box, trust]() {
+            m_client->answerCertificate(box->clickedButton() == trust);
+        });
+        // Gone with the connection, if that ends first.
+        connect(m_client, &RemoteClient::disconnected, box, &QDialog::reject);
+        box->open();
     });
     connect(m_client, &RemoteClient::connected, this, [this]() {
         m_loginError.clear();
@@ -410,7 +436,7 @@ void VncView::showLoginPrompt(bool needsUsername, const QString &error)
     if (!error.isEmpty()) {
         text = error + QLatin1Char('\n') + text;
         // What usually stops a login a Mac turns down.
-        if (needsUsername)
+        if (needsUsername && m_client->scheme() == QLatin1String("vnc"))
             text += QLatin1Char('\n')
                     + tr("Use the account's short name, and check the Mac lists the account "
                          "itself under Screen Sharing's “Allow access for” (a group such as "

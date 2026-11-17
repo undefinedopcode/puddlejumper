@@ -28,6 +28,8 @@ public:
     /* The remote screen, as last updated. Null until connected. */
     virtual const QImage &framebuffer() const = 0;
     virtual QString desktopName() const = 0;
+    /* The protocol, as in an address: "vnc" or "rdp". */
+    virtual QString scheme() const = 0;
 
     /* 16-bit colour, for slow links; from the next connection. */
     virtual void setReducedColour(bool) {}
@@ -37,6 +39,8 @@ public:
     virtual void setCredentials(const QString &username, const QString &password) = 0;
     /* The last connection ended because the login was turned down. */
     virtual bool authenticationFailed() const = 0;
+    /* Whether to go on with the server whose certificate was asked about. */
+    virtual void answerCertificate(bool) {}
 
     /* `buttons`: 1 left, 2 middle, 4 right, 8/16 wheel up/down, 32/64 left/right. */
     virtual void sendPointer(const QPoint &pos, int buttons) = 0;
@@ -48,6 +52,12 @@ signals:
     /* The server wants a login and no password is set: call setCredentials().
      * `needsUsername` when it takes an account name too. */
     void credentialsRequested(bool needsUsername);
+    /*
+     * The server's certificate can't be verified and isn't one trusted
+     * before (`changed`: another was, for this address): the connection waits
+     * for answerCertificate(). `fingerprint` is its SHA-256.
+     */
+    void certificateRequested(const QString &name, const QString &fingerprint, bool changed);
     void connected();
     /* The framebuffer has a new size (and is blank until updated). */
     void resized(const QSize &size);

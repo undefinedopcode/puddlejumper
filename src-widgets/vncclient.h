@@ -48,6 +48,7 @@ public:
     bool isConnected() const override { return m_state == State::Normal || m_state == State::Rects; }
     /* The remote screen, as last updated. Null until connected. */
     const QImage &framebuffer() const override { return m_image; }
+    QString scheme() const override { return QStringLiteral("vnc"); }
     QString desktopName() const override { return m_name; }
     /* Whether sendKey()'s scan code reaches the server (else only the keysym). */
     bool hasScanCodes() const { return m_scanCodes; }
