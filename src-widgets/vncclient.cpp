@@ -9,6 +9,7 @@
 #include "vnccrypto.h"
 
 #include <QCryptographicHash>
+#include <QFile>
 #include <QHostAddress>
 #include <QLoggingCategory>
 #include <QRandomGenerator>
@@ -26,6 +27,8 @@
 // encodings asked for, to compare them ("adaptive" is a Mac's own).
 // SUPERTERM_VNC_APPLE=0 speaks plain RFB 3.8 to a Mac, without Apple's
 // revision and what it brings.
+// SUPERTERM_VNC_ADAPTIVE_DUMP=<file> appends every Adaptive rectangle received
+// to a file, to put a picture that came out wrong through the decoder again.
 Q_LOGGING_CATEGORY(lcVnc, "superterm.vnc", QtInfoMsg)
 
 namespace {
@@ -192,6 +195,7 @@ void VncClient::open()
     m_apple = false;
     m_appleAccepts.clear();
     m_pushed = false;
+    m_fullOwed = 0;
     m_endReason.clear();
     m_cursors.clear();
     m_pasteReader.reset();
@@ -448,6 +452,7 @@ bool VncClient::parseOne()
             qCDebug(lcVnc) << "Apple: flags" << Qt::hex << qFromBigEndian<quint32>(field.constData() + 2)
                            << "accepts" << m_appleAccepts.toHex();
         }
+        qCDebug(lcVnc) << "server's screen" << width << "x" << height;
         m_pos += 20 + nameSize;
         m_name = name;
         m_state = State::Normal;
@@ -457,6 +462,7 @@ bool VncClient::parseOne()
         resizeFramebuffer(width, height);
         requestUpdate(false);
         m_fullUpdate = false;
+        m_fullAsks = 8;
         emit connected();
         return true;
     }
@@ -474,8 +480,11 @@ bool VncClient::parseOne()
             // Ask for the next one now, so the server works on it while
             // this one downloads, rather than after: a round trip less per
             // update. (After a resize the full one is asked for at the end.)
-            // A Mac that pushes its updates needs no asking.
-            if (!m_pushed)
+            // A Mac that pushes its updates needs no asking, and one that
+            // still owes the whole picture must not be asked for less: it
+            // keeps the later request only, and the picture never comes.
+            m_paintedBefore = m_fullOwed;
+            if (!m_pushed && !(m_apple && m_fullOwed > 0))
                 requestUpdate(true);
             if (m_rectsLeft == 0)
                 m_state = State::Normal;
@@ -577,8 +586,27 @@ bool VncClient::parseOne()
             return false;
         if (--m_rectsLeft == 0) {
             m_state = State::Normal;
-            if (m_fullUpdate)
+            if (m_fullUpdate) {
                 requestUpdate(false);
+                m_fullAsks = 8;
+            } else if (m_apple && m_fullOwed > 0) {
+                // A Mac's updates of other things (its layout, its cursor,
+                // a little that changed) can come before the picture asked
+                // for. Asked again after one that brought no picture at
+                // all, if it is long in coming, a few times: for a Mac that
+                // let the request go.
+                const bool painted = m_fullOwed != m_paintedBefore;
+                const bool late = !painted && m_fullAsked.elapsed() > 1000;
+                if (m_fullAsks > 0 && (late || !m_pushed)) {
+                    --m_fullAsks;
+                    qCDebug(lcVnc) << "Apple: the whole picture, asked for again";
+                    requestUpdate(false);
+                } else if (m_fullAsks == 0) {
+                    m_fullOwed = 0;
+                    if (!m_pushed)
+                        requestUpdate(true);
+                }
+            }
             m_fullUpdate = false;
             ++m_statsUpdates;
             if (m_statsTimer.elapsed() >= 5000)
@@ -631,6 +659,7 @@ bool VncClient::parseRect()
         if (!parseTight(rect))
             return false;
         m_statsPixels += qint64(w) * h;
+        m_fullOwed -= qint64(w) * h;
         m_statsDecodeNs += decoding.nsecsElapsed();
         emit updated(rect);
         return true;
@@ -649,6 +678,26 @@ bool VncClient::parseRect()
         }
         if (!available(16 + qsizetype(length)))
             return false;
+        if (u8(16) != 1)   // partial updates are too many to list
+            qCDebug(lcVnc) << "Adaptive:" << (u8(16) == 2 ? "tables" : "full update") << rect
+                           << length << "bytes";
+        if (const QString dump = qEnvironmentVariable("SUPERTERM_VNC_ADAPTIVE_DUMP"); !dump.isEmpty()) {
+            // Each rectangle as it came: x, y, width, height, length and the
+            // screen's size, then the body.
+            QFile file(dump);
+            if (file.open(QIODevice::Append)) {
+                QByteArray head;
+                put16(head, quint16(x));
+                put16(head, quint16(y));
+                put16(head, quint16(w));
+                put16(head, quint16(h));
+                put32(head, length);
+                put16(head, quint16(m_image.width()));
+                put16(head, quint16(m_image.height()));
+                file.write(head);
+                file.write(m_in.constData() + m_pos + 16, length);
+            }
+        }
         bool drew = false;
         QString error;
         const bool ok = m_adaptive->decode(rect, reinterpret_cast<const uchar *>(m_in.constData())
@@ -658,6 +707,7 @@ bool VncClient::parseRect()
         ++m_statsRects[encodingName(encoding)];
         if (drew) {
             m_statsPixels += qint64(w) * h;
+            m_fullOwed -= qint64(w) * h;
             m_statsDecodeNs += decoding.nsecsElapsed();
             emit updated(rect);
         }
@@ -697,6 +747,7 @@ bool VncClient::parseRect()
         m_pos += 16 + length;
         ++m_statsRects[encodingName(encoding)];
         m_statsPixels += qint64(w) * h;
+        m_fullOwed -= qint64(w) * h;
         if (encoding == kEncZrle) {
             if (!decodeZrle(data, rect)) {
                 fail(tr("Corrupt ZRLE update"));
@@ -737,6 +788,7 @@ bool VncClient::parseRect()
         m_pos += size;
         ++m_statsRects[encodingName(encoding)];
         m_statsPixels += qint64(w) * h;
+        m_fullOwed -= qint64(w) * h;
         m_statsDecodeNs += decoding.nsecsElapsed();
         emit updated(rect);
         return true;
@@ -846,6 +898,10 @@ bool VncClient::parseAppleRect(qint32 encoding, const QRect &rect, bool *handled
         resizeFramebuffer(width, height);
         // A layout drops the arming of the Mac's pushes: again, each time.
         armPushes();
+        // And the whole picture is asked for after it, once this update has
+        // been read, whether or not the size changed: the request made
+        // before the layout came may have been lost to one made since.
+        m_fullUpdate = true;
         return true;
     }
 
@@ -1400,6 +1456,10 @@ void VncClient::sendEncodings()
 void VncClient::requestUpdate(bool incremental)
 {
     QByteArray out;
+    if (!incremental) {
+        m_fullOwed = qint64(m_image.width()) * m_image.height();
+        m_fullAsked.start();
+    }
     put8(out, 3);
     put8(out, incremental);
     put16(out, 0);

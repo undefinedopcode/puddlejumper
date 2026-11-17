@@ -177,6 +177,10 @@ private:
     std::unique_ptr<AppleAdaptive> m_adaptive;
     int m_rectsLeft = 0;          // in the FramebufferUpdate being read
     bool m_fullUpdate = false;    // ask for everything next (after a resize)
+    qint64 m_fullOwed = 0;        // pixels of a whole picture asked for, yet to come
+    qint64 m_paintedBefore = 0;   // m_fullOwed as this update began
+    int m_fullAsks = 0;           // times left to ask a Mac for it again
+    QElapsedTimer m_fullAsked;    // since it was asked for
     bool m_scanCodes = false;
     bool m_reducedColour = false;
     int m_bytesPerPixel = 4;      // as set up for this connection: 4, or 2 for 16-bit
