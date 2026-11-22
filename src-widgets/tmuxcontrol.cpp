@@ -1,5 +1,5 @@
 /*
- * superterm — Qt Widgets port.
+ * puddlejumper — Qt Widgets port.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
@@ -12,7 +12,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 
-Q_LOGGING_CATEGORY(lcTmux, "superterm.tmux")
+Q_LOGGING_CATEGORY(lcTmux, "puddlejumper.tmux")
 
 namespace {
 

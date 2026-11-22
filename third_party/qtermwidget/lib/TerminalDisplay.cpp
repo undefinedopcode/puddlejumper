@@ -209,7 +209,7 @@ void TerminalDisplay::setColorTable(const ColorEntry table[])
    QCodec.
 */
 
-// superterm: characters drawn as geometry rather than taken from the font, so
+// puddlejumper: characters drawn as geometry rather than taken from the font, so
 // they fill their cell exactly and join up with their neighbours. Font glyphs
 // for these are sized to the font's ascent/descent, not to the integer cell,
 // which leaves gaps between rows at many font sizes.
@@ -224,7 +224,7 @@ static bool isDrawnChar(uint c, bool drawLineChars)
     return (drawLineChars && isBoxDrawing(c)) || isBlockElement(c) || isPowerlineGlyph(c);
 }
 
-// superterm: QChar is 16 bits, so QChar(c) silently truncates code points
+// puddlejumper: QChar is 16 bits, so QChar(c) silently truncates code points
 // above U+FFFF (e.g. Nerd Font icons at U+F0000+) and measures the wrong glyph.
 static int charAdvance(const QFontMetrics& fm, uint c)
 {
@@ -337,7 +337,7 @@ void TerminalDisplay::setVTFont(const QFont& f)
   // italic, etc) are stored in QFont independently, in almost all cases styleName is not needed.
   font.setStyleName(QString());
 
-  // superterm: the cell grid is a whole number of pixels wide, but a run of
+  // puddlejumper: the cell grid is a whole number of pixels wide, but a run of
   // text is drawn at the font's own advance, which is fractional wherever
   // hinting doesn't snap it (always on macOS, and on Linux with hinting off):
   // Monaco at 14pt is 8.39px in an 8px cell, 27px adrift by column 80. Letter
@@ -714,7 +714,7 @@ static void drawOtherChar(QPainter& paint, int x, int y, int w, int h, uchar cod
     }
 }
 
-// superterm: U+2580..U+259F, filled to exact cell boundaries. Antialiasing
+// puddlejumper: U+2580..U+259F, filled to exact cell boundaries. Antialiasing
 // stays off so adjacent cells share edges with no seam or overlap, including
 // under fractional display scaling.
 static void drawBlockElement(QPainter& paint, int x, int y, int w, int h, uint c)
@@ -759,7 +759,7 @@ static void drawBlockElement(QPainter& paint, int x, int y, int w, int h, uint c
     }
 }
 
-// superterm: Powerline separators (U+E0B0..U+E0BF, as defined by Powerline
+// puddlejumper: Powerline separators (U+E0B0..U+E0BF, as defined by Powerline
 // and Nerd Fonts), drawn to the cell so they meet the adjacent segment's
 // background exactly instead of depending on the font's glyph size.
 static void drawPowerlineGlyph(QPainter& paint, int x, int y, int w, int h, uint c)
@@ -1040,7 +1040,7 @@ void TerminalDisplay::drawCharacters(QPainter& painter,
         // This still allows RTL characters to be rendered in the RTL way.
         painter.setLayoutDirection(Qt::LeftToRight);
 
-        // superterm: QPainter::drawText(QRect, ...) clips to the rect unless
+        // puddlejumper: QPainter::drawText(QRect, ...) clips to the rect unless
         // told not to, which cut every glyph wider than its cell in half.
         // A single-cell character whose glyph has a much wider advance (a
         // fallback font's symbol, typically) is also centred on its cell, as
@@ -1085,7 +1085,7 @@ void TerminalDisplay::drawTextFragment(QPainter& painter ,
     const QColor foregroundColor = style->foregroundColor.color(_colorTable);
     const QColor backgroundColor = style->backgroundColor.color(_colorTable);
 
-    // superterm: backgrounds and text are painted in separate passes (see
+    // puddlejumper: backgrounds and text are painted in separate passes (see
     // paintEvent()), so this fragment's background can't cover the part of a
     // previous fragment's glyph that overhangs into it.
     if (backgroundPass)
@@ -1707,7 +1707,7 @@ void TerminalDisplay::paintEvent( QPaintEvent* pe )
     calDrawTextAdditionHeight(paint);
   }
 
-  // superterm: paint every background before any text. Painting fragment by
+  // puddlejumper: paint every background before any text. Painting fragment by
   // fragment let each background cover whatever the previous fragment's glyph
   // drew past its cell edge, which cut wide symbols off on the right.
   const QRegion regToDraw = pe->region() & cr;
@@ -1908,7 +1908,7 @@ int TerminalDisplay::textWidth(const int startColumn, const int length, const in
     }
     else if (_fixedFont_original)
     {
-        // superterm: drawn characters occupy exactly one cell, whatever
+        // puddlejumper: drawn characters occupy exactly one cell, whatever
         // advance the font (or a fallback font) gives its own glyph.
         result += _fontWidth;
     }

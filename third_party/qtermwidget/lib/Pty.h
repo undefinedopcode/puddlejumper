@@ -29,7 +29,7 @@
 */
 
 #ifdef _WIN32
-// superterm: Windows has its own Pty, on the pseudoconsole API.
+// puddlejumper: Windows has its own Pty, on the pseudoconsole API.
 #include "Pty_win.h"
 #else
 

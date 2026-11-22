@@ -1,5 +1,5 @@
 /*
- * superterm — a modern terminal built on Qt Quick and QMLTermWidget.
+ * puddlejumper — a modern terminal built on Qt Quick and QMLTermWidget.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
@@ -26,7 +26,7 @@ public:
     explicit ThumbnailStore(QObject *parent = nullptr);
     ~ThumbnailStore() override;
 
-    /* Path for a given tab id, e.g. .../superterm/thumbs/<pid>/tab-3.png */
+    /* Path for a given tab id, e.g. .../puddlejumper/thumbs/<pid>/tab-3.png */
     Q_INVOKABLE QString thumbnailPath(int tabId) const;
 
     /*

@@ -1,13 +1,13 @@
 [Desktop Entry]
 Type=Application
 Version=1.0
-Name=SuperTerm
+Name=PuddleJumper
 GenericName=Terminal Emulator
 Comment=A modern terminal emulator
-Exec=superterm
-Icon=superterm
+Exec=puddlejumper
+Icon=puddlejumper
 Terminal=false
 Categories=TerminalEmulator;System;
 Keywords=terminal;shell;console;command;
 StartupNotify=true
-StartupWMClass=superterm
+StartupWMClass=puddlejumper

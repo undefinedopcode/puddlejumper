@@ -1,5 +1,5 @@
 /*
- * superterm — Qt Widgets port.
+ * puddlejumper — Qt Widgets port.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
@@ -79,7 +79,7 @@ public:
     {
         // Widgets ask for the pixmap on every repaint; rendering the SVG each
         // time is wasteful, so cache per size, scale and colour.
-        const QString key = QStringLiteral("superterm-lucide/%1/%2x%3@%4/%5")
+        const QString key = QStringLiteral("puddlejumper-lucide/%1/%2x%3@%4/%5")
                                 .arg(m_name).arg(size.width()).arg(size.height())
                                 .arg(scale).arg(colourFor(mode).rgba());
         QPixmap pm;
@@ -105,7 +105,7 @@ public:
     }
 
     QIconEngine *clone() const override { return new LucideIconEngine(m_name); }
-    QString key() const override { return QStringLiteral("superterm-lucide"); }
+    QString key() const override { return QStringLiteral("puddlejumper-lucide"); }
     QString iconName() override { return m_name; }
 
 private:

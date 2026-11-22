@@ -1,5 +1,5 @@
 /*
- * superterm — Qt Widgets port.
+ * puddlejumper — Qt Widgets port.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
@@ -121,7 +121,7 @@ private:
      * workspace's tabs. One already open is switched to instead.
      */
     void openWorkspaceFile(const QString &path);
-    /* A folder: its .superterm.yml or .smug.yml if it has one, else a plain
+    /* A folder: its .puddlejumper.yml or .smug.yml if it has one, else a plain
      * workspace for it (or the one already open there). */
     void openFolder(const QString &dir);
     /* Offer, in the status bar, a workspace file for where the shell is. */

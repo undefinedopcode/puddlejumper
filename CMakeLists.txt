@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(superterm
+project(puddlejumper
     VERSION 0.2.0
     DESCRIPTION "A modern terminal built on Qt Widgets and QTermWidget"
     LANGUAGES CXX
@@ -10,13 +10,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # The Qt Widgets build is the application. QtQuick is only needed for the
-# legacy QML implementation, which is optional (see SUPERTERM_BUILD_QML below).
+# legacy QML implementation, which is optional (see PUDDLEJUMPER_BUILD_QML below).
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Widgets Svg Network)
 qt_standard_project_setup(REQUIRES 6.5)
 
 include(GNUInstallDirs)
 
-# QTermWidget is vendored and patched (third_party/qtermwidget/SUPERTERM.md),
+# QTermWidget is vendored and patched (third_party/qtermwidget/PUDDLEJUMPER.md),
 # so the system qtermwidget6 package is not used.
 add_subdirectory(third_party/qtermwidget EXCLUDE_FROM_ALL)
 
@@ -35,16 +35,18 @@ endif()
 file(GLOB LUCIDE_ICONS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" icons/lucide/*.svg)
 
 # ---------------------------------------------------------------------------
-# superterm — the application.
+# puddlejumper — the application.
 #
 # Built on a vendored copy of qtermwidget (Qt Widgets). This is the supported
 # build; it is the one that gets installed, and the one the desktop entry
 # launches.
 # ---------------------------------------------------------------------------
-qt_add_executable(superterm
+qt_add_executable(puddlejumper
     src-widgets/appicon.cpp
     src-widgets/appicon.h
     src-widgets/cardstyle.h
+    src-widgets/formername.cpp
+    src-widgets/formername.h
     src-widgets/macwindow.h
     src-widgets/main.cpp
     src-widgets/mainwindow.cpp
@@ -99,7 +101,7 @@ qt_add_executable(superterm
     src-widgets/wsl.h
 )
 
-target_link_libraries(superterm PRIVATE
+target_link_libraries(puddlejumper PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
@@ -110,54 +112,54 @@ target_link_libraries(superterm PRIVATE
     ZLIB::ZLIB
 )
 
-set_target_properties(superterm PROPERTIES AUTOMOC ON)
+set_target_properties(puddlejumper PROPERTIES AUTOMOC ON)
 
 # macOS: the toolbar in the title bar (src-widgets/macwindow.h), and an app
-# bundle, build/SuperTerm.app. packaging/macos/build-app.sh makes it a
+# bundle, build/PuddleJumper.app. packaging/macos/build-app.sh makes it a
 # self-contained one, in a disk image.
 if(APPLE)
     enable_language(OBJCXX)
-    target_sources(superterm PRIVATE src-widgets/macwindow.mm)
-    target_link_libraries(superterm PRIVATE "-framework AppKit")
+    target_sources(puddlejumper PRIVATE src-widgets/macwindow.mm)
+    target_link_libraries(puddlejumper PRIVATE "-framework AppKit")
 
-    set(SUPERTERM_ICNS icons/superterm.icns)
-    set_source_files_properties(${SUPERTERM_ICNS} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
-    target_sources(superterm PRIVATE ${SUPERTERM_ICNS})
-    set_target_properties(superterm PROPERTIES
+    set(PUDDLEJUMPER_ICNS icons/puddlejumper.icns)
+    set_source_files_properties(${PUDDLEJUMPER_ICNS} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    target_sources(puddlejumper PRIVATE ${PUDDLEJUMPER_ICNS})
+    set_target_properties(puddlejumper PROPERTIES
         MACOSX_BUNDLE TRUE
-        OUTPUT_NAME SuperTerm
+        OUTPUT_NAME PuddleJumper
         MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/data/macos/Info.plist.in
-        MACOSX_BUNDLE_BUNDLE_NAME SuperTerm
-        MACOSX_BUNDLE_GUI_IDENTIFIER com.superterm.superterm   # as the settings' domain
-        MACOSX_BUNDLE_ICON_FILE superterm.icns
+        MACOSX_BUNDLE_BUNDLE_NAME PuddleJumper
+        MACOSX_BUNDLE_GUI_IDENTIFIER com.puddlejumper.puddlejumper   # as the settings' domain
+        MACOSX_BUNDLE_ICON_FILE puddlejumper.icns
         MACOSX_BUNDLE_SHORT_VERSION_STRING ${PROJECT_VERSION}
         MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
         MACOSX_BUNDLE_COPYRIGHT "GNU General Public License v2 or later"
     )
 endif()
 
-# Windows: a GUI program (no console window of its own), SuperTerm.exe.
+# Windows: a GUI program (no console window of its own), PuddleJumper.exe.
 # packaging/windows/build-app.sh makes a self-contained folder of it, zipped.
 if(WIN32)
-    target_sources(superterm PRIVATE data/windows/superterm.rc)
-    set_target_properties(superterm PROPERTIES
+    target_sources(puddlejumper PRIVATE data/windows/puddlejumper.rc)
+    set_target_properties(puddlejumper PROPERTIES
         WIN32_EXECUTABLE TRUE
-        OUTPUT_NAME SuperTerm
+        OUTPUT_NAME PuddleJumper
     )
 endif()
 
 # Embed the icon so the window and taskbar get it without an install step.
-qt_add_resources(superterm "app_icons"
+qt_add_resources(puddlejumper "app_icons"
     PREFIX "/"
-    FILES icons/superterm.svg
+    FILES icons/puddlejumper.svg
 )
-qt_add_resources(superterm "lucide_icons"
+qt_add_resources(puddlejumper "lucide_icons"
     PREFIX "/lucide"
     BASE icons/lucide
     FILES ${LUCIDE_ICONS}
 )
 
-install(TARGETS superterm
+install(TARGETS puddlejumper
     BUNDLE  DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
@@ -165,10 +167,10 @@ install(TARGETS superterm
 # Desktop entry and icon, so the app appears in launchers and the xdg portal
 # recognises its app id (which also silences the startup portal warning).
 if(UNIX AND NOT APPLE)
-    install(FILES data/superterm.desktop
+    install(FILES data/puddlejumper.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
     )
-    install(FILES icons/superterm.svg
+    install(FILES icons/puddlejumper.svg
         DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
     )
 endif()
@@ -195,10 +197,10 @@ target_link_libraries(probe-vnc PRIVATE
 )
 set_target_properties(probe-vnc PROPERTIES AUTOMOC ON)
 
-foreach(target superterm probe-vnc)
+foreach(target puddlejumper probe-vnc)
     if(FREERDP_FOUND)
         target_sources(${target} PRIVATE src-widgets/rdpclient.cpp src-widgets/rdpclient.h)
-        target_compile_definitions(${target} PRIVATE SUPERTERM_RDP)
+        target_compile_definitions(${target} PRIVATE PUDDLEJUMPER_RDP)
         target_link_libraries(${target} PRIVATE PkgConfig::FREERDP)
     endif()
 endforeach()
@@ -234,18 +236,18 @@ set_target_properties(probe-settingsdialog PROPERTIES AUTOMOC ON)
 target_include_directories(probe-settingsdialog PRIVATE src-widgets)
 
 # ---------------------------------------------------------------------------
-# superterm-qml — the original Qt Quick implementation.
+# puddlejumper-qml — the original Qt Quick implementation.
 #
 # Kept buildable for comparison and as a fallback, but no longer installed and
 # no longer the desktop entry target. Off by default: it needs the QMLTermWidget
 # QML module, which is a separate (and largely abandoned) dependency.
 #
-#   cmake -B build -DSUPERTERM_BUILD_QML=ON
-#   cmake --build build --target superterm-qml
+#   cmake -B build -DPUDDLEJUMPER_BUILD_QML=ON
+#   cmake --build build --target puddlejumper-qml
 # ---------------------------------------------------------------------------
-option(SUPERTERM_BUILD_QML "Also build the legacy Qt Quick implementation" OFF)
+option(PUDDLEJUMPER_BUILD_QML "Also build the legacy Qt Quick implementation" OFF)
 
-if(SUPERTERM_BUILD_QML)
+if(PUDDLEJUMPER_BUILD_QML)
     find_package(Qt6 6.5 REQUIRED COMPONENTS Quick QuickControls2)
 
     # QMLTermWidget is a QML plugin (import QMLTermWidget 2.0), NOT a linkable
@@ -267,7 +269,7 @@ if(SUPERTERM_BUILD_QML)
     )
     if(NOT QMLTERMWIDGET_IMPORT_DIR)
         message(FATAL_ERROR
-            "SUPERTERM_BUILD_QML=ON but the QMLTermWidget QML module was not found.\n"
+            "PUDDLEJUMPER_BUILD_QML=ON but the QMLTermWidget QML module was not found.\n"
             "Install it first, e.g.:\n"
             "  Arch:   pacman -S qmltermwidget\n"
             "  Debian: apt install qmltermwidget-qt6-dev\n"
@@ -276,12 +278,14 @@ if(SUPERTERM_BUILD_QML)
     endif()
     message(STATUS "QMLTermWidget import dir: ${QMLTERMWIDGET_IMPORT_DIR}")
 
-    qt_add_executable(superterm-qml
+    qt_add_executable(puddlejumper-qml
         src/main.cpp
         src/settings_store.h
         src/settings_store.cpp
         src/thumbnail_store.h
         src/thumbnail_store.cpp
+        src-widgets/formername.h
+        src-widgets/formername.cpp
     )
 
     # Must be set BEFORE qt_add_qml_module so the generated qmldir marks Theme
@@ -290,8 +294,8 @@ if(SUPERTERM_BUILD_QML)
         PROPERTIES QT_QML_SINGLETON_TYPE TRUE
     )
 
-    qt_add_qml_module(superterm-qml
-        URI Superterm
+    qt_add_qml_module(puddlejumper-qml
+        URI PuddleJumper
         VERSION 1.0
         QML_FILES
             qml/Main.qml
@@ -301,17 +305,17 @@ if(SUPERTERM_BUILD_QML)
             qml/ThumbnailSidebar.qml
             qml/Theme.qml
         RESOURCES
-            icons/superterm.svg
+            icons/puddlejumper.svg
     )
 
-    target_link_libraries(superterm-qml PRIVATE
+    target_link_libraries(puddlejumper-qml PRIVATE
         Qt6::Core
         Qt6::Gui
         Qt6::Quick
         Qt6::QuickControls2
     )
 
-    target_compile_definitions(superterm-qml PRIVATE
-        SUPERTERM_QMLTERMWIDGET_IMPORT_DIR="${QMLTERMWIDGET_IMPORT_DIR}"
+    target_compile_definitions(puddlejumper-qml PRIVATE
+        PUDDLEJUMPER_QMLTERMWIDGET_IMPORT_DIR="${QMLTERMWIDGET_IMPORT_DIR}"
     )
 endif()

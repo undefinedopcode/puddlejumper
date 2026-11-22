@@ -28,7 +28,7 @@
 
 // System
 #ifdef Q_OS_WIN
-// superterm: no mmap there. A block is read into memory instead of mapped.
+// puddlejumper: no mmap there. A block is read into memory instead of mapped.
 #include <cstdlib>
 #define getpagesize() 4096
 #else

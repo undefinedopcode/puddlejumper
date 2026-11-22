@@ -1,4 +1,4 @@
-# SuperTerm
+# PuddleJumper
 
 A modern terminal built on **Qt Widgets** and
 **[QTermWidget](https://github.com/lxqt/qtermwidget)**.
@@ -13,6 +13,12 @@ The UI chrome follows the platform's widget style, so it looks native on
 Plasma, GNOME, macOS and Windows alike; `--style Fusion` forces a consistent
 look instead.
 
+PuddleJumper was called superterm. The first time it runs it takes over
+superterm's settings, workspaces and colour schemes (leaving them where they
+were), and it still reads `.superterm.yml` project files and the former
+`SUPERTERM_*` environment variables wherever their `PUDDLEJUMPER_*` names
+are unset.
+
 ## Screenshots
 
 The window chrome, toolbar, tab strip, status bar, and a live zsh prompt:
@@ -23,11 +29,11 @@ The window chrome, toolbar, tab strip, status bar, and a live zsh prompt:
 ├──────────────────────────────────────────────────────────┤
 │  Terminal  ✕                                             │
 ├──────────────────────────────────────────────────────────┤
-│  ~/projects/superterm  on  main ?5        at 02:19:38 PM │
+│  ~/projects/puddlejumper  on  main ?5        at 02:19:38 PM │
 │  ❯                                                       │
 │                                                          │
 ├──────────────────────────────────────────────────────────┤
-│ /home/april/projects/superterm        Solarized    13pt  │
+│ /home/april/projects/puddlejumper        Solarized    13pt  │
 └──────────────────────────────────────────────────────────┘
 ```
 
@@ -43,7 +49,7 @@ The window chrome, toolbar, tab strip, status bar, and a live zsh prompt:
 QTermWidget is **vendored** in `third_party/qtermwidget` (2.4.0, with rendering
 patches) and built as a static library, so no system qtermwidget package is
 needed. Its keyboard layouts and colour schemes are compiled in as Qt
-resources. See `third_party/qtermwidget/SUPERTERM.md` for what differs from
+resources. See `third_party/qtermwidget/PUDDLEJUMPER.md` for what differs from
 upstream.
 
 The UI's icons are [Lucide](https://lucide.dev) (1.65.0, ISC; see
@@ -60,14 +66,14 @@ see the project layout section.
 ```sh
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
-./build/superterm
+./build/puddlejumper
 ```
 
 Environment overrides, handy for testing:
 
 ```sh
-SUPERTERM_SHELL=/bin/fish SUPERTERM_SHELL_ARGS="-l" ./build/superterm
-SUPERTERM_TMUX="tmux -L test" ./build/superterm   # a separate tmux server
+PUDDLEJUMPER_SHELL=/bin/fish PUDDLEJUMPER_SHELL_ARGS="-l" ./build/puddlejumper
+PUDDLEJUMPER_TMUX="tmux -L test" ./build/puddlejumper   # a separate tmux server
 ```
 
 ### Install
@@ -76,19 +82,19 @@ SUPERTERM_TMUX="tmux -L test" ./build/superterm   # a separate tmux server
 cmake --install build --prefix ~/.local
 ```
 
-This installs the binary, a `superterm.desktop` entry and the icon, so the app
+This installs the binary, a `puddlejumper.desktop` entry and the icon, so the app
 appears in your launcher. (Installing to `~/.local` also gives xdg-desktop-
 portal an app id to match, which silences the startup portal warning you get
 when running straight from the build tree.)
 
 ### macOS
 
-On macOS the build is an app bundle, `build/SuperTerm.app` (`open
-build/SuperTerm.app`, or run `build/SuperTerm.app/Contents/MacOS/SuperTerm`
+On macOS the build is an app bundle, `build/PuddleJumper.app` (`open
+build/PuddleJumper.app`, or run `build/PuddleJumper.app/Contents/MacOS/PuddleJumper`
 to see its output). To build one to hand round:
 
 ```sh
-packaging/macos/build-app.sh            # dist/SuperTerm.app and dist/SuperTerm-<version>-<arch>.dmg
+packaging/macos/build-app.sh            # dist/PuddleJumper.app and dist/PuddleJumper-<version>-<arch>.dmg
 packaging/macos/build-app.sh --no-dmg   # just the app
 ```
 
@@ -97,7 +103,7 @@ Xcode, and sets up the rest itself the first time: Miniforge in `~/miniforge3`
 and a conda environment with Qt from `packaging/macos/environment.yml`. Then it
 builds in release, copies Qt and the other libraries into the app with
 `macdeployqt`, checks the app needs nothing outside itself, signs it ad hoc and
-makes the disk image (open it and drag SuperTerm onto Applications).
+makes the disk image (open it and drag PuddleJumper onto Applications).
 
 Things to know:
 
@@ -107,9 +113,9 @@ Things to know:
 - **Signed ad hoc, not notarised.** The Mac it was built on runs it as is. On
   another, Gatekeeper refuses a downloaded copy the first time: Control-click
   the app and choose Open, or clear the quarantine with
-  `xattr -dr com.apple.quarantine /Applications/SuperTerm.app`.
+  `xattr -dr com.apple.quarantine /Applications/PuddleJumper.app`.
 - **Opened from the Finder**, an app gets a bare environment. So that shells
-  get what Terminal's do, SuperTerm starts them as login shells (reading
+  get what Terminal's do, PuddleJumper starts them as login shells (reading
   `/etc/zprofile` and `~/.zprofile`, where Homebrew sets up its `PATH`), sets
   `LANG` from the system's language and region if no locale is set, and
   starts them at home rather than in `/`.
@@ -139,8 +145,8 @@ Persistence uses `QSettings`:
 
 | Platform | Location |
 | --- | --- |
-| Linux | `~/.config/superterm/superterm.conf` |
-| macOS | `~/Library/Preferences/com.superterm.superterm.plist` |
+| Linux | `~/.config/puddlejumper/puddlejumper.conf` |
+| macOS | `~/Library/Preferences/com.puddlejumper.puddlejumper.plist` |
 
 Stored keys:
 
@@ -258,7 +264,7 @@ Thumbnail Sidebar (`Ctrl+Shift+B`), in the settings dialog, or by setting
 - **thumbnails** — a left sidebar of cards, each with a live preview of that
   terminal.
 
-Both are superterm's own, not the platform's tab bar, so they look the same on
+Both are puddlejumper's own, not the platform's tab bar, so they look the same on
 every desktop and on macOS: cards in the terminal scheme's colours, the current
 one tinted and outlined in the system accent colour. Drag to reorder,
 middle-click or ✕ to close, right-click for the tab menu; double-click the
@@ -288,7 +294,7 @@ badge on the preview. A dot marks a tab that has had output you haven't seen.
 
 Previews are drawn from each pane's screen contents — the emulator's character
 image — not grabbed from the widget (patch 8 in
-`third_party/qtermwidget/SUPERTERM.md`). A hidden `QTabWidget` page never
+`third_party/qtermwidget/PUDDLEJUMPER.md`). A hidden `QTabWidget` page never
 paints, so grabbing it gives nothing; drawing from the screen works for hidden
 tabs as well as the visible one, with no need to bring them to the front. A
 split tab previews as its arrangement of panes. Every 250 ms, the tabs that have
@@ -356,7 +362,7 @@ only the eight ANSI colours: leaving them out makes bold text render black.
 seeds itself from the selected scheme's colours and decides from where that
 scheme came:
 
-- a scheme **you** saved (`~/.local/share/superterm/color-schemes/`) opens under
+- a scheme **you** saved (`~/.local/share/puddlejumper/color-schemes/`) opens under
   its own name and saving updates it — so adjusting the background of a theme
   you built does not spawn `<name> copy`
 - a **built-in** scheme opens as `<scheme> copy`, so a bundled preset can never
@@ -368,7 +374,7 @@ Colours** re-reads the original seed.
 Saved schemes land in:
 
 ```
-~/.local/share/superterm/color-schemes/<name>.colorscheme
+~/.local/share/puddlejumper/color-schemes/<name>.colorscheme
 ```
 
 That directory is registered with qtermwidget at startup, so your schemes appear
@@ -475,11 +481,11 @@ your global font size. Resolution happens on every apply, not once at creation.
   be renamed and given overrides like any other, and the default can be moved
   to another profile.
 
-`SUPERTERM_SHELL` still wins over a profile's shell program, since it is an
+`PUDDLEJUMPER_SHELL` still wins over a profile's shell program, since it is an
 explicit per-run instruction:
 
 ```sh
-SUPERTERM_SHELL=/bin/fish superterm   # every new tab uses fish
+PUDDLEJUMPER_SHELL=/bin/fish puddlejumper   # every new tab uses fish
 ```
 
 Config layout, under `[profiles]`:
@@ -547,7 +553,7 @@ Workspace** are `Ctrl+Shift+PgDown` and `Ctrl+Shift+PgUp`.
   programs are running there. Its tmux sessions are detached rather than
   ended. The last workspace can't be closed.
 
-**Reopening.** At the next start, superterm reopens the workspaces and tabs
+**Reopening.** At the next start, puddlejumper reopens the workspaces and tabs
 that were open when it quit: each tab's split layout, every pane's directory
 and profile, and tab names you gave. Programs aren't restarted; each pane
 gets a fresh shell where the old one was. tmux sessions on this machine that
@@ -560,13 +566,13 @@ turns this off.
 A workspace can also be described in a file, which says what to open and
 what to run, so a project's whole setup comes up in one go. The format is
 [smug](https://github.com/ivaaaan/smug)'s, so existing smug files work as
-they are, with a few additions of superterm's own that smug ignores.
+they are, with a few additions of puddlejumper's own that smug ignores.
 
 ```yaml
 session: blog                  # the workspace's name
 root: ~/src/blog               # where everything starts
-colour: "#4a8fe0"              # superterm: the workspace's colour
-backend: tmux                  # superterm: run as a tmux session (see below)
+colour: "#4a8fe0"              # puddlejumper: the workspace's colour
+backend: tmux                  # puddlejumper: run as a tmux session (see below)
 env:
   NODE_ENV: development        # set in every pane
 before_start:                  # run first; a failure stops the opening
@@ -582,7 +588,7 @@ windows:
         commands: [npm run dev]
       - commands: [git status]
   - name: tests
-    split: down                # superterm: nested splits with sizes
+    split: down                # puddlejumper: nested splits with sizes
     sizes: [70, 30]
     panes:
       - commands: [npm test -- --watch]
@@ -594,7 +600,7 @@ windows:
 ```
 
 **Workspace → Open Workspace** lists the files in
-`~/.config/superterm/workspaces/` and smug's `~/.config/smug/`, and has
+`~/.config/puddlejumper/workspaces/` and smug's `~/.config/smug/`, and has
 **Open File…** for any other. Opening one creates a workspace with its
 windows as tabs; if it's already open, it's switched to instead.
 
@@ -608,14 +614,14 @@ windows as tabs; if it's already open, it's switched to instead.
   prints it. Or a nested `split: right|down` with `sizes` and `panes`, for any
   arrangement.
 - **Variables**: `$name` and `${name}` are filled in from the environment,
-  as in smug. superterm asks for any that aren't set, in place of smug's
+  as in smug. puddlejumper asks for any that aren't set, in place of smug's
   `name=value` arguments, and remembers the answers for that workspace.
   Names the file sets under `env:` are left for the shell, so they read what
   the panes were given.
 - **Profiles**: `profile:` (at the top, or on a window or pane) names a
   profile to use instead of the default.
 - **Environment**: `SMUG_SESSION` and `SMUG_SESSION_CONFIG_PATH` are set as
-  in smug, and `SUPERTERM_WORKSPACE` too.
+  in smug, and `PUDDLEJUMPER_WORKSPACE` too.
 - **Start Window** lists the `manual: true` windows not yet open.
 - **Edit Workspace File** opens the file in `$VISUAL` or `$EDITOR` (or nano)
   in a new tab. **Save Workspace As…** writes any workspace as a file: each
@@ -624,12 +630,12 @@ windows as tabs; if it's already open, it's switched to instead.
   file's other settings and its unopened manual windows are kept as written.
 - **Trust.** A file outside those two directories, from a project or a
   download, runs commands. The first time it's opened, and whenever it
-  changes, superterm lists the commands and asks first.
+  changes, puddlejumper lists the commands and asks first.
 
 **Running in tmux.** With `backend: tmux`, a workspace file runs as a tmux
 session named after it, as smug does, so its programs keep running when
-superterm closes. Files in smug's directory, or named `.smug.yml`, use tmux
-unless they say `backend: local`; superterm's own files default to local
+puddlejumper closes. Files in smug's directory, or named `.smug.yml`, use tmux
+unless they say `backend: local`; puddlejumper's own files default to local
 shells.
 
 - **Opening** builds the session with tmux's command line (windows, splits at
@@ -643,12 +649,12 @@ shells.
 - **Save Workspace As…** includes tmux tabs, with each pane's directory and
   running command taken from tmux, and writes `backend: tmux`.
 - tmux spreads a resize evenly across panes rather than in proportion, so the
-  session is built at the size superterm will show it, to keep the sizes the
+  session is built at the size puddlejumper will show it, to keep the sizes the
   file gives.
 
 ### Project folders
 
-A project can keep its workspace file with its code, as `.superterm.yml` or
+A project can keep its workspace file with its code, as `.puddlejumper.yml` or
 smug's `.smug.yml` (or `.yaml`), so everyone working on it gets the same
 setup.
 
@@ -663,7 +669,7 @@ setup.
 - A project's file is someone else's, so it always goes through the trust
   prompt the first time and whenever it changes.
 
-From the command line, `superterm <workspace>` opens one at launch: a
+From the command line, `puddlejumper <workspace>` opens one at launch: a
 folder, a workspace file, or the name of a file in the workspace directories
 (as `smug start <name>` does).
 
@@ -687,9 +693,9 @@ whole arrangement.
 
 The **tmux** menu attaches to tmux sessions in **control mode**, the way
 iTerm2 does: each tmux window becomes a tab and each pane a pane, drawn by
-superterm rather than by tmux. So scrollback, search, copy, screenshots,
+puddlejumper rather than by tmux. So scrollback, search, copy, screenshots,
 thumbnails and the font all work natively, while the programs live in tmux.
-Detach, or quit superterm, and they keep running; attach again (from here or
+Detach, or quit puddlejumper, and they keep running; attach again (from here or
 any tmux client) and everything is where it was, history included.
 
 The menu lists this machine's sessions (choosing one attaches), plus:
@@ -703,7 +709,7 @@ The menu lists this machine's sessions (choosing one attaches), plus:
 In a tmux tab, the usual actions are carried out by tmux: New Tab creates a
 tmux window, Split Right/Down split the pane, Close Pane and Close Tab kill the
 pane or window, and dragging a split handle resizes the pane. Closing the
-session's last window would end the session, so superterm asks first and
+session's last window would end the session, so puddlejumper asks first and
 offers to detach instead (the default). Switching tabs
 or panes switches tmux's current window and pane too, so another client sees
 the same. **File → New Tab with Profile** still opens a local tab. tmux's own
@@ -711,12 +717,12 @@ prefix key isn't involved: keys go straight to the program in the pane.
 
 How it works:
 
-- superterm runs `tmux -C` over plain pipes and speaks its line protocol:
+- puddlejumper runs `tmux -C` over plain pipes and speaks its line protocol:
   replies to commands, plus notifications such as `%output`,
   `%layout-change` and `%window-add`. Pane output is fed straight into a
   terminal that has no process of its own; keystrokes go back with
   `send-keys -H`.
-- tmux decides the layout in character cells. superterm tells tmux how many
+- tmux decides the layout in character cells. puddlejumper tells tmux how many
   cells fit (`refresh-client -C`) and sizes every pane and split handle to
   whole cells, so each pane shows exactly the grid tmux gave it. That is why
   tmux panes have no scrollbar or per-pane margin: the tab is padded instead.
@@ -724,8 +730,8 @@ How it works:
 - On attaching, each pane's history and screen come from `capture-pane`, and
   a full-screen program (an editor, a pager) is put back on the alternate
   screen.
-- With tmux 3.2 or later, flow control is on: if superterm falls behind a
-  flood of output, tmux pauses that pane, and superterm redraws it from a
+- With tmux 3.2 or later, flow control is on: if puddlejumper falls behind a
+  flood of output, tmux pauses that pane, and puddlejumper redraws it from a
   capture when it catches up.
 - Both of tmux's layout formats are understood: the classic one in
   `%layout-change`, and the JSON one tmux 3.8 uses in format variables.
@@ -747,7 +753,7 @@ screen: the character grid and its margin, without the scrollbar.
 
 Either way the image goes straight to the clipboard, and for ten seconds the
 status bar offers **Save…**, which suggests
-`~/Pictures/superterm-<date>-<time>.png`. Nothing is written to disk unless you
+`~/Pictures/puddlejumper-<date>-<time>.png`. Nothing is written to disk unless you
 ask. Both actions are also in the terminal's right-click menu.
 
 Captures are at device resolution, so on a scaled display they come out at the
@@ -785,7 +791,7 @@ A `QAction` shortcut is claimed by the shortcut map before the focused widget �
 the terminal — ever sees the key, so binding one would silently break the
 program running inside it. `Ctrl+Q` in particular is micro's quit key, and the
 shell's XON resume; it used to be `Quit` (via `QKeySequence::Quit`) and killed
-SuperTerm instead of the editor. Quit is now `Ctrl+Shift+Q`.
+PuddleJumper instead of the editor. Quit is now `Ctrl+Shift+Q`.
 
 The plain-`Ctrl` bindings that remain (`Ctrl+Tab`, `Ctrl+,`, `Ctrl+=`/`-`/`0`)
 are non-letter keys that produce no control code, so no terminal program wants
@@ -814,9 +820,9 @@ src-widgets/colorschemeeditor.*  scheme editor dialog with live preview
 src-widgets/screenshotoverlay.*  drag-to-select region screenshots
 src-widgets/thumbnailsidebar.*  left sidebar of tab cards with live previews
 src-widgets/settings.*    QSettings-backed configuration
-third_party/qtermwidget/  vendored, patched QTermWidget (see SUPERTERM.md)
-data/superterm.desktop    launcher entry
-icons/superterm.svg       app icon
+third_party/qtermwidget/  vendored, patched QTermWidget (see PUDDLEJUMPER.md)
+data/puddlejumper.desktop    launcher entry
+icons/puddlejumper.svg       app icon
 
 qml/, src/                legacy Qt Quick build (optional, see below)
 ```
@@ -824,8 +830,8 @@ qml/, src/                legacy Qt Quick build (optional, see below)
 ### Building the legacy QML version
 
 ```sh
-cmake -B build -DSUPERTERM_BUILD_QML=ON
-cmake --build build --target superterm-qml
+cmake -B build -DPUDDLEJUMPER_BUILD_QML=ON
+cmake --build build --target puddlejumper-qml
 ```
 
 It requires the separate QMLTermWidget QML module and is not installed. The two
@@ -851,8 +857,8 @@ segfaults the moment a `ComboBox` is instantiated, and since Fusion already
 yields the identical palette it would buy nothing but risk. To force a style:
 
 ```sh
-SUPERTERM_QUICK_STYLE=Fusion ./build/superterm    # or Basic, Material, ...
-SUPERTERM_SHOWSTYLE=1 ./build/superterm           # log the choice
+PUDDLEJUMPER_QUICK_STYLE=Fusion ./build/puddlejumper    # or Basic, Material, ...
+PUDDLEJUMPER_SHOWSTYLE=1 ./build/puddlejumper           # log the choice
 ```
 
 The terminal itself always paints its own colour scheme (Solarized by
@@ -942,4 +948,4 @@ from QTermWidget).
   `ComboBox` in a `ColumnLayout`, independent of the Qt *widget* theme.
   `Fusion`, `Basic` and `org.kde.union` are all unaffected. The app therefore
   selects Union rather than `org.kde.desktop`; if you override the style with
-  `SUPERTERM_QUICK_STYLE=org.kde.desktop` the settings drawer will crash.
+  `PUDDLEJUMPER_QUICK_STYLE=org.kde.desktop` the settings drawer will crash.

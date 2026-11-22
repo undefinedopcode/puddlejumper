@@ -1,7 +1,7 @@
-# Exploratory: porting SuperTerm to Qt Widgets
+# Exploratory: porting PuddleJumper to Qt Widgets
 
 Written while evaluating and carrying out the port, which is now complete: the
-Qt Widgets build is the main `superterm` target and the Qt Quick version is
+Qt Widgets build is the main `puddlejumper` target and the Qt Quick version is
 optional. Kept because the measurements and traps below are still the reference
 for why the widgets API was chosen and what to watch out for.
 
@@ -102,12 +102,12 @@ been superseded by `src-widgets/`. It was built as a separate executable (never
 touching the QML app), invoking it as:
 
 ```sh
-cmake --build build --target superterm-widgets
-./build/superterm-widgets              # platform style (here: darkly)
-./build/superterm-widgets --style Fusion   # neutral look, same everywhere
+cmake --build build --target puddlejumper-widgets
+./build/puddlejumper-widgets              # platform style (here: darkly)
+./build/puddlejumper-widgets --style Fusion   # neutral look, same everywhere
 ```
 
-Today the equivalent is simply the main target: `./build/superterm [--style ...]`.
+Today the equivalent is simply the main target: `./build/puddlejumper [--style ...]`.
 
 `QMainWindow` + `QTabWidget` + `QTermWidget`, with a settings dock exposing the
 four settings the QML build could not reach. Verified at runtime by driving the
@@ -180,7 +180,7 @@ SPIKEV tab count = 3  current = 2                    (tabs)
 SPIKEV settings dialog visible = true                (dialog)
 ```
 
-Both binaries read and write `~/.config/superterm/superterm.conf`, so an
+Both binaries read and write `~/.config/puddlejumper/puddlejumper.conf`, so an
 existing QML-build config carries over — the ported build picked up
 `colorScheme=Tango` unchanged on first run.
 
@@ -200,8 +200,8 @@ Known deltas from the QML build:
 
 ### After the merge
 
-The widgets build is now the main `superterm` target; the QML version is
-`superterm-qml`, opt-in via `-DSUPERTERM_BUILD_QML=ON`, and no longer installed.
+The widgets build is now the main `puddlejumper` target; the QML version is
+`puddlejumper-qml`, opt-in via `-DPUDDLEJUMPER_BUILD_QML=ON`, and no longer installed.
 qtermwidget6 is a required dependency and QtQuick is only needed for the legacy
 target.
 

@@ -1,5 +1,5 @@
 /*
- * superterm — Qt Widgets port.
+ * puddlejumper — Qt Widgets port.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
@@ -254,7 +254,7 @@ QJsonObject arrange(const QString &layout, const QList<QJsonObject> &leaves)
     return split(QStringLiteral("right"), leaves);
 }
 
-/* superterm's nested form: a node with "split" and "panes", or a pane. */
+/* puddlejumper's nested form: a node with "split" and "panes", or a pane. */
 QJsonObject nested(const YAML::Node &node, const QString &base, const QString &profile,
                    QStringList firstCommands)
 {
@@ -350,7 +350,7 @@ namespace WorkspaceFile {
 QStringList directories()
 {
     const QString config = QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation);
-    return {config + QStringLiteral("/superterm/workspaces"), config + QStringLiteral("/smug")};
+    return {config + QStringLiteral("/puddlejumper/workspaces"), config + QStringLiteral("/smug")};
 }
 
 QList<QPair<QString, QString>> available()
@@ -382,7 +382,9 @@ bool isUsersOwn(const QString &path)
 
 QString projectFileIn(const QString &dir)
 {
-    for (const char *name : {".superterm.yml", ".superterm.yaml", ".smug.yml", ".smug.yaml"}) {
+    for (const char *name : {".puddlejumper.yml", ".puddlejumper.yaml",
+                             ".superterm.yml", ".superterm.yaml",   // its former name
+                             ".smug.yml", ".smug.yaml"}) {
         const QFileInfo f(QDir(dir).filePath(QLatin1String(name)));
         if (f.isFile())
             return f.absoluteFilePath();
@@ -501,7 +503,8 @@ bool parse(const QString &text, const QString &path, WorkspaceSpec &out, QString
         // As smug sets them, so files written for it keep working.
         out.environment << QStringLiteral("SMUG_SESSION=") + out.name
                         << QStringLiteral("SMUG_SESSION_CONFIG_PATH=") + path
-                        << QStringLiteral("SUPERTERM_WORKSPACE=") + out.name;
+                        << QStringLiteral("PUDDLEJUMPER_WORKSPACE=") + out.name
+                        << QStringLiteral("SUPERTERM_WORKSPACE=") + out.name;   // its former name
 
         const YAML::Node windows = doc["windows"];
         if (windows && windows.IsSequence()) {
@@ -514,7 +517,7 @@ bool parse(const QString &text, const QString &path, WorkspaceSpec &out, QString
                 const QString winProfile = str(w, "profile").isEmpty() ? profile : str(w, "profile");
 
                 if (!str(w, "split").isEmpty()) {
-                    // superterm's nested layout.
+                    // puddlejumper's nested layout.
                     win.layout = nested(w, win.root, winProfile, list(w, "commands"));
                 } else {
                     // smug's: the window's pane, then one per `panes` entry,
@@ -621,7 +624,7 @@ QString write(const QString &name, const QString &root, const QColor &colour,
             }
             out << YAML::EndSeq;
         } else {
-            // Nested splits: superterm's form.
+            // Nested splits: puddlejumper's form.
             out << YAML::Key << "split" << YAML::Value
                 << w.layout.value(QStringLiteral("split")).toString().toStdString();
             out << YAML::Key << "sizes" << YAML::Value << YAML::Flow << YAML::BeginSeq;

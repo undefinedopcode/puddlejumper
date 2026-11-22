@@ -1,5 +1,5 @@
 /*
- * superterm — Qt Widgets port.
+ * puddlejumper — Qt Widgets port.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
@@ -7,6 +7,7 @@
 #include "mainwindow.h"
 
 #include "colorscheme.h"
+#include "formername.h"
 #include "settings.h"
 
 #include <QApplication>
@@ -26,14 +27,15 @@ int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
     // Must match the QML build so both share one config file.
-    app.setOrganizationName(QStringLiteral("superterm"));
-    app.setApplicationName(QStringLiteral("superterm"));
-    app.setApplicationDisplayName(QStringLiteral("SuperTerm"));
+    app.setOrganizationName(QStringLiteral("puddlejumper"));
+    app.setApplicationName(QStringLiteral("puddlejumper"));
+    app.setApplicationDisplayName(QStringLiteral("PuddleJumper"));
     app.setApplicationVersion(QStringLiteral("0.2.0"));
-    app.setDesktopFileName(QStringLiteral("superterm"));
+    app.setDesktopFileName(QStringLiteral("puddlejumper"));
+    adoptFormerName();   // superterm's settings, the first time
 
     /*
-     * The shells are ours, not those of the terminal superterm may have been
+     * The shells are ours, not those of the terminal puddlejumper may have been
      * started from: drop that one's identity, which they would inherit. On
      * macOS, TERM_PROGRAM=Apple_Terminal makes /etc/zshrc load Terminal's
      * session save/restore, and an inherited TERM_SESSION_ID has every shell
@@ -43,7 +45,7 @@ int main(int argc, char *argv[])
                              "KONSOLE_DBUS_SESSION", "KONSOLE_VERSION", "VTE_VERSION",
                              "WT_SESSION"})
         qunsetenv(name);
-    qputenv("TERM_PROGRAM", "superterm");
+    qputenv("TERM_PROGRAM", "puddlejumper");
     qputenv("TERM_PROGRAM_VERSION", app.applicationVersion().toUtf8());
 
     // Started from a launcher (the Finder, the Dock, a desktop entry), the
@@ -88,7 +90,7 @@ int main(int argc, char *argv[])
     // from the one scalable source keeps small sizes sharp.
     QIcon appIcon;
     for (int size : {16, 24, 32, 48, 64, 128, 256}) {
-        appIcon.addFile(QStringLiteral(":/icons/superterm.svg"),
+        appIcon.addFile(QStringLiteral(":/icons/puddlejumper.svg"),
                         QSize(size, size));
     }
     QApplication::setWindowIcon(appIcon);
@@ -113,9 +115,9 @@ int main(int argc, char *argv[])
     parser.addOption(rdpOpt);
     parser.addPositionalArgument(
         QStringLiteral("workspace"),
-        QStringLiteral("A workspace to open: a folder (its .superterm.yml or .smug.yml, "
+        QStringLiteral("A workspace to open: a folder (its .puddlejumper.yml or .smug.yml, "
                        "or a workspace for the folder), a workspace file, or the name of "
-                       "one in ~/.config/superterm/workspaces or ~/.config/smug."),
+                       "one in ~/.config/puddlejumper/workspaces or ~/.config/smug."),
         QStringLiteral("[workspace]"));
     parser.process(app);
 

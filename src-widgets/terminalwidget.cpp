@@ -1,5 +1,5 @@
 /*
- * superterm — Qt Widgets port.
+ * puddlejumper — Qt Widgets port.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
@@ -7,6 +7,7 @@
 #include "terminalwidget.h"
 
 #include "colorscheme.h"
+#include "formername.h"
 #include "procinfo.h"
 #include "screenshotoverlay.h"
 
@@ -117,12 +118,12 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings,
     }
 
     // Optional shell override, useful for testing:
-    //   SUPERTERM_SHELL=/bin/fish superterm
+    //   PUDDLEJUMPER_SHELL=/bin/fish puddlejumper
     //
     // The environment variable wins over the profile: it is an explicit,
     // per-run instruction, and tools/tests rely on it to pin a shell without
     // editing config.
-    const QByteArray shell = qgetenv("SUPERTERM_SHELL");
+    const QByteArray shell = appEnv("SHELL");
     const QString envShell = QString::fromLocal8Bit(shell);
 
     const QString program =
@@ -149,7 +150,7 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings,
     if (m_profile.workingDirectory && !m_profile.workingDirectory->isEmpty())
         m_terminal->setWorkingDirectory(*m_profile.workingDirectory);
     if (!m_profile.environment.isEmpty())
-        m_terminal->setEnvironment(m_profile.environment);   // added to superterm's own
+        m_terminal->setEnvironment(m_profile.environment);   // added to puddlejumper's own
 
     m_terminal->startShellProgram();
 }
@@ -415,7 +416,7 @@ void TerminalWidget::focusTerminal()
 bool TerminalWidget::hasRunningProcess() const
 {
     // An external terminal's programs live elsewhere (in tmux), and survive
-    // superterm quitting.
+    // puddlejumper quitting.
     if (!m_terminal || isExternal())
         return false;
 

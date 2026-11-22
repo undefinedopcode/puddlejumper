@@ -117,7 +117,7 @@ void HistoryFile::map()
     Q_ASSERT( fileMap == nullptr );
 
 #ifdef Q_OS_WIN
-    // superterm: not mapped there; get() reads the file instead.
+    // puddlejumper: not mapped there; get() reads the file instead.
     readWriteBalance = 0;
     return;
 #else

@@ -274,7 +274,7 @@ public:
     int  fontWidth()    { return _fontWidth; }
 
     /**
-     * superterm: the rectangle the character grid occupies, in widget
+     * puddlejumper: the rectangle the character grid occupies, in widget
      * coordinates. Excludes the margins, the scrollbar, and any part of a cell
      * left over at the right and bottom edges. A cell is fontWidth() by
      * fontHeight(), so this lets callers map pixels to cells.
@@ -672,7 +672,7 @@ private:
     // divides the part of the display specified by 'rect' into
     // fragments according to their colors and styles and calls
     // drawTextFragment() to draw the fragments
-    // superterm: called twice per paint, first with backgroundPass set to
+    // puddlejumper: called twice per paint, first with backgroundPass set to
     // fill backgrounds, then without it to draw the cursor and text
     void drawContents(QPainter &paint, const QRect &rect, bool backgroundPass);
     // draws a section of text, all the text in this section
@@ -763,7 +763,7 @@ private:
     int  _fontWidth;     // width
     int  _fontAscent;     // ascend
     bool _boldIntense;   // Whether intense colors should be rendered with bold font
-    qreal _boldLetterSpacing = 0; // superterm: letter spacing fitting the bold face to the cell
+    qreal _boldLetterSpacing = 0; // puddlejumper: letter spacing fitting the bold face to the cell
     int  _drawTextAdditionHeight;   // additional height to prevent font trancation
     bool _drawTextTestFlag;         // indicate it is a testing or not
 

@@ -1,5 +1,5 @@
 /*
- * superterm — Qt Widgets port.
+ * puddlejumper — Qt Widgets port.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
@@ -7,6 +7,7 @@
 #include "mainwindow.h"
 
 #include "appicon.h"
+#include "formername.h"
 #include "macwindow.h"
 #include "procinfo.h"
 #include "settingsdialog.h"
@@ -18,7 +19,7 @@
 #include "tmuxsession.h"
 #include "tmuxworkspace.h"
 #include "vncclient.h"
-#ifdef SUPERTERM_RDP
+#ifdef PUDDLEJUMPER_RDP
 #include "rdpclient.h"
 #endif
 #include "vnctab.h"
@@ -81,12 +82,12 @@ namespace {
  * name and shortcut appear. Qt doesn't add the shortcut itself.
  */
 /*
- * How to run tmux. SUPERTERM_TMUX overrides it, e.g. "tmux -L test" to use a
+ * How to run tmux. PUDDLEJUMPER_TMUX overrides it, e.g. "tmux -L test" to use a
  * separate server (handy for testing without touching real sessions).
  */
 QStringList tmuxProgram()
 {
-    const QString env = QString::fromLocal8Bit(qgetenv("SUPERTERM_TMUX")).trimmed();
+    const QString env = appEnvString("TMUX").trimmed();
     const QStringList cmd = env.isEmpty() ? QStringList() : QProcess::splitCommand(env);
     if (!cmd.isEmpty())
         return cmd;
@@ -122,11 +123,11 @@ QStringList scriptCommand(const QString &script)
 constexpr int kDefaultSidebarWidth = 220;
 
 // On a tab: it has output that hasn't been seen (kept while it is parked).
-constexpr char kBusyProperty[] = "supertermBusy";
+constexpr char kBusyProperty[] = "puddlejumperBusy";
 
 // On a new tab: until when (ms since the epoch) its output is its shell
 // starting up, not news.
-constexpr char kQuietUntilProperty[] = "supertermQuietUntil";
+constexpr char kQuietUntilProperty[] = "puddlejumperQuietUntil";
 
 // Where the session (workspaces and their tabs) is kept between runs.
 constexpr auto kSessionKey = "session/state";
@@ -215,7 +216,7 @@ void setToolTipWithShortcut(QAction *act)
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
-    setWindowTitle(QStringLiteral("SuperTerm"));
+    setWindowTitle(QStringLiteral("PuddleJumper"));
     setMinimumSize(760, 420);
 
     // There is always a workspace; a saved session replaces this one.
@@ -447,7 +448,7 @@ void MainWindow::buildMenus()
         settings.setValue(QStringLiteral("vnc/lastAddress"), text.trimmed());
         openVnc(text);
     });
-#ifdef SUPERTERM_RDP
+#ifdef PUDDLEJUMPER_RDP
     auto *rdpAct = file->addAction(tr("New R&DP Tab…"));
     connect(rdpAct, &QAction::triggered, this, [this]() {
         QSettings settings;
@@ -813,7 +814,7 @@ void MainWindow::saveScreenshot()
     QString dir = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
     if (dir.isEmpty() || !QDir(dir).exists())
         dir = QDir::homePath();
-    const QString suggested = dir + QStringLiteral("/superterm-")
+    const QString suggested = dir + QStringLiteral("/puddlejumper-")
         + QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"))
         + QStringLiteral(".png");
 
@@ -980,7 +981,7 @@ void MainWindow::openVnc(const QString &address)
 
 void MainWindow::openRdp(const QString &address)
 {
-#ifdef SUPERTERM_RDP
+#ifdef PUDDLEJUMPER_RDP
     QString host;
     quint16 port;
     if (!RdpClient::parseAddress(address, &host, &port)) {
@@ -1045,7 +1046,7 @@ void MainWindow::syncTabText(Tab *page)
         m_tabStrip->setTitle(i, name);
         m_tabStrip->setTabToolTip(i, m_tabs->tabToolTip(i));
         if (vnc == currentPage())
-            setWindowTitle(tr("%1 — SuperTerm").arg(name));
+            setWindowTitle(tr("%1 — PuddleJumper").arg(name));
         return;
     }
 
@@ -1067,7 +1068,7 @@ void MainWindow::syncTabText(Tab *page)
                                      : tr("tmux %1 — %2\n%3").arg(session->label(), name, title));
         m_tabStrip->setTabToolTip(i, m_tabs->tabToolTip(i));
         if (tab == currentTab())
-            setWindowTitle(tr("%1 — tmux %2 — SuperTerm")
+            setWindowTitle(tr("%1 — tmux %2 — PuddleJumper")
                                .arg(title.isEmpty() ? name : title, session->label()));
         return;
     }
@@ -1083,8 +1084,8 @@ void MainWindow::syncTabText(Tab *page)
     m_tabStrip->setTitle(i, name);
     m_tabStrip->setTabToolTip(i, m_tabs->tabToolTip(i));
     if (tab == currentTab())
-        setWindowTitle(title.isEmpty() ? QStringLiteral("SuperTerm")
-                                       : tr("%1 — SuperTerm").arg(title));
+        setWindowTitle(title.isEmpty() ? QStringLiteral("PuddleJumper")
+                                       : tr("%1 — PuddleJumper").arg(title));
 }
 
 void MainWindow::wirePane(TerminalWidget *term)
@@ -1780,7 +1781,7 @@ bool MainWindow::confirmQuitIfBusy()
 
     QMessageBox box(this);
     box.setIcon(QMessageBox::Warning);
-    box.setWindowTitle(tr("Quit SuperTerm?"));
+    box.setWindowTitle(tr("Quit PuddleJumper?"));
 
     // Name the programs where possible: "Quitting will terminate micro, ssh"
     // is far more useful than a bare count.
@@ -2160,7 +2161,7 @@ void MainWindow::rebuildWorkspaceMenu()
     m_workspaceMenu->addSeparator();
     m_workspaceMenu->addAction(m_newWorkspaceAct);
 
-    // Workspace files: superterm's, then smug's; those open are ticked.
+    // Workspace files: puddlejumper's, then smug's; those open are ticked.
     m_openWorkspaceMenu->clear();
     for (const auto &[name, path] : WorkspaceFile::available()) {
         QAction *act = m_openWorkspaceMenu->addAction(name);
@@ -2436,7 +2437,7 @@ bool MainWindow::restoreSession()
                     syncTabText(vnc);
                 continue;
             }
-#ifdef SUPERTERM_RDP
+#ifdef PUDDLEJUMPER_RDP
             if (const QString address = savedTab.value(QStringLiteral("rdp")).toString();
                 !address.isEmpty()) {
                 QString host;
@@ -2533,7 +2534,7 @@ bool MainWindow::readWorkspaceFile(const QString &path, QHash<QString, QString> 
     if (!WorkspaceFile::parse(WorkspaceFile::expand(text, variables), path, spec, &error)) {
         if (askForVariables)
             QMessageBox::warning(this, tr("Open Workspace"),
-                                 tr("%1 isn't a workspace file superterm can read.\n\n%2")
+                                 tr("%1 isn't a workspace file puddlejumper can read.\n\n%2")
                                      .arg(tildePath(path), error));
         return false;
     }

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Build SuperTerm.app on macOS, self-contained, in a disk image:
+# Build PuddleJumper.app on macOS, self-contained, in a disk image:
 #
 #   packaging/macos/build-app.sh            # set up what's missing, build, package
-#   packaging/macos/build-app.sh --no-dmg   # stop at dist/SuperTerm.app
+#   packaging/macos/build-app.sh --no-dmg   # stop at dist/PuddleJumper.app
 #
 # What it needs, it sets up (each step is skipped once done):
 #   - Apple's command line tools (asks to install them; not the whole Xcode)
@@ -12,13 +12,13 @@
 #
 # The app is built for this Mac's architecture, signed ad hoc (enough to run
 # here, and on other Macs once let through Gatekeeper; not notarised), and
-# lands in dist/: SuperTerm.app and SuperTerm-<version>-<arch>.dmg.
+# lands in dist/: PuddleJumper.app and PuddleJumper-<version>-<arch>.dmg.
 
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 MINIFORGE="${MINIFORGE:-$HOME/miniforge3}"
-ENV_NAME="superterm"
+ENV_NAME="puddlejumper"
 BUILD="$ROOT/build-release"
 DIST="$ROOT/dist"
 MAKE_DMG=1
@@ -73,21 +73,21 @@ conda activate "$ENV_NAME"
 
 step "Build"
 cmake -S "$ROOT" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_PREFIX_PATH="$CONDA_PREFIX" -DSUPERTERM_BUILD_QML=OFF
-cmake --build "$BUILD" --target superterm
+    -DCMAKE_PREFIX_PATH="$CONDA_PREFIX" -DPUDDLEJUMPER_BUILD_QML=OFF
+cmake --build "$BUILD" --target puddlejumper
 
 version="$(/usr/libexec/PlistBuddy -c 'Print CFBundleShortVersionString' \
-    "$BUILD/SuperTerm.app/Contents/Info.plist")"
+    "$BUILD/PuddleJumper.app/Contents/Info.plist")"
 arch="$(uname -m)"
 
 step "Bundle Qt and the other libraries"
-rm -rf "$DIST/SuperTerm.app"
+rm -rf "$DIST/PuddleJumper.app"
 mkdir -p "$DIST"
-cp -R "$BUILD/SuperTerm.app" "$DIST/"
+cp -R "$BUILD/PuddleJumper.app" "$DIST/"
 # The libraries come from the environment, by rpath; macdeployqt copies them
 # in, Qt's plugins with them, and points everything at the copies.
 deployqt="$(command -v macdeployqt6 || command -v macdeployqt || echo "$CONDA_PREFIX/lib/qt6/bin/macdeployqt")"
-"$deployqt" "$DIST/SuperTerm.app" -libpath="$CONDA_PREFIX/lib" -verbose=1
+"$deployqt" "$DIST/PuddleJumper.app" -libpath="$CONDA_PREFIX/lib" -verbose=1
 
 step "Check nothing outside the app is needed"
 # Every Mach-O file may only use the app's own copies and the system's.
@@ -103,35 +103,35 @@ while IFS= read -r -d '' file; do
             ;;
         esac
     done < <(otool -L "$file" | tail -n +2 | awk '{print $1}')
-done < <(find "$DIST/SuperTerm.app" -type f -print0)
+done < <(find "$DIST/PuddleJumper.app" -type f -print0)
 # @rpath ones must resolve inside: the executable's rpaths may only point in.
-if otool -l "$DIST/SuperTerm.app/Contents/MacOS/SuperTerm" | awk '/LC_RPATH/{getline; getline; print $2}' \
+if otool -l "$DIST/PuddleJumper.app/Contents/MacOS/PuddleJumper" | awk '/LC_RPATH/{getline; getline; print $2}' \
     | grep -v '^@' | grep -q .; then
     echo "  the executable still has rpaths outside the app:"
-    otool -l "$DIST/SuperTerm.app/Contents/MacOS/SuperTerm" | awk '/LC_RPATH/{getline; getline; print "    " $2}'
+    otool -l "$DIST/PuddleJumper.app/Contents/MacOS/PuddleJumper" | awk '/LC_RPATH/{getline; getline; print "    " $2}'
     bad=1
 fi
 [ "$bad" = 0 ] || die "the app still refers to files outside it (above)"
 echo "  all self-contained"
 
 step "Sign (ad hoc)"
-codesign --force --deep --sign - "$DIST/SuperTerm.app"
-codesign --verify --deep --strict "$DIST/SuperTerm.app"
+codesign --force --deep --sign - "$DIST/PuddleJumper.app"
+codesign --verify --deep --strict "$DIST/PuddleJumper.app"
 echo "  signed"
 
 if [ "$MAKE_DMG" = 1 ]; then
     step "Disk image"
-    dmg="$DIST/SuperTerm-$version-$arch.dmg"
+    dmg="$DIST/PuddleJumper-$version-$arch.dmg"
     staging="$(mktemp -d)"
-    cp -R "$DIST/SuperTerm.app" "$staging/"
+    cp -R "$DIST/PuddleJumper.app" "$staging/"
     ln -s /Applications "$staging/Applications"   # drag the app onto it to install
     rm -f "$dmg"
-    hdiutil create -quiet -volname "SuperTerm $version" -srcfolder "$staging" \
+    hdiutil create -quiet -volname "PuddleJumper $version" -srcfolder "$staging" \
         -fs HFS+ -format UDZO "$dmg"
     rm -rf "$staging"
     echo "  $dmg"
 fi
 
 step "Done"
-du -sh "$DIST/SuperTerm.app"
-echo "  run it: open \"$DIST/SuperTerm.app\""
+du -sh "$DIST/PuddleJumper.app"
+echo "  run it: open \"$DIST/PuddleJumper.app\""

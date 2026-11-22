@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import Superterm
+import PuddleJumper
 
 /*
  * Left-hand tab sidebar with live terminal previews.

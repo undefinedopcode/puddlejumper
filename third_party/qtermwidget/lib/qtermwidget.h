@@ -69,7 +69,7 @@ public:
     void startTerminalTeletype() override;
 
     /**
-     * superterm: for a terminal started with startTerminalTeletype() whose
+     * puddlejumper: for a terminal started with startTerminalTeletype() whose
      * output comes from elsewhere (tmux control mode). feedData() hands bytes
      * straight to the emulator; keystrokes still come out of sendData().
      * setFixedTerminalSize() pins the screen to the size the source dictates
@@ -81,7 +81,7 @@ public:
     void setAnswerTerminalQueries(bool answer);
 
     /**
-     * superterm: a picture of the screen (its visible lines, not scrollback),
+     * puddlejumper: a picture of the screen (its visible lines, not scrollback),
      * drawn from the emulator's character image rather than the display
      * widget, so it works while the widget is hidden or has never been shown.
      * screenPixelSize() is its natural size: columns x font width by lines x

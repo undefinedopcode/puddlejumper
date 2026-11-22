@@ -272,7 +272,7 @@ public slots:
 
 public:
   /**
-   * superterm: whether the emulation answers terminal queries (device
+   * puddlejumper: whether the emulation answers terminal queries (device
    * attributes, cursor position and status reports). Off when the output comes
    * from a multiplexer (tmux control mode) that has already answered them for
    * the program; answering again would type the replies in as input.
@@ -505,7 +505,7 @@ private slots:
 private:
   bool _usesMouse;
   bool _bracketedPasteMode;
-  bool _answerQueries = true;   // superterm
+  bool _answerQueries = true;   // puddlejumper
   QTimer _bulkTimer1{this};
   QTimer _bulkTimer2{this};
   QStringDecoder _toUtf16;

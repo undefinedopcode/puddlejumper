@@ -1,5 +1,5 @@
 /*
- * superterm — Qt Widgets port.
+ * puddlejumper — Qt Widgets port.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
@@ -89,7 +89,7 @@ struct ColorSchemeFile
 
     /*
      * Directory user-created schemes live in:
-     *   ~/.local/share/superterm/color-schemes
+     *   ~/.local/share/puddlejumper/color-schemes
      * Created on demand. Registered with qtermwidget at startup.
      */
     static QString userSchemeDir();

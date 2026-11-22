@@ -1,5 +1,5 @@
 # Vendored QTermWidget (lxqt/qtermwidget 2.4.0, commit 4ca192e5), built as a
-# static library for superterm. See SUPERTERM.md for what differs from
+# static library for puddlejumper. See PUDDLEJUMPER.md for what differs from
 # upstream and why.
 #
 # This replaces upstream's CMakeLists.txt, which needs lxqt2-build-tools and
@@ -90,7 +90,7 @@ if(APPLE)
 endif()
 
 # Data lives in Qt resources (see below). There are no compiled translations:
-# upstream's are only for the search bar, which superterm doesn't use, so
+# upstream's are only for the search bar, which puddlejumper doesn't use, so
 # TRANSLATIONS_DIR points at an empty resource path and loading quietly finds
 # nothing.
 target_compile_definitions(qtermwidget PRIVATE

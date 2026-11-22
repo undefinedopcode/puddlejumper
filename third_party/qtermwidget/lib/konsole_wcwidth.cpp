@@ -20,7 +20,7 @@
 #include "konsole_wcwidth.h"
 
 #ifdef Q_OS_WIN
-// superterm: the C library there has no wcwidth(). Widths as a terminal's
+// puddlejumper: the C library there has no wcwidth(). Widths as a terminal's
 // programs expect them: 0 for combining and format characters, 2 for East
 // Asian wide and fullwidth characters and emoji, 1 otherwise.
 namespace {

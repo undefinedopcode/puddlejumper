@@ -1,10 +1,12 @@
 /*
- * superterm — Qt Widgets port.
+ * puddlejumper — Qt Widgets port.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
 
 #include "rdpclient.h"
+
+#include "formername.h"
 
 #include <QCryptographicHash>
 #include <QMutex>
@@ -416,10 +418,10 @@ BOOL RdpWorker::desktopResize(rdpContext *context)
 
 void RdpWorker::run()
 {
-    // Once: FreeRDP says a great deal on stderr; SUPERTERM_RDP_LOG (a level:
+    // Once: FreeRDP says a great deal on stderr; PUDDLEJUMPER_RDP_LOG (a level:
     // debug, info, warn...) lets it.
     static const bool quiet = []() {
-        const QByteArray level = qgetenv("SUPERTERM_RDP_LOG");
+        const QByteArray level = appEnv("RDP_LOG");
         WLog_SetStringLogLevel(WLog_GetRoot(), level.isEmpty() ? "OFF" : level.constData());
         // Where the channels are found: built into the client library.
         freerdp_register_addin_provider(freerdp_channels_load_static_addin_entry, 0);

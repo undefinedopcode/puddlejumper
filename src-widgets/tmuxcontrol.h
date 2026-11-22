@@ -1,5 +1,5 @@
 /*
- * superterm — Qt Widgets port.
+ * puddlejumper — Qt Widgets port.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
@@ -18,8 +18,8 @@
 
 struct PaneLayout;
 
-/* Connections coming and going ("superterm.tmux"); goes to the journal when
- * superterm is started from the desktop. */
+/* Connections coming and going ("puddlejumper.tmux"); goes to the journal when
+ * puddlejumper is started from the desktop. */
 Q_DECLARE_LOGGING_CATEGORY(lcTmux)
 
 /*

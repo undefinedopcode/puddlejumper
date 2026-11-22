@@ -39,7 +39,7 @@
 #include <QStandardPaths>
 
 #ifdef Q_OS_MACOS
-#include <libproc.h>   // superterm: currentWorkingDirectory() on macOS
+#include <libproc.h>   // puddlejumper: currentWorkingDirectory() on macOS
 #endif
 
 #include "Pty.h"
@@ -86,7 +86,7 @@ Session::Session(QObject* parent) :
     //create teletype for I/O with shell process
     _shellProcess = new Pty();
 #ifdef Q_OS_WIN
-    ptySlaveFd = -1;   // superterm: a pseudoconsole has no such thing
+    ptySlaveFd = -1;   // puddlejumper: a pseudoconsole has no such thing
 #else
     ptySlaveFd = _shellProcess->pty()->slaveFd();
 #endif
@@ -167,7 +167,7 @@ QString Session::currentWorkingDirectory()
     if (_reportedWorkingUrl.isValid() && _reportedWorkingUrl.isLocalFile()
         && (_reportedWorkingUrl.host().length() == 0 || _reportedWorkingUrl.host().compare(QSysInfo::machineHostName(), Qt::CaseInsensitive) == 0)) {
 #ifdef Q_OS_WIN
-        return _reportedWorkingUrl.toLocalFile();   // superterm: C:/..., not /C:/...
+        return _reportedWorkingUrl.toLocalFile();   // puddlejumper: C:/..., not /C:/...
 #else
         return _reportedWorkingUrl.path();
 #endif
@@ -185,7 +185,7 @@ QString Session::currentWorkingDirectory()
     }
     return d.canonicalPath();
 #elif defined(Q_OS_MACOS)
-    // superterm: macOS has no /proc; ask the kernel for the shell's current
+    // puddlejumper: macOS has no /proc; ask the kernel for the shell's current
     // directory vnode instead.
     {
         struct proc_vnodepathinfo info;
@@ -303,7 +303,7 @@ void Session::run()
     // is not set then fall back to /bin/sh
 
 #ifdef Q_OS_WIN
-    // superterm: no $SHELL here. PowerShell, the newer one if installed, or
+    // puddlejumper: no $SHELL here. PowerShell, the newer one if installed, or
     // failing that the command interpreter.
     if (exec.isEmpty()) {
         for (const char *shell : {"pwsh.exe", "powershell.exe"}) {
@@ -630,7 +630,7 @@ bool Session::sendSignal(int signal)
     }
 
 #ifdef Q_OS_WIN
-    // superterm: no signals here; close() closes the pseudoconsole instead.
+    // puddlejumper: no signals here; close() closes the pseudoconsole instead.
     Q_UNUSED(signal)
     return false;
 #else
@@ -653,7 +653,7 @@ void Session::close()
     _wantedClose = true;
 
 #ifdef Q_OS_WIN
-    // superterm: closing the pseudoconsole is the hangup. Its programs are
+    // puddlejumper: closing the pseudoconsole is the hangup. Its programs are
     // told to exit and ended if they don't; done() follows.
     if (isRunning())
     {

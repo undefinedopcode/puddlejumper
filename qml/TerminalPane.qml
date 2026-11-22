@@ -1,6 +1,6 @@
 import QtQuick
 import QMLTermWidget 2.0
-import Superterm
+import PuddleJumper
 
 /*
  * TerminalPane wraps a single QMLTermWidget + QMLTermSession pair.

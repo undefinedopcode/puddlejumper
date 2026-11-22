@@ -1,8 +1,10 @@
 /*
- * superterm — a modern terminal built on Qt Quick and QMLTermWidget.
+ * puddlejumper — a modern terminal built on Qt Quick and QMLTermWidget.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
+
+#include "../src-widgets/formername.h"
 
 #include <QGuiApplication>
 #include <QQmlApplicationEngine>
@@ -24,8 +26,8 @@ static bool qmlModuleAvailable(const QString &relativeQmldir)
 {
     // Escapes for testing: treat a style as unavailable without uninstalling
     // it, so the fallback chain can be exercised on a machine that has all of
-    // them. Comma-separated, e.g. SUPERTERM_HIDE_STYLES=org.kde.union
-    const QString hidden = QString::fromLocal8Bit(qgetenv("SUPERTERM_HIDE_STYLES"));
+    // them. Comma-separated, e.g. PUDDLEJUMPER_HIDE_STYLES=org.kde.union
+    const QString hidden = appEnvString("HIDE_STYLES");
     if (!hidden.isEmpty()) {
         // Compare module names, translating the dotted form to its path form
         // (org.kde.union -> /org/kde/union/).
@@ -62,18 +64,19 @@ int main(int argc, char *argv[])
 {
     QGuiApplication app(argc, argv);
 
-    app.setApplicationName(QStringLiteral("superterm"));
-    app.setApplicationDisplayName(QStringLiteral("SuperTerm"));
+    app.setApplicationName(QStringLiteral("puddlejumper"));
+    app.setApplicationDisplayName(QStringLiteral("PuddleJumper"));
     app.setApplicationVersion(QStringLiteral("0.1.0"));
-    app.setOrganizationName(QStringLiteral("superterm"));
-    app.setDesktopFileName(QStringLiteral("superterm"));
+    app.setOrganizationName(QStringLiteral("puddlejumper"));
+    app.setDesktopFileName(QStringLiteral("puddlejumper"));
+    adoptFormerName();
 
     // Window/taskbar icon. The SVG is embedded by qt_add_qml_module's RESOURCES
     // block, so it resolves under the module's qrc prefix. Without this the app
     // had no window icon at all, which is what left the taskbar entry showing
     // the desktop file's fallback.
     {
-        const QString iconPath = QStringLiteral(":/qt/qml/Superterm/icons/superterm.svg");
+        const QString iconPath = QStringLiteral(":/qt/qml/PuddleJumper/icons/puddlejumper.svg");
         QIcon appIcon;
         for (int size : {16, 24, 32, 48, 64, 128, 256})
             appIcon.addFile(iconPath, QSize(size, size));
@@ -91,13 +94,13 @@ int main(int argc, char *argv[])
     // "org.kde.desktop" (qqc2-desktop-style) is deliberately NOT used:
     // version 6.31.0 segfaults the moment a ComboBox is instantiated, it
     // offers no colour advantage here, and Union supersedes it. Set
-    // SUPERTERM_QUICK_STYLE=<name> to override.
+    // PUDDLEJUMPER_QUICK_STYLE=<name> to override.
     const bool isKdeSession =
         qgetenv("XDG_CURRENT_DESKTOP").toUpper().contains("KDE")
         || !qgetenv("KDE_FULL_SESSION").isEmpty();
 
     QString style = QStringLiteral("Fusion");
-    const QByteArray overrideStyle = qgetenv("SUPERTERM_QUICK_STYLE");
+    const QByteArray overrideStyle = appEnv("QUICK_STYLE");
     if (!overrideStyle.isEmpty()) {
         style = QString::fromLocal8Bit(overrideStyle);
     } else if (isKdeSession
@@ -108,14 +111,14 @@ int main(int argc, char *argv[])
     // actually supplies one — which is what SystemPalette reports.
     const bool useNativeStyle = isKdeSession;
     QQuickStyle::setStyle(style);
-    if (qEnvironmentVariableIsSet("SUPERTERM_SHOWSTYLE"))
+    if (appEnvIsSet("SHOWSTYLE"))
         qInfo() << "quick style:" << style << "followsSystem:" << useNativeStyle;
 
     // QMLTermWidget is installed as a system QML module. Put its directory on
     // the import path so the engine can find it when run from a build tree.
-#ifdef SUPERTERM_QMLTERMWIDGET_IMPORT_DIR
+#ifdef PUDDLEJUMPER_QMLTERMWIDGET_IMPORT_DIR
     QByteArray importPath = qgetenv("QML2_IMPORT_PATH");
-    const QByteArray ours = SUPERTERM_QMLTERMWIDGET_IMPORT_DIR;
+    const QByteArray ours = PUDDLEJUMPER_QMLTERMWIDGET_IMPORT_DIR;
     if (!importPath.split(QDir::listSeparator().toLatin1()).contains(ours)) {
         if (!importPath.isEmpty())
             importPath.prepend(QDir::listSeparator().toLatin1());
@@ -169,11 +172,11 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("thumbnailStore"), &thumbnailStore);
 
     // Optional shell override, useful for testing:
-    //   SUPERTERM_SHELL=/bin/fish SUPERTERM_SHELL_ARGS="-l" superterm
+    //   PUDDLEJUMPER_SHELL=/bin/fish PUDDLEJUMPER_SHELL_ARGS="-l" puddlejumper
     engine.rootContext()->setContextProperty(QStringLiteral("envShell"),
-        QString::fromLocal8Bit(qgetenv("SUPERTERM_SHELL")));
+        appEnvString("SHELL"));
     engine.rootContext()->setContextProperty(QStringLiteral("envShellArgs"),
-        QString::fromLocal8Bit(qgetenv("SUPERTERM_SHELL_ARGS")).split(
+        appEnvString("SHELL_ARGS").split(
             QLatin1Char(' '), Qt::SkipEmptyParts));
 
     QObject::connect(
@@ -181,7 +184,7 @@ int main(int argc, char *argv[])
         &app, []() { QCoreApplication::exit(1); },
         Qt::QueuedConnection);
 
-    engine.loadFromModule("Superterm", "Main");
+    engine.loadFromModule("PuddleJumper", "Main");
 
     return app.exec();
 }

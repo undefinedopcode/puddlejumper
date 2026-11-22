@@ -1,11 +1,12 @@
 /*
- * superterm — Qt Widgets port.
+ * puddlejumper — Qt Widgets port.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
 
 #include "vncview.h"
 
+#include "formername.h"
 #include "vncclient.h"
 
 #include <QApplication>
@@ -257,10 +258,10 @@ VncView::VncView(QWidget *parent, RemoteClient *client)
      * later (a menu fading in, a window opening) can take a second or two to
      * be sent. So for a while after a click, the pointer is moved a pixel over
      * and back now and then (the pointer sent again where it is, or a part of
-     * the screen asked for afresh, aren't enough). SUPERTERM_VNC_NUDGE=off
+     * the screen asked for afresh, aren't enough). PUDDLEJUMPER_VNC_NUDGE=off
      * stops it.
      */
-    m_nudge = m_client->scheme() == QLatin1String("vnc") && qgetenv("SUPERTERM_VNC_NUDGE") != "off";
+    m_nudge = m_client->scheme() == QLatin1String("vnc") && appEnv("VNC_NUDGE") != "off";
     m_sizeTimer = new QTimer(this);
     m_sizeTimer->setSingleShot(true);
     m_sizeTimer->setInterval(300);

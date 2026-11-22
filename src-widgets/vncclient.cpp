@@ -1,11 +1,12 @@
 /*
- * superterm — Qt Widgets port.
+ * puddlejumper — Qt Widgets port.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
 
 #include "vncclient.h"
 
+#include "formername.h"
 #include "vnccrypto.h"
 
 #include <QCryptographicHash>
@@ -22,14 +23,14 @@
 #include <zlib.h>
 
 // The connection's steps, for when a server won't have us, and what updates
-// cost: QT_LOGGING_RULES="superterm.vnc.debug=true". SUPERTERM_VNC_ENCODINGS
+// cost: QT_LOGGING_RULES="puddlejumper.vnc.debug=true". PUDDLEJUMPER_VNC_ENCODINGS
 // (e.g. "raw,copyrect", or "tight,jpeg" for Tight with JPEG) limits the
 // encodings asked for, to compare them ("adaptive" is a Mac's own).
-// SUPERTERM_VNC_APPLE=0 speaks plain RFB 3.8 to a Mac, without Apple's
+// PUDDLEJUMPER_VNC_APPLE=0 speaks plain RFB 3.8 to a Mac, without Apple's
 // revision and what it brings.
-// SUPERTERM_VNC_ADAPTIVE_DUMP=<file> appends every Adaptive rectangle received
+// PUDDLEJUMPER_VNC_ADAPTIVE_DUMP=<file> appends every Adaptive rectangle received
 // to a file, to put a picture that came out wrong through the decoder again.
-Q_LOGGING_CATEGORY(lcVnc, "superterm.vnc", QtInfoMsg)
+Q_LOGGING_CATEGORY(lcVnc, "puddlejumper.vnc", QtInfoMsg)
 
 namespace {
 
@@ -183,7 +184,7 @@ void VncClient::connectToHost(const QString &host, quint16 port)
 {
     m_host = host;
     m_port = port;
-    m_plainOnly = qEnvironmentVariable("SUPERTERM_VNC_APPLE") == QLatin1String("0");
+    m_plainOnly = appEnvString("VNC_APPLE") == QLatin1String("0");
     m_adaptiveFailed = false;
     open();
 }
@@ -681,7 +682,7 @@ bool VncClient::parseRect()
         if (u8(16) != 1)   // partial updates are too many to list
             qCDebug(lcVnc) << "Adaptive:" << (u8(16) == 2 ? "tables" : "full update") << rect
                            << length << "bytes";
-        if (const QString dump = qEnvironmentVariable("SUPERTERM_VNC_ADAPTIVE_DUMP"); !dump.isEmpty()) {
+        if (const QString dump = appEnvString("VNC_ADAPTIVE_DUMP"); !dump.isEmpty()) {
             // Each rectangle as it came: x, y, width, height, length and the
             // screen's size, then the body.
             QFile file(dump);
@@ -1378,7 +1379,7 @@ void VncClient::sendSetup()
     // SetPixelFormat, in our byte order: 32-bit 0x00RRGGBB, which is
     // QImage's RGB32, or 16-bit RGB565.
     // A Mac's Adaptive picture is its own format, drawn at full depth.
-    const QString only = qEnvironmentVariable("SUPERTERM_VNC_ENCODINGS");
+    const QString only = appEnvString("VNC_ENCODINGS");
     m_adaptiveWanted = m_apple && (only.isEmpty() ? m_adaptiveQuality
                                                   : only.contains(QLatin1String("adaptive")));
     m_bytesPerPixel = m_reducedColour && !m_adaptiveWanted ? 2 : 4;
@@ -1410,7 +1411,7 @@ void VncClient::sendEncodings()
     QList<qint32> encodings =
         local ? QList<qint32>{kEncCopyRect, kEncRaw, kEncZrle, kEncZlib, kEncTight}
               : QList<qint32>{kEncTight, kEncZrle, kEncCopyRect, kEncZlib, kEncRaw, kEncJpegQuality};
-    const QString only = qEnvironmentVariable("SUPERTERM_VNC_ENCODINGS");
+    const QString only = appEnvString("VNC_ENCODINGS");
     if (!only.isEmpty()) {
         const QHash<QString, qint32> names = {
             {QStringLiteral("tight"), kEncTight}, {QStringLiteral("zrle"), kEncZrle},

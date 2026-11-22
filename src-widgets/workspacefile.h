@@ -1,5 +1,5 @@
 /*
- * superterm — Qt Widgets port.
+ * puddlejumper — Qt Widgets port.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
@@ -16,19 +16,19 @@
 
 /*
  * A workspace file: smug's YAML format (https://github.com/ivaaaan/smug),
- * so existing smug files open as they are, plus a few keys of superterm's
+ * so existing smug files open as they are, plus a few keys of puddlejumper's
  * own that smug ignores:
  *
  *   session: name              root: ~/src/project       env: {KEY: value}
  *   before_start: [commands]   stop: [commands]          sendkeys_timeout: ms
- *   colour: "#4a8fe0"          profile: <profile name>   (superterm)
- *   backend: tmux | local                                (superterm)
+ *   colour: "#4a8fe0"          profile: <profile name>   (puddlejumper)
+ *   backend: tmux | local                                (puddlejumper)
  *   windows:
  *     - name: code             root: relative/or/abs     layout: main-vertical
  *       commands: [...]        panes: [{root, commands, type}]
  *       manual: true           selected: true
- *       profile, exec: true                              (superterm)
- *       split: right|down      sizes: [60, 40]           (superterm: nested
+ *       profile, exec: true                              (puddlejumper)
+ *       split: right|down      sizes: [60, 40]           (puddlejumper: nested
  *       panes: [{split, sizes, panes} | {root, commands}]    layouts)
  *
  * $name and ${name} are expanded over the whole file before it is read, as
@@ -60,7 +60,7 @@ struct WorkspaceSpec
     int sendKeysDelay = 0;     // ms between commands typed into a pane
     /*
      * Run as a tmux session (named `name`), as smug does, so it outlives
-     * superterm; otherwise as superterm's own shells. `backend:` says which;
+     * puddlejumper; otherwise as puddlejumper's own shells. `backend:` says which;
      * without it, smug's files (in its directory, or .smug.yml) use tmux.
      */
     bool tmux = false;
@@ -69,14 +69,14 @@ struct WorkspaceSpec
 
 namespace WorkspaceFile {
 
-/* Where named workspace files are found: superterm's directory, then smug's. */
+/* Where named workspace files are found: puddlejumper's directory, then smug's. */
 QStringList directories();
-/* The files there, as (name, path); a name in superterm's directory wins. */
+/* The files there, as (name, path); a name in puddlejumper's directory wins. */
 QList<QPair<QString, QString>> available();
 /* Whether `path` is in one of directories(): the user's own, not a project's. */
 bool isUsersOwn(const QString &path);
 
-/* A project's workspace file in `dir`: .superterm.yml, else .smug.yml
+/* A project's workspace file in `dir`: .puddlejumper.yml, else .smug.yml
  * (or .yaml); empty if it has none. */
 QString projectFileIn(const QString &dir);
 /* The nearest one in `dir` or a folder above it, stopping short of the home

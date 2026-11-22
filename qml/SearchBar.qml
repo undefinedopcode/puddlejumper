@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import Superterm
+import PuddleJumper
 
 /*
  * Inline search bar overlay for a terminal pane.

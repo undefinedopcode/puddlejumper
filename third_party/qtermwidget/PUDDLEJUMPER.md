@@ -4,8 +4,8 @@ Source: [lxqt/qtermwidget](https://github.com/lxqt/qtermwidget) tag `2.4.0`
 (commit `4ca192e5d7dc12fe2a06371d3a374d8fa86165af`).
 
 Licence: as upstream. See `LICENSE` (GPL-2.0-or-later) and the per-file headers
-(some files are LGPL-2.0-or-later or BSD-3-Clause). Linking it into superterm
-means superterm is distributed under GPL-compatible terms.
+(some files are LGPL-2.0-or-later or BSD-3-Clause). Linking it into puddlejumper
+means puddlejumper is distributed under GPL-compatible terms.
 
 ## What was taken
 
@@ -13,7 +13,7 @@ means superterm is distributed under GPL-compatible terms.
 Upstream's `CMakeLists.txt` was replaced; it needs lxqt2-build-tools and installs
 a shared library. Ours builds a static library and compiles the keyboard layouts
 and colour schemes in as Qt resources under `:/qtermwidget/`. Translations
-(search bar strings only, and superterm doesn't use the search bar) are not built.
+(search bar strings only, and puddlejumper doesn't use the search bar) are not built.
 
 ## Patches
 
@@ -21,7 +21,7 @@ Patches 1–6 are in `lib/TerminalDisplay.cpp` / `.h`; patch 7 also touches
 `qtermwidget`, `Session`, `Emulation` and `Vt102Emulation`; patch 10 is in
 `lib/Session.cpp`; patch 11 is in `lib/TerminalDisplay.cpp` and
 `lib/qtermwidget.cpp`. Each is marked
-with a `superterm:` comment.
+with a `puddlejumper:` comment.
 
 1. **Block elements and Powerline separators are drawn as geometry.**
    U+2580–U+259F (halves, eighths, shades, quadrants) are filled to exact cell
@@ -55,7 +55,7 @@ with a `superterm:` comment.
    misplace a fragment of box drawing in fonts lacking those glyphs.
 
 6. **`cellArea()` accessor.** Returns where the character grid sits in the
-   widget, which superterm needs to snap screenshot selections to cells.
+   widget, which puddlejumper needs to snap screenshot selections to cells.
    Upstream keeps the margins and scrollbar offset private.
 
 7. **Driving a terminal from outside**, for tmux control mode.
@@ -112,6 +112,6 @@ utmp functions that don't exist there.
 ## Updating
 
 Diff this tree against the upstream tag it came from, re-apply the
-`superterm:`-marked changes onto the new tag, and update the version and commit
+`puddlejumper:`-marked changes onto the new tag, and update the version and commit
 above and in `CMakeLists.txt`. If upstream adds or removes `lib/*.cpp` files,
 update the source list in `CMakeLists.txt`.

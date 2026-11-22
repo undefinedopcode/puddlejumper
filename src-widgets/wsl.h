@@ -1,5 +1,5 @@
 /*
- * superterm — the Windows Subsystem for Linux, as a source of shells (and of
+ * puddlejumper — the Windows Subsystem for Linux, as a source of shells (and of
  * tmux, which Windows itself has none of).
  *
  * Distributed under the terms of the GNU General Public License v2 or later.

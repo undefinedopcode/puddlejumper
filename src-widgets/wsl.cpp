@@ -1,5 +1,5 @@
 /*
- * superterm — the Windows Subsystem for Linux. See wsl.h.
+ * puddlejumper — the Windows Subsystem for Linux. See wsl.h.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */

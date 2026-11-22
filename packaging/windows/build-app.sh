@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 #
-# Build SuperTerm for Windows, self-contained, in a zip file. Run it in an
+# Build PuddleJumper for Windows, self-contained, in a zip file. Run it in an
 # MSYS2 UCRT64 shell (https://www.msys2.org):
 #
 #   packaging/windows/build-app.sh            # set up what's missing, build, package
-#   packaging/windows/build-app.sh --no-zip   # stop at dist/SuperTerm
+#   packaging/windows/build-app.sh --no-zip   # stop at dist/PuddleJumper
 #
 # What it needs it installs with pacman: the compiler, CMake, Ninja, Qt 6,
 # yaml-cpp and zlib (each skipped once there).
 #
-# The result is dist/SuperTerm, a folder with SuperTerm.exe and every DLL it
-# needs, and dist/SuperTerm-<version>-x64.zip of it. It needs Windows 10
+# The result is dist/PuddleJumper, a folder with PuddleJumper.exe and every DLL it
+# needs, and dist/PuddleJumper-<version>-x64.zip of it. It needs Windows 10
 # 1809 or later (as Qt 6 does, and the pseudoconsole).
 
 set -euo pipefail
@@ -50,20 +50,20 @@ pacman -S --needed --noconfirm \
     $prefix-yaml-cpp $prefix-zlib zip
 
 step "Build"
-cmake -S "$ROOT" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release -DSUPERTERM_BUILD_QML=OFF
-cmake --build "$BUILD" --target superterm
+cmake -S "$ROOT" -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release -DPUDDLEJUMPER_BUILD_QML=OFF
+cmake --build "$BUILD" --target puddlejumper
 
 version="$(sed -n 's/^ *VERSION \([0-9.]*\).*/\1/p' "$ROOT/CMakeLists.txt" | head -1)"
-app="$DIST/SuperTerm"
+app="$DIST/PuddleJumper"
 
 step "Bundle Qt and the other libraries"
 rm -rf "$app"
 mkdir -p "$app"
-cp "$BUILD/SuperTerm.exe" "$app/"
+cp "$BUILD/PuddleJumper.exe" "$app/"
 # Qt's libraries and plugins, by its own tool; the rest (the compiler's
 # runtime, yaml-cpp, zlib, what Qt itself uses) by what the loader would find.
 windeployqt6 --release --no-translations --no-system-d3d-compiler --no-opengl-sw \
-    --compiler-runtime "$app/SuperTerm.exe" >/dev/null
+    --compiler-runtime "$app/PuddleJumper.exe" >/dev/null
 copied=1
 while [ "$copied" = 1 ]; do   # (until nothing new: the copies have needs too)
     copied=0
@@ -79,7 +79,7 @@ done
 step "Check nothing outside the folder is needed"
 # Run from the folder, with only Windows on the path, every DLL must be found
 # there or be the system's.
-outside="$(cd "$app" && PATH="/c/Windows/System32:/c/Windows" /usr/bin/ldd SuperTerm.exe \
+outside="$(cd "$app" && PATH="/c/Windows/System32:/c/Windows" /usr/bin/ldd PuddleJumper.exe \
     | grep -v -i '/c/windows/' | grep -v "$(cygpath -u "$app" | sed 's/[][\.*^$]/\\&/g')" || true)"
 [ -z "$outside" ] || die "the program still needs files outside its folder:
 $outside"
@@ -87,12 +87,12 @@ echo "  all self-contained"
 
 if [ "$MAKE_ZIP" = 1 ]; then
     step "Zip"
-    zipfile="$DIST/SuperTerm-$version-x64.zip"
+    zipfile="$DIST/PuddleJumper-$version-x64.zip"
     rm -f "$zipfile"
-    (cd "$DIST" && zip -q -r "$zipfile" SuperTerm)
+    (cd "$DIST" && zip -q -r "$zipfile" PuddleJumper)
     echo "  $zipfile"
 fi
 
 step "Done"
 du -sh "$app"
-echo "  run it: $(cygpath -w "$app/SuperTerm.exe")"
+echo "  run it: $(cygpath -w "$app/PuddleJumper.exe")"

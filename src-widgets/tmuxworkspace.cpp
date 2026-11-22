@@ -1,5 +1,5 @@
 /*
- * superterm — Qt Widgets port.
+ * puddlejumper — Qt Widgets port.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
@@ -16,7 +16,7 @@ namespace {
 
 // The window a new session starts with, removed once the real ones exist
 // (as smug does), so that every window is made the same way.
-const QString kSetupWindow = QStringLiteral("__superterm_setup");
+const QString kSetupWindow = QStringLiteral("__puddlejumper_setup");
 
 bool run(const QStringList &tmux, const QStringList &args, QString *output, QString *error)
 {

@@ -5,7 +5,7 @@ built"); phase 4, the record layer, is not.
 
 ## Goal
 
-Against a Mac, superterm's VNC tab should:
+Against a Mac, puddlejumper's VNC tab should:
 
 1. share the clipboard's text in both directions, in Unicode;
 2. take the Mac's Adaptive picture (encoding `0x3f3`), which costs a fraction of
@@ -38,7 +38,7 @@ why phase 0 exists.
   server gets what it gets today.
 - If the security list that follows has no type 30, reconnect and speak 3.8.
   889 with a VNC password is unmeasured, and 3.8 is known to work.
-- `SUPERTERM_VNC_APPLE=0` keeps 3.8 for a Mac, as the way back if a macOS update
+- `PUDDLEJUMPER_VNC_APPLE=0` keeps 3.8 for a Mac, as the way back if a macOS update
   breaks any of this.
 
 `VncClient` gains `m_apple`, true for an 889 session. Every difference below
@@ -72,7 +72,7 @@ In order, after the type-30 login the client already does:
 
 Apple's viewer leaves a session in cleartext after the login unless a
 preference asks otherwise, so 889 without the record layer is a path the Mac
-supports. It is also what superterm's Mac sessions are today. The first version
+supports. It is also what puddlejumper's Mac sessions are today. The first version
 does the same.
 
 The record layer (AES-128-CBC records with a SHA-1 check, and a rekey message)
@@ -172,7 +172,7 @@ Full is the default. **Adaptive Quality (Mac)** is a setting of the tab, in its
 context menu beside **Reduced Colour** and saved with it (`"adaptive": true`);
 it does nothing to a server that is not a Mac in 889. `0x3f3` decodes to 32-bit
 only, so Reduced Colour is not applied while Adaptive is on.
-`SUPERTERM_VNC_ENCODINGS` knows `adaptive`.
+`PUDDLEJUMPER_VNC_ENCODINGS` knows `adaptive`.
 
 Changing the setting connects again, as changing the colour depth does. A new
 `SetEncodings` mid-session is not enough: re-listing `0x3f3` after ZRLE does not
@@ -238,7 +238,7 @@ Each phase leaves a client that works. Phase 2 is what fixes pasting.
 - **Unit tests** (the project has none yet; these would be the first):
   `PasteboardReader` against archives built by hand and against a captured one;
   `AdaptiveDecoder` against captured rectangles.
-- **Captures.** `SUPERTERM_VNC_DUMP=<file>` writes every byte received. The
+- **Captures.** `PUDDLEJUMPER_VNC_DUMP=<file>` writes every byte received. The
   probe replays a dump into the client with no server, which turns a session
   into a regression test. For the decoder, the same dump goes through remotex's
   decoder and the two pictures must match exactly.
@@ -290,7 +290,7 @@ account.
 - **Sessions.** 889 handshake, account login, layout, cursor cache, pushed
   updates (hundreds with no request), button swap (a right-click opens a
   context menu), and scroll by distance (200 px sent moved the Mac's view
-  200 px). `SUPERTERM_VNC_APPLE=0` speaks plain 3.8 as before.
+  200 px). `PUDDLEJUMPER_VNC_APPLE=0` speaks plain 3.8 as before.
 - **A session of its own.** Logging in as an account that is not at the Mac's
   console gives that account a virtual session, which stays between
   connections; the console user's screen is not shown.
@@ -318,7 +318,7 @@ pasteboard, and the record layer.
 1. Answered: a user's own copy in a logged-in session reaches us. What other
    flavors do beside the text (an image, a file) is unchecked.
 2. Pushes at interval 0 can leave input unread on the Mac while the client
-   falls behind. superterm decodes natively and should keep up; if a slow link
+   falls behind. puddlejumper decodes natively and should keep up; if a slow link
    shows the problem, arm at 33,333 µs instead.
 3. `0x3f3` was never captured from a physical Mac or at Retina density.
 4. macOS 26 is untested here; the write-up covers it, this work covers 14.

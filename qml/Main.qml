@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Window
 import QMLTermWidget 2.0
-import Superterm
+import PuddleJumper
 
 ApplicationWindow {
     id: win
@@ -14,7 +14,7 @@ ApplicationWindow {
     minimumHeight: 320
     visible: true
     color: Theme.bg
-    title: activeSessionTitle !== "" ? activeSessionTitle + " — SuperTerm" : "SuperTerm"
+    title: activeSessionTitle !== "" ? activeSessionTitle + " — PuddleJumper" : "PuddleJumper"
     flags: Qt.Window
 
     property alias colorScheme: themeState.colorScheme

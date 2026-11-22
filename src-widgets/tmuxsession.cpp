@@ -1,5 +1,5 @@
 /*
- * superterm — Qt Widgets port.
+ * puddlejumper — Qt Widgets port.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
@@ -218,7 +218,7 @@ void TmuxSession::killSession()
 
 void TmuxSession::onReady()
 {
-    // Flow control (tmux 3.2+): if superterm falls more than a few seconds
+    // Flow control (tmux 3.2+): if puddlejumper falls more than a few seconds
     // behind a flood of output, tmux pauses the pane instead of queueing
     // without limit, and resyncPane() catches it up.
     m_control->command(QStringLiteral("display-message -p '#{version}'"),

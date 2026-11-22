@@ -1,5 +1,5 @@
 /*
-    superterm: the Windows counterpart of Pty.h, on the pseudoconsole API
+    puddlejumper: the Windows counterpart of Pty.h, on the pseudoconsole API
     (ConPTY, Windows 10 1809 and later). Pty.h includes this in its place.
 
     This program is free software; you can redistribute it and/or modify

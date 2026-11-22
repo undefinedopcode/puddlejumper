@@ -1,5 +1,5 @@
 /*
- * superterm — a modern terminal built on Qt Quick and QMLTermWidget.
+ * puddlejumper — a modern terminal built on Qt Quick and QMLTermWidget.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
@@ -15,8 +15,8 @@
  *
  * Values are stored in the standard platform location, keyed by the
  * application/organisation name set in main.cpp:
- *   Linux   ~/.config/superterm/superterm.conf
- *   macOS   ~/Library/Preferences/com.superterm.superterm.plist
+ *   Linux   ~/.config/puddlejumper/puddlejumper.conf
+ *   macOS   ~/Library/Preferences/com.puddlejumper.puddlejumper.plist
  *
  * Every write is flushed immediately, so an unclean exit cannot lose
  * settings.

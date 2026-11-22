@@ -1,5 +1,5 @@
 /*
- * superterm — Qt Widgets port.
+ * puddlejumper — Qt Widgets port.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
@@ -22,14 +22,14 @@ class TerminalWidget;
 class TmuxControl;
 
 /*
- * One tmux session shown natively: each tmux window is a superterm tab, each
- * pane a superterm pane, laid out exactly as tmux lays them out.
+ * One tmux session shown natively: each tmux window is a puddlejumper tab, each
+ * pane a puddlejumper pane, laid out exactly as tmux lays them out.
  *
  * tmux owns the truth. Panes hold no process; their output arrives through
  * control mode and their keystrokes go back with send-keys. User actions
  * (new tab, split, close, resize, switching tab or pane) become tmux commands,
  * and the tabs change when tmux's notifications say they have. So whatever is
- * done here is there next time, from superterm or any other tmux client, and
+ * done here is there next time, from puddlejumper or any other tmux client, and
  * detaching or quitting leaves every program running.
  */
 class TmuxSession : public QObject

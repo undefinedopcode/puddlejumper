@@ -1,5 +1,5 @@
 /*
- * superterm — Qt Widgets port.
+ * puddlejumper — Qt Widgets port.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */
@@ -198,7 +198,7 @@ private:
     std::unique_ptr<Inflater> m_zrle;
     std::unique_ptr<Inflater> m_zlib;
     std::unique_ptr<Inflater> m_tight[4];   // Tight has four, which it can reset
-    // What updates cost, logged every few seconds (superterm.vnc).
+    // What updates cost, logged every few seconds (puddlejumper.vnc).
     QElapsedTimer m_statsTimer;
     qint64 m_statsBytes = 0;
     qint64 m_statsPixels = 0;     // updated, to set against the screen's size

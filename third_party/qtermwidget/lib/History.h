@@ -35,7 +35,7 @@
 #include "Character.h"
 
 // map
-#ifndef Q_OS_WIN   // superterm: no mmap there; see CompactHistoryBlock
+#ifndef Q_OS_WIN   // puddlejumper: no mmap there; see CompactHistoryBlock
 #include <sys/mman.h>
 #endif
 

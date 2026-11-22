@@ -1,5 +1,5 @@
 /*
- * superterm — a modern terminal built on Qt Quick and QMLTermWidget.
+ * puddlejumper — a modern terminal built on Qt Quick and QMLTermWidget.
  *
  * Distributed under the terms of the GNU General Public License v2 or later.
  */

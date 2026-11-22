@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import Superterm
+import PuddleJumper
 
 /*
  * Centered modal settings window, sectioned down the left.

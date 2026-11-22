@@ -16,7 +16,7 @@
 
 #include "../vncclient.h"
 #include "../vncview.h"
-#ifdef SUPERTERM_RDP
+#ifdef PUDDLEJUMPER_RDP
 #include "../rdpclient.h"
 #endif
 
@@ -158,7 +158,7 @@ int main(int argc, char *argv[])
 
     // PROBE_RDP: the address is an RDP server's (as given: no display numbers).
     RemoteClient *client = nullptr;
-#ifdef SUPERTERM_RDP
+#ifdef PUDDLEJUMPER_RDP
     if (qEnvironmentVariableIsSet("PROBE_RDP")) {
         client = new RdpClient;
         port = quint16(args.at(1).section(QLatin1Char(':'), -1).toInt());
