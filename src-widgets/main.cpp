@@ -20,11 +20,16 @@
 #include <QLocale>
 #include <QStyle>
 #include <QStyleFactory>
+#include <QUrl>
 
 #include <qtermwidget.h>
 
 int main(int argc, char *argv[])
 {
+#ifdef PUDDLEJUMPER_WEB
+    // Web tabs' pages are drawn with OpenGL contexts shared with the window's.
+    QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
+#endif
     QApplication app(argc, argv);
     // Must match the QML build so both share one config file.
     app.setOrganizationName(QStringLiteral("puddlejumper"));
@@ -113,6 +118,11 @@ int main(int argc, char *argv[])
         QStringLiteral("Open an RDP tab on this address (host or host:port)."),
         QStringLiteral("address"));
     parser.addOption(rdpOpt);
+    QCommandLineOption webOpt(
+        QStringLiteral("web"),
+        QStringLiteral("Open a web tab on this address (localhost:3000, a URL)."),
+        QStringLiteral("address"));
+    parser.addOption(webOpt);
     parser.addPositionalArgument(
         QStringLiteral("workspace"),
         QStringLiteral("A workspace to open: a folder (its .puddlejumper.yml or .smug.yml, "
@@ -137,6 +147,8 @@ int main(int argc, char *argv[])
         window.openVnc(parser.value(vncOpt));
     if (parser.isSet(rdpOpt))
         window.openRdp(parser.value(rdpOpt));
+    if (parser.isSet(webOpt))
+        window.openWeb(QUrl::fromUserInput(parser.value(webOpt)));
     if (const QStringList args = parser.positionalArguments(); !args.isEmpty()) {
         // Once the window is up, so dialogs (variables, trust) have a parent.
         const QString target = args.first();

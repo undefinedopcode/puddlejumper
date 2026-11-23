@@ -31,6 +31,8 @@ class SettingsDialog;
 class TabStrip;
 class ThumbnailSidebar;
 class VncTab;
+class WebTab;
+class QUrl;
 
 /*
  * Main window: tabs (or thumbnail sidebar) around a set of terminals.
@@ -56,6 +58,8 @@ public:
     void openVnc(const QString &address);
     /* The same over RDP: host or host:port. */
     void openRdp(const QString &address);
+    /* A tab showing a web page. */
+    void openWeb(const QUrl &url);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -159,6 +163,13 @@ private:
     void wireTab(TerminalTab *tab);
     void wirePane(TerminalWidget *pane);
     void wireVncTab(VncTab *tab);
+    void wireWebTab(WebTab *tab);
+    /* A link from a terminal: a page on this computer in a web tab (where
+     * this build has them), anything else in the system's browser. */
+    void openLink(const QUrl &url);
+    /* Reload the web tabs that ask for it when a command finishes in a
+     * terminal of their workspace. */
+    void reloadAfterCommands();
     /* Tab text, tooltip and window title: from a terminal tab's active pane,
      * or the remote desktop's name. */
     void syncTabText(Tab *tab);

@@ -197,6 +197,24 @@ target_link_libraries(probe-vnc PRIVATE
 )
 set_target_properties(probe-vnc PROPERTIES AUTOMOC ON)
 
+# Web tabs, on Qt WebEngine (Chromium) where it is there to build with; it
+# isn't for MinGW, so the Windows build goes without.
+option(PUDDLEJUMPER_WEB "Web tabs (needs Qt WebEngine)" ON)
+if(PUDDLEJUMPER_WEB)
+    find_package(Qt6 6.5 QUIET OPTIONAL_COMPONENTS WebEngineWidgets)
+endif()
+if(PUDDLEJUMPER_WEB AND TARGET Qt6::WebEngineWidgets)
+    message(STATUS "Web tabs: on")
+    target_sources(puddlejumper PRIVATE src-widgets/webtab.cpp src-widgets/webtab.h)
+    target_compile_definitions(puddlejumper PRIVATE PUDDLEJUMPER_WEB)
+    target_link_libraries(puddlejumper PRIVATE Qt6::WebEngineWidgets)
+    # WebEngine brings Qt QML along, and with it a scan of the sources for QML
+    # imports, which would find the legacy QML version's.
+    set_target_properties(puddlejumper PROPERTIES QT_QML_MODULE_NO_IMPORT_SCAN TRUE)
+else()
+    message(STATUS "Web tabs: off (no Qt WebEngine)")
+endif()
+
 foreach(target puddlejumper probe-vnc)
     if(FREERDP_FOUND)
         target_sources(${target} PRIVATE src-widgets/rdpclient.cpp src-widgets/rdpclient.h)

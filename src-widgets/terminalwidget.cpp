@@ -74,6 +74,13 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings,
         emit sessionFinished();
     });
 
+    // A link's hot spot fires at any click on it, which mostly means to
+    // select or to place the cursor: only a Ctrl-click (Cmd on a Mac) opens it.
+    connect(m_terminal, &QTermWidget::urlActivated, this, [this](const QUrl &url, bool fromMenu) {
+        if (fromMenu || QGuiApplication::keyboardModifiers() & Qt::ControlModifier)
+            emit linkOpened(url);
+    });
+
     // Right-click menu: our own, built from QTermWidget's public actions. It
     // is assembled on demand (see showContextMenu) so Copy reflects selection.
     m_terminal->setContextMenuPolicy(Qt::CustomContextMenu);
@@ -514,9 +521,36 @@ void TerminalWidget::startRegionScreenshot()
     overlay->setFocus();
 }
 
+QUrl TerminalWidget::linkAt(const QPoint &globalPos) const
+{
+    Konsole::TerminalDisplay *view = display();
+    if (!view)
+        return QUrl();
+    const auto *spot = dynamic_cast<const Konsole::RegExpFilter::HotSpot *>(
+        m_terminal->getHotSpotAt(view->mapFromGlobal(globalPos)));
+    if (!spot || spot->type() != Konsole::Filter::HotSpot::Link || spot->capturedTexts().isEmpty())
+        return QUrl();
+    // As the hot spot opens it: an address without a scheme is a web one.
+    QString text = spot->capturedTexts().constFirst();
+    if (text.contains(QLatin1Char('@')) && !text.contains(QLatin1String("://")))
+        return QUrl();   // an e-mail address
+    if (!text.contains(QLatin1String("://")))
+        text.prepend(QLatin1String("http://"));
+    const QUrl url(text);
+    return url.isValid() ? url : QUrl();
+}
+
 void TerminalWidget::showContextMenu(const QPoint &globalPos)
 {
     QMenu menu(this);
+
+    if (const QUrl link = linkAt(globalPos); link.isValid()) {
+        menu.addAction(tr("&Open Link"), this, [this, link]() { emit linkOpened(link); });
+        menu.addAction(tr("Copy &Link Address"), this, [link]() {
+            QApplication::clipboard()->setText(link.toString());
+        });
+        menu.addSeparator();
+    }
 
     // Copy is enabled only while there is a selection, asked now: the
     // terminal's copyAvailable() signal is never emitted, so it can't be

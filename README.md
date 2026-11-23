@@ -45,6 +45,7 @@ The window chrome, toolbar, tab strip, status bar, and a live zsh prompt:
 | CMake | 3.21+ |
 | Compiler | C++17 |
 | yaml-cpp | 0.7+ (workspace files; `yaml-cpp`, `libyaml-cpp-dev` or `yaml-cpp-devel`) |
+| Qt WebEngine | optional, for web tabs (`qt6-webengine`) |
 
 QTermWidget is **vendored** in `third_party/qtermwidget` (2.4.0, with rendering
 patches) and built as a static library, so no system qtermwidget package is
@@ -738,6 +739,27 @@ How it works:
 
 Tested against tmux 3.8. Connecting over ssh uses the same code path but has
 only been tried locally.
+
+## Web tabs
+
+A web tab shows a page beside the terminals: the app you are building, in the
+same window as the shells building it. **File → New Web Tab…** asks for an
+address (`localhost:3000` will do), and `--web <address>` opens one from the
+command line. A link to a page on this computer in a terminal's output opens
+in a web tab when Ctrl-clicked (Cmd-clicked on a Mac) or chosen with **Open
+Link** from the pane's menu; any other link opens in the system's browser.
+
+The tab has back, forward, reload and an address bar (`Ctrl+L`), and
+Chromium's developer tools beside the page (`F12`, or the `</>` button). A
+page's new windows (a link to `_blank`, `window.open()`) open as tabs of their
+own. **Reload After Commands**, in the tab's menu, reloads the page whenever a
+command finishes in a terminal of the same workspace — a build, a test run.
+Web tabs are saved and reopened with the rest; their cookies and storage are
+kept between runs, shared by all of them.
+
+They need Qt WebEngine (`qt6-webengine`), and are left out of a build without
+it (`-DPUDDLEJUMPER_WEB=OFF` leaves them out on purpose). The Windows build,
+on MinGW, has none: Qt WebEngine is built with MSVC only.
 
 ## Taking screenshots
 

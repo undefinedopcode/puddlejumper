@@ -200,6 +200,9 @@ signals:
     /* The pane changed size (and so, soon, the terminal's columns and lines). */
     void resized();
 
+    /* A link in the output was Ctrl-clicked, or opened from the menu. */
+    void linkOpened(const QUrl &url);
+
 protected:
     void paintEvent(QPaintEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
@@ -210,6 +213,8 @@ private:
 
     void onOutput();
     void showContextMenu(const QPoint &globalPos);
+    /* The web address under a point on screen; none if no link is there. */
+    QUrl linkAt(const QPoint &globalPos) const;
 
     int m_id = 0;
     Backend m_backend = Backend::Local;

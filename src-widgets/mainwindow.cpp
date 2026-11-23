@@ -24,6 +24,9 @@
 #endif
 #include "vnctab.h"
 #include "vncview.h"
+#ifdef PUDDLEJUMPER_WEB
+#include "webtab.h"
+#endif
 #include "wsl.h"
 
 #include <QAction>
@@ -32,6 +35,7 @@
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QDateTime>
+#include <QDesktopServices>
 #include <QEvent>
 #include <QResizeEvent>
 #include <QDir>
@@ -128,6 +132,9 @@ constexpr char kBusyProperty[] = "puddlejumperBusy";
 // On a new tab: until when (ms since the epoch) its output is its shell
 // starting up, not news.
 constexpr char kQuietUntilProperty[] = "puddlejumperQuietUntil";
+// On a pane: a command was running in it when last looked (see
+// reloadAfterCommands()).
+constexpr char kRunningProperty[] = "puddlejumperRunning";
 
 // Where the session (workspaces and their tabs) is kept between runs.
 constexpr auto kSessionKey = "session/state";
@@ -237,6 +244,7 @@ MainWindow::MainWindow(QWidget *parent)
     connect(m_previewTimer, &QTimer::timeout, this, [this]() {
         refreshPreviews(false);
         updateProjectNotice();   // cheap unless the shell has changed directory
+        reloadAfterCommands();   // nothing unless a web tab asks for it
     });
     m_previewTimer->start();
 
@@ -461,6 +469,26 @@ void MainWindow::buildMenus()
             return;
         settings.setValue(QStringLiteral("rdp/lastAddress"), text.trimmed());
         openRdp(text);
+    });
+#endif
+#ifdef PUDDLEJUMPER_WEB
+    auto *webAct = file->addAction(tr("New W&eb Tab…"));
+    connect(webAct, &QAction::triggered, this, [this]() {
+        QSettings settings;
+        const QString last = settings.value(QStringLiteral("web/lastAddress"),
+                                            QStringLiteral("localhost:3000")).toString();
+        bool ok = false;
+        const QString text = QInputDialog::getText(this, tr("New Web Tab"), tr("Address:"),
+                                                   QLineEdit::Normal, last, &ok);
+        if (!ok || text.trimmed().isEmpty())
+            return;
+        const QUrl url = WebTab::urlFromInput(text);
+        if (!url.isValid()) {
+            QMessageBox::warning(this, tr("New Web Tab"), tr("“%1” isn't an address.").arg(text));
+            return;
+        }
+        settings.setValue(QStringLiteral("web/lastAddress"), text.trimmed());
+        openWeb(url);
     });
 #endif
 
@@ -938,6 +966,11 @@ int MainWindow::addTab(Tab *tab, const QString &text, const QString &toolTip,
     } else if (auto *vnc = qobject_cast<VncTab *>(tab)) {
         wireVncTab(vnc);
     }
+#ifdef PUDDLEJUMPER_WEB
+    else if (auto *web = qobject_cast<WebTab *>(tab)) {
+        wireWebTab(web);
+    }
+#endif
     tab->setProperty(kQuietUntilProperty, QDateTime::currentMSecsSinceEpoch() + 3000);
     if (workspace >= 0 && workspace < m_workspaces.size() && workspace != m_currentWorkspace) {
         // For a workspace not on screen: parked until it is. Its text and
@@ -999,6 +1032,84 @@ void MainWindow::openRdp(const QString &address)
 #endif
 }
 
+void MainWindow::openWeb(const QUrl &url)
+{
+#ifdef PUDDLEJUMPER_WEB
+    auto *tab = new WebTab(url);
+    const int index = addTab(tab, tab->title(), QString());
+    m_tabs->setCurrentIndex(index);
+    syncTabText(tab);
+    tab->focusContent();
+#else
+    QMessageBox::warning(this, tr("New Web Tab"),
+                         tr("This build has no web tabs (%1).").arg(url.toDisplayString()));
+#endif
+}
+
+void MainWindow::wireWebTab(WebTab *tab)
+{
+#ifdef PUDDLEJUMPER_WEB
+    connect(tab, &WebTab::changed, this, [this, tab]() {
+        syncTabText(tab);
+        if (const int i = m_tabs->indexOf(tab); i >= 0)
+            updateCardDetails(i);
+        if (tab == currentPage())
+            updateStatus();
+    });
+    // What a page opens in a new window: a tab beside it, in its workspace.
+    tab->setNewTabHandler([this, tab]() {
+        auto *made = new WebTab;
+        const int index = addTab(made, made->title(), QString(), workspaceOf(tab));
+        if (index >= 0) {
+            m_tabs->setCurrentIndex(index);
+            syncTabText(made);
+        }
+        return made;
+    });
+#else
+    Q_UNUSED(tab);
+#endif
+}
+
+void MainWindow::openLink(const QUrl &url)
+{
+#ifdef PUDDLEJUMPER_WEB
+    const QString scheme = url.scheme();
+    if ((scheme == QLatin1String("http") || scheme == QLatin1String("https")) && WebTab::isLocal(url)) {
+        openWeb(url);
+        return;
+    }
+#endif
+    QDesktopServices::openUrl(url);
+}
+
+void MainWindow::reloadAfterCommands()
+{
+#ifdef PUDDLEJUMPER_WEB
+    QList<WebTab *> watching;
+    for (Tab *page : allPages()) {
+        if (auto *web = qobject_cast<WebTab *>(page); web && web->reloadAfterCommands())
+            watching << web;
+    }
+    if (watching.isEmpty())
+        return;
+    // A command is seen running at one look and gone at the next (one
+    // shorter than the looks apart may be missed, and doesn't matter).
+    for (TerminalWidget *pane : allPanes()) {
+        const bool running = pane->hasRunningProcess();
+        const bool was = pane->property(kRunningProperty).toBool();
+        pane->setProperty(kRunningProperty, running);
+        if (!was || running)
+            continue;
+        const int workspace = workspaceOf(tabOf(pane));
+        for (WebTab *web : std::as_const(watching)) {
+            if (workspaceOf(web) == workspace)
+                web->reload();
+        }
+    }
+#endif
+}
+
 void MainWindow::wireVncTab(VncTab *tab)
 {
     tab->view()->setShortcutFilter([this](const QKeyEvent *event) { return isAppShortcut(event); });
@@ -1037,6 +1148,20 @@ void MainWindow::syncTabText(Tab *page)
     if (i < 0)
         return;
 
+#ifdef PUDDLEJUMPER_WEB
+    if (auto *web = qobject_cast<WebTab *>(page)) {
+        const QString title = web->title();
+        const QString name = !web->customTitle().isEmpty() ? web->customTitle() : title;
+        m_tabs->setTabText(i, name);
+        m_tabs->setTabToolTip(i, tr("Web — %1\n%2").arg(title, web->details()));
+        m_sidebar->setTitle(i, name);
+        m_tabStrip->setTitle(i, name);
+        m_tabStrip->setTabToolTip(i, m_tabs->tabToolTip(i));
+        if (web == currentPage())
+            setWindowTitle(tr("%1 — PuddleJumper").arg(name));
+        return;
+    }
+#endif
     if (auto *vnc = qobject_cast<VncTab *>(page)) {
         const QString title = vnc->title();
         const QString name = !vnc->customTitle().isEmpty() ? vnc->customTitle() : title;
@@ -1090,6 +1215,8 @@ void MainWindow::syncTabText(Tab *page)
 
 void MainWindow::wirePane(TerminalWidget *term)
 {
+    connect(term, &TerminalWidget::linkOpened, this, &MainWindow::openLink);
+
     // A pane's title names its tab while it is the tab's active pane.
     connect(term, &TerminalWidget::titleChanged, this, [this, term]() {
         auto *tab = tabOf(term);
@@ -1591,6 +1718,13 @@ void MainWindow::updateCardDetails(int index)
         m_sidebar->setSubtitle(index, vnc->details());
         return;
     }
+#ifdef PUDDLEJUMPER_WEB
+    if (auto *web = qobject_cast<WebTab *>(pageAt(index))) {
+        m_sidebar->setBadge(index, tr("Web"));
+        m_sidebar->setSubtitle(index, web->details());
+        return;
+    }
+#endif
     auto *tab = tabAt(index);
     TerminalWidget *pane = tab ? tab->activePane() : nullptr;
     if (!pane)
@@ -1670,6 +1804,21 @@ void MainWindow::showTabMenu(int index, const QPoint &globalPos)
             });
             menu.addSeparator();
         }
+#ifdef PUDDLEJUMPER_WEB
+        // A page to see the result of a build: reloaded as one finishes.
+        if (auto *web = qobject_cast<WebTab *>(pageAt(index))) {
+            menu.addSeparator();
+            QAction *reload = menu.addAction(tr("Reload After &Commands"));
+            reload->setCheckable(true);
+            reload->setChecked(web->reloadAfterCommands());
+            QPointer<WebTab> tab = web;
+            connect(reload, &QAction::toggled, this, [tab](bool on) {
+                if (tab)
+                    tab->setReloadAfterCommands(on);
+            });
+            menu.addSeparator();
+        }
+#endif
 
         // A tmux session lives in one workspace, so its tabs move together.
         QMenu *move = menu.addMenu(tmuxSessionFor(pageAt(index)) ? tr("&Move Session to Workspace")
@@ -1729,6 +1878,15 @@ void MainWindow::renameTab(int index)
 
 void MainWindow::updateStatus()
 {
+#ifdef PUDDLEJUMPER_WEB
+    if (auto *web = qobject_cast<WebTab *>(currentPage())) {
+        m_statusDir->setText(tr("Web  ·  %1").arg(web->title()));
+        m_statusInfo->setText(web->reloadAfterCommands()
+                                  ? tr("%1  ·  reloads after commands").arg(web->details())
+                                  : web->details());
+        return;
+    }
+#endif
     if (auto *vnc = qobject_cast<VncTab *>(currentPage())) {
         m_statusDir->setText(QStringLiteral("%1  ·  %2").arg(vnc->view()->client()->scheme().toUpper(), vnc->title()));
         m_statusInfo->setText(vnc->details());
@@ -2308,6 +2466,18 @@ void MainWindow::saveSession()
                 continue;
             if (t == currentTab)
                 savedCurrent = savedTabs.size();
+#ifdef PUDDLEJUMPER_WEB
+            if (auto *web = qobject_cast<WebTab *>(page)) {
+                QJsonObject saved{
+                    {QStringLiteral("title"), web->customTitle()},
+                    {QStringLiteral("web"), web->url().toString()},
+                };
+                if (web->reloadAfterCommands())
+                    saved.insert(QStringLiteral("reloadAfterCommands"), true);
+                savedTabs.append(saved);
+                continue;
+            }
+#endif
             if (auto *vnc = qobject_cast<VncTab *>(page)) {
                 // Under its protocol: "vnc" or "rdp".
                 QJsonObject saved{
@@ -2420,6 +2590,18 @@ bool MainWindow::restoreSession()
         };
         for (const QJsonValue &t : o.value(QStringLiteral("tabs")).toArray()) {
             const QJsonObject savedTab = t.toObject();
+            if (const QString address = savedTab.value(QStringLiteral("web")).toString();
+                !address.isEmpty()) {
+#ifdef PUDDLEJUMPER_WEB
+                auto *web = new WebTab(QUrl(address));
+                web->setCustomTitle(savedTab.value(QStringLiteral("title")).toString());
+                web->setReloadAfterCommands(savedTab.value(QStringLiteral("reloadAfterCommands")).toBool());
+                addTab(web, web->title(), QString(), i);
+                if (i == m_currentWorkspace)
+                    syncTabText(web);
+#endif
+                continue;
+            }
             if (const QString address = savedTab.value(QStringLiteral("vnc")).toString();
                 !address.isEmpty()) {
                 QString host;
