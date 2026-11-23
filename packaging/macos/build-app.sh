@@ -69,6 +69,13 @@ if conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
 else
     conda env create -q -n "$ENV_NAME" -f "$ROOT/packaging/macos/environment.yml"
 fi
+# Web tabs need Qt WebEngine, which conda-forge builds for Apple Silicon only:
+# an Intel Mac's app goes without them.
+if [ "$(uname -m)" = arm64 ]; then
+    conda install -q -y -n "$ENV_NAME" -c conda-forge qt6-webengine
+else
+    echo "  (no Qt WebEngine for Intel Macs on conda-forge: no web tabs)"
+fi
 conda activate "$ENV_NAME"
 
 step "Build"

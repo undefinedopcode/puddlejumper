@@ -111,6 +111,11 @@ Things to know:
 - **One architecture.** The app is built for the Mac it's built on: an Intel
   Mac (or the VM) makes an x86_64 app, which runs on Apple Silicon through
   Rosetta. For a native Apple Silicon app, build it on one.
+- **Web tabs on Apple Silicon only.** conda-forge has Qt WebEngine for Apple
+  Silicon and not for Intel, so an Intel Mac's app has no web tabs.
+- **Built on GitHub too.** `.github/workflows/macos.yml` builds both apps, and
+  their disk images, for each push to `main` and each pull request: they are
+  the run's artifacts (Actions → the run → Artifacts).
 - **Signed ad hoc, not notarised.** The Mac it was built on runs it as is. On
   another, Gatekeeper refuses a downloaded copy the first time: Control-click
   the app and choose Open, or clear the quarantine with

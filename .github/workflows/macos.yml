@@ -1,0 +1,44 @@
+# The macOS app, for Apple Silicon and Intel, as packaging/macos/build-app.sh
+# makes it: the disk images are the run's artifacts.
+name: macOS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15         # Apple Silicon: with web tabs
+            arch: arm64
+          - runner: macos-15-intel   # Intel: without (no Qt WebEngine there)
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    name: macOS ${{ matrix.arch }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Conda's downloaded packages, so each run doesn't fetch Qt again.
+      - uses: actions/cache@v4
+        with:
+          path: ~/miniforge3/pkgs
+          key: conda-${{ matrix.arch }}-${{ hashFiles('packaging/macos/environment.yml') }}
+          restore-keys: conda-${{ matrix.arch }}-
+
+      - name: Build and package
+        run: packaging/macos/build-app.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PuddleJumper-macOS-${{ matrix.arch }}
+          path: dist/*.dmg
+          if-no-files-found: error
