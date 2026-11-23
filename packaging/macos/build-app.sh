@@ -57,7 +57,9 @@ if [ ! -x "$MINIFORGE/bin/conda" ]; then
     installer="$(mktemp -d)/miniforge.sh"
     curl -fsSL -o "$installer" \
         "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-MacOSX-$(uname -m).sh"
-    bash "$installer" -b -p "$MINIFORGE"
+    # -u: the folder may be there already, with only a package cache in it
+    # (restored by CI, say).
+    bash "$installer" -b -u -p "$MINIFORGE"
 fi
 # (Not "source .../activate", which would take this script's arguments.)
 eval "$("$MINIFORGE/bin/conda" shell.bash hook)"
