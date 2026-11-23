@@ -18,7 +18,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - runner: macos-15         # Apple Silicon: with web tabs
+          - runner: macos-26         # Apple Silicon: with web tabs
             arch: arm64
           - runner: macos-15-intel   # Intel: without (no Qt WebEngine there)
             arch: x86_64
