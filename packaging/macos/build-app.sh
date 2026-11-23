@@ -114,7 +114,7 @@ fi
 # in, Qt's plugins with them, and points everything at the copies.
 deployqt="$(command -v macdeployqt6 || command -v macdeployqt || echo "$CONDA_PREFIX/lib/qt6/bin/macdeployqt")"
 "$deployqt" "$DIST/PuddleJumper.app" -libpath="$CONDA_PREFIX/lib" -verbose=1 \
-    "${extra[@]}"
+    ${extra[@]+"${extra[@]}"}   # (bash 3.2: an empty array is unset)
 
 step "Check nothing outside the app is needed"
 # Every Mach-O file may only use the app's own copies and the system's.
