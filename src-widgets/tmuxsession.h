@@ -132,6 +132,12 @@ private:
     QSet<int> m_restoring;
     bool m_attaching = true;   // until the initial windows are restored
     int m_activeWindow = -1;   // tmux's current window, as last reported
+    int m_sessionId = -1;      // tmux's id for the session ($3 is 3)
+    // select-window commands sent and not yet answered, and the window the
+    // last one selects. While any is out, tmux's reports of the earlier ones
+    // are stale: following them would switch back and select again.
+    int m_selectsPending = 0;
+    int m_selectedWindow = -1;
 
     // An invisible pane that only measures the cell size for the current font.
     TerminalWidget *m_metrics = nullptr;

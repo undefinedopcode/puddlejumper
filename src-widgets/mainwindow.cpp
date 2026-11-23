@@ -1558,8 +1558,10 @@ void MainWindow::attachTmux(const QString &label, const QStringList &command,
     });
 
     // The size tabs will have, so the session starts at the right size rather
-    // than redrawing once its first tab is shown.
-    if (QWidget *page = m_tabs->currentWidget()) {
+    // than redrawing once its first tab is shown. Not before the window is
+    // (restoring a session): its size then is a guess, and a resize to the
+    // guess and another to the real size each make the shells redraw.
+    if (QWidget *page = m_tabs->currentWidget(); page && page->isVisible()) {
         const int m = m_settings.appearance().terminalMargin;
         session->setClientArea(page->size() - QSize(2 * m, 2 * m));
     }

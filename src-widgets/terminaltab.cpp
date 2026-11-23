@@ -506,6 +506,12 @@ void TerminalTab::resizeEvent(QResizeEvent *event)
     emit layoutAreaResized();
 }
 
+void TerminalTab::showEvent(QShowEvent *event)
+{
+    QWidget::showEvent(event);
+    emit layoutAreaResized();
+}
+
 void TerminalTab::paintEvent(QPaintEvent *)
 {
     if (m_padding == 0)

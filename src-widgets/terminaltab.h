@@ -129,6 +129,8 @@ signals:
     void activePaneChanged(TerminalWidget *pane);
     void paneAdded(TerminalWidget *pane);
     void empty();
+    /* The panes' area changed size, or the tab was shown: a hidden one is
+     * resized unseen, and shown at that size without another resize. */
     void layoutAreaResized();
     /*
      * The user dragged a splitter handle. `before` is a pane in the part
@@ -139,6 +141,7 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
+    void showEvent(QShowEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
 
 private:

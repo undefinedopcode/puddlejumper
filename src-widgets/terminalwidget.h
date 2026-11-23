@@ -197,7 +197,8 @@ signals:
     void splitRequested(Qt::Orientation orientation);
     void closePaneRequested();
 
-    /* The pane changed size (and so, soon, the terminal's columns and lines). */
+    /* The pane changed size (and so, soon, the terminal's columns and lines),
+     * or an external pane was given new columns and lines. */
     void resized();
 
     /* A link in the output was Ctrl-clicked, or opened from the menu. */

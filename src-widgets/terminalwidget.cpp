@@ -330,8 +330,10 @@ void TerminalWidget::feed(const QByteArray &data)
 
 void TerminalWidget::setScreenSize(int columns, int lines)
 {
-    if (m_terminal && isExternal())
-        m_terminal->setFixedTerminalSize(columns, lines);
+    if (!m_terminal || !isExternal())
+        return;
+    m_terminal->setFixedTerminalSize(columns, lines);
+    emit resized();   // the pane itself may keep its size
 }
 
 QSize TerminalWidget::cellSize() const

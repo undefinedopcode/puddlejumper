@@ -354,14 +354,15 @@ void TmuxControl::handleNotification(const QByteArray &line)
             emit windowRenamed(parseId(f.at(1)), QString::fromUtf8(f.at(2)));
     } else if (name == "%session-window-changed") {
         // %session-window-changed $<session> @<window>
-        emit activeWindowChanged(parseId(fields(line, 3).value(2)));
+        const QList<QByteArray> f = fields(line, 3);
+        emit activeWindowChanged(parseId(f.value(1)), parseId(f.value(2)));
     } else if (name == "%window-pane-changed") {
         const QList<QByteArray> f = fields(line, 3);
         emit activePaneChanged(parseId(f.value(1)), parseId(f.value(2)));
     } else if (name == "%session-changed") {
         const QList<QByteArray> f = fields(line, 3);
         if (f.size() == 3)
-            emit sessionChanged(QString::fromUtf8(f.at(2)));
+            emit sessionChanged(parseId(f.at(1)), QString::fromUtf8(f.at(2)));
     } else if (name == "%pause") {
         emit paused(parseId(fields(line, 2).value(1)));
     } else if (name == "%exit") {

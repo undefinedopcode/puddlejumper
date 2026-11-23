@@ -71,9 +71,12 @@ signals:
     void windowClosed(int window);
     void windowRenamed(int window, const QString &name);
     void layoutChanged(int window, const QByteArray &layout);
-    void activeWindowChanged(int window);
+    /* A session's current window changed: any session's, not only this
+     * client's (tmux tells every control client). */
+    void activeWindowChanged(int session, int window);
     void activePaneChanged(int window, int pane);
-    void sessionChanged(const QString &name);
+    /* The session this client is attached to: its id ($1 is 1) and name. */
+    void sessionChanged(int session, const QString &name);
     /* Flow control (refresh-client -f pause-after): output for `pane` was
      * dropped because we fell behind, and it waits for "continue". */
     void paused(int pane);

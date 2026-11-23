@@ -151,8 +151,12 @@ TmuxSession::TmuxSession(const QString &label, const QStringList &command,
             emit tabRenamed(it->tab, name);
     });
 
-    connect(m_control, &TmuxControl::activeWindowChanged, this, [this](int window) {
+    connect(m_control, &TmuxControl::activeWindowChanged, this, [this](int session, int window) {
+        if (m_sessionId >= 0 && session != m_sessionId)
+            return;   // another session's
         m_activeWindow = window;
+        if (m_selectsPending > 0 && window != m_selectedWindow)
+            return;   // on its way to the one selected since
         if (TerminalTab *tab = m_windows.value(window).tab)
             emit tabActivated(tab);
     });
@@ -164,7 +168,8 @@ TmuxSession::TmuxSession(const QString &label, const QStringList &command,
             tab->setActivePane(p, tab->isVisible());
     });
 
-    connect(m_control, &TmuxControl::sessionChanged, this, [this](const QString &name) {
+    connect(m_control, &TmuxControl::sessionChanged, this, [this](int session, const QString &name) {
+        m_sessionId = session;
         m_sessionName = name;
     });
 
@@ -550,8 +555,28 @@ void TmuxSession::renameWindow(TerminalTab *tab, const QString &name)
 void TmuxSession::selectWindow(TerminalTab *tab)
 {
     const int wid = windowId(tab);
-    if (wid >= 0)
-        m_control->command(QStringLiteral("select-window -t ") + windowTarget(wid));
+    // While attaching, tmux's current window is the one to show, not one to
+    // change; and the tab shown because tmux switched to it needs no select.
+    if (wid < 0 || m_attaching || (wid == m_activeWindow && m_selectsPending == 0))
+        return;
+    ++m_selectsPending;
+    m_selectedWindow = wid;
+    m_control->command(QStringLiteral("select-window -t ") + windowTarget(wid),
+                       [this](bool, const QList<QByteArray> &) {
+        if (--m_selectsPending > 0)
+            return;
+        // Whatever was reported meanwhile was held back: the tabs follow
+        // tmux's current window again, asked for since its report of this
+        // select may still be on the way.
+        m_control->command(QStringLiteral("display-message -p '#{window_id}'"),
+                           [this](bool ok, const QList<QByteArray> &lines) {
+            if (!ok || lines.isEmpty() || m_selectsPending > 0)
+                return;
+            m_activeWindow = parseId(lines.first());
+            if (TerminalTab *tab = m_windows.value(m_activeWindow).tab)
+                emit tabActivated(tab);
+        });
+    });
 }
 
 bool TmuxSession::ownsTab(const TerminalTab *tab) const
