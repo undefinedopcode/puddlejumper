@@ -16,6 +16,7 @@
 #include <QDebug>
 #include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QIcon>
 #include <QLocale>
 #include <QStyle>
@@ -69,6 +70,34 @@ int main(int argc, char *argv[])
             locale = QStringLiteral("en_US.UTF-8");
         qputenv("LANG", locale.toUtf8());
     }
+    // Nor the PATH a login shell gets: tmux, which the app runs itself, is
+    // Homebrew's (or MacPorts') more often than not. The usual places, after
+    // what's there.
+    {
+        QStringList path = qEnvironmentVariable("PATH").split(QLatin1Char(':'), Qt::SkipEmptyParts);
+        for (const char *dir : {"/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin",
+                                "/usr/local/sbin", "/opt/local/bin", "/opt/local/sbin"}) {
+            const QString d = QString::fromLatin1(dir);
+            if (!path.contains(d) && QFileInfo(d).isDir())
+                path.append(d);
+        }
+        qputenv("PATH", QFile::encodeName(path.join(QLatin1Char(':'))));
+    }
+#ifdef PUDDLEJUMPER_WEB
+    // Qt WebEngine finds its helper and data in the app only when Qt is built
+    // as frameworks; conda's isn't, so the app carries them where
+    // build-app.sh puts them, and says so. (Without them it aborts.)
+    {
+        const QDir contents(app.applicationDirPath() + QStringLiteral("/.."));
+        const auto point = [&contents](const char *name, const QString &path) {
+            if (qEnvironmentVariableIsEmpty(name) && QFile::exists(contents.filePath(path)))
+                qputenv(name, QFile::encodeName(contents.absoluteFilePath(path)));
+        };
+        point("QTWEBENGINEPROCESS_PATH", QStringLiteral("MacOS/QtWebEngineProcess"));
+        point("QTWEBENGINE_RESOURCES_PATH", QStringLiteral("Resources/qtwebengine"));
+        point("QTWEBENGINE_LOCALES_PATH", QStringLiteral("Resources/qtwebengine/qtwebengine_locales"));
+    }
+#endif
 #endif
 
     /*

@@ -93,10 +93,28 @@ step "Bundle Qt and the other libraries"
 rm -rf "$DIST/PuddleJumper.app"
 mkdir -p "$DIST"
 cp -R "$BUILD/PuddleJumper.app" "$DIST/"
+contents="$DIST/PuddleJumper.app/Contents"
+executables=("$contents/MacOS/PuddleJumper")
+extra=()   # macdeployqt's -executable= for those besides the app's own
+# Qt WebEngine's helper process and data. macdeployqt brings them only for a
+# Qt built as frameworks, which conda's isn't: they go in by hand, where
+# main.cpp tells Qt WebEngine to look.
+if otool -L "$contents/MacOS/PuddleJumper" | grep -q libQt6WebEngineCore; then
+    helper="$(find "$CONDA_PREFIX/lib/qt6" -name QtWebEngineProcess -type f -perm -u+x | head -n 1)"
+    [ -n "$helper" ] || die "no QtWebEngineProcess in $CONDA_PREFIX/lib/qt6"
+    cp "$helper" "$contents/MacOS/QtWebEngineProcess"
+    executables+=("$contents/MacOS/QtWebEngineProcess")
+    extra+=("-executable=$contents/MacOS/QtWebEngineProcess")
+    mkdir -p "$contents/Resources/qtwebengine"
+    cp "$CONDA_PREFIX"/share/qt6/resources/* "$contents/Resources/qtwebengine/"
+    cp -R "$CONDA_PREFIX/share/qt6/translations/qtwebengine_locales" "$contents/Resources/qtwebengine/"
+    echo "  Qt WebEngine's helper and data: in"
+fi
 # The libraries come from the environment, by rpath; macdeployqt copies them
 # in, Qt's plugins with them, and points everything at the copies.
 deployqt="$(command -v macdeployqt6 || command -v macdeployqt || echo "$CONDA_PREFIX/lib/qt6/bin/macdeployqt")"
-"$deployqt" "$DIST/PuddleJumper.app" -libpath="$CONDA_PREFIX/lib" -verbose=1
+"$deployqt" "$DIST/PuddleJumper.app" -libpath="$CONDA_PREFIX/lib" -verbose=1 \
+    "${extra[@]}"
 
 step "Check nothing outside the app is needed"
 # Every Mach-O file may only use the app's own copies and the system's.
@@ -113,17 +131,22 @@ while IFS= read -r -d '' file; do
         esac
     done < <(otool -L "$file" | tail -n +2 | awk '{print $1}')
 done < <(find "$DIST/PuddleJumper.app" -type f -print0)
-# @rpath ones must resolve inside: the executable's rpaths may only point in.
-if otool -l "$DIST/PuddleJumper.app/Contents/MacOS/PuddleJumper" | awk '/LC_RPATH/{getline; getline; print $2}' \
-    | grep -v '^@' | grep -q .; then
-    echo "  the executable still has rpaths outside the app:"
-    otool -l "$DIST/PuddleJumper.app/Contents/MacOS/PuddleJumper" | awk '/LC_RPATH/{getline; getline; print "    " $2}'
-    bad=1
-fi
+# @rpath ones must resolve inside: the executables' rpaths may only point in.
+for exe in "${executables[@]}"; do
+    if otool -l "$exe" | awk '/LC_RPATH/{getline; getline; print $2}' | grep -v '^@' | grep -q .; then
+        echo "  $(basename "$exe") still has rpaths outside the app:"
+        otool -l "$exe" | awk '/LC_RPATH/{getline; getline; print "    " $2}'
+        bad=1
+    fi
+done
 [ "$bad" = 0 ] || die "the app still refers to files outside it (above)"
 echo "  all self-contained"
 
 step "Sign (ad hoc)"
+# The helper too: it isn't where --deep looks, and an unsigned one is killed.
+for exe in "${executables[@]:1}"; do
+    codesign --force --sign - "$exe"
+done
 codesign --force --deep --sign - "$DIST/PuddleJumper.app"
 codesign --verify --deep --strict "$DIST/PuddleJumper.app"
 echo "  signed"
