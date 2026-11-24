@@ -10,6 +10,7 @@
 #include "formername.h"
 #include "macwindow.h"
 #include "procinfo.h"
+#include "programstatus.h"
 #include "settingsdialog.h"
 #include "tabstrip.h"
 #include "terminaltab.h"
@@ -70,6 +71,7 @@
 #include <QStatusBar>
 #include <QTabBar>
 #include <QTabWidget>
+#include <QPointer>
 #include <QTimer>
 #include <QUuid>
 #include <QToolBar>
@@ -788,6 +790,7 @@ void MainWindow::buildMenus()
 void MainWindow::buildStatusBar()
 {
     m_statusDir = new QLabel(this);
+    m_statusDir->setTextFormat(Qt::PlainText);   // titles and programs' messages are never markup
     m_statusInfo = new QLabel(this);
     statusBar()->addWidget(m_statusDir, 1);
 
@@ -1226,6 +1229,18 @@ void MainWindow::wirePane(TerminalWidget *term)
 
     connect(term, &TerminalWidget::sessionFinished, this, [this, term]() {
         closePane(term);
+    });
+
+    // What a program here says it's doing; gone with the pane.
+    connect(term->programStatus(), &ProgramStatus::changed, this, [this, term]() {
+        updateProgramStatus(tabOf(term));
+    });
+    connect(term->programStatus(), &QObject::destroyed, this,
+            [this, tab = QPointer<TerminalTab>(tabOf(term))]() {
+        QTimer::singleShot(0, this, [this, tab]() {
+            if (tab)
+                updateProgramStatus(tab);
+        });
     });
 
     // The status bar's columns and lines. (Queued: the terminal inside takes
@@ -1693,6 +1708,7 @@ void MainWindow::syncTabTitles()
             m_sidebar->setBusy(i, true);
             m_tabStrip->setBusy(i, true);
         }
+        updateProgramStatus(pageAt(i));
     }
     refreshPreviews(true);
 }
@@ -1900,12 +1916,19 @@ void MainWindow::updateStatus()
         m_statusInfo->clear();
         return;
     }
-    const QString title = term->sessionTitle();
+    QString title = term->sessionTitle();
     if (auto *session = tmuxSessionFor(term))
-        m_statusDir->setText(tr("tmux %1  ·  %2").arg(
-            session->label(), title.isEmpty() ? session->windowName(tabOf(term)) : title));
-    else
-        m_statusDir->setText(title);
+        title = tr("tmux %1  ·  %2").arg(session->label(),
+                                         title.isEmpty() ? session->windowName(tabOf(term)) : title);
+    // What the program here says it's doing, and why.
+    const ProgramStatusRecord status = term->programStatus()->mostPressing();
+    if (ProgramStatus::rank(status) > 0) {
+        QString said = ProgramStatus::label(status);
+        if (!status.msg.isEmpty())
+            said += QStringLiteral(": ") + status.msg;
+        title = title.isEmpty() ? said : title + QStringLiteral("  ·  ") + said;
+    }
+    m_statusDir->setText(title);
 
     auto *t = term->terminal();
     // Report the tab's *effective* scheme, which a profile may have overridden.
@@ -1914,6 +1937,47 @@ void MainWindow::updateStatus()
                               .arg(t->screenLinesCount())
                               .arg(t->historySize())
                               .arg(term->appliedColorScheme()));
+}
+
+void MainWindow::updateProgramStatus(QWidget *page)
+{
+    const int index = page ? m_tabs->indexOf(page) : -1;
+    if (index < 0)
+        return;   // gone, or in a workspace not on screen (synced when it is)
+
+    // The most pressing record of any pane in the tab.
+    ProgramStatusRecord best;
+    if (auto *tab = qobject_cast<TerminalTab *>(page)) {
+        for (TerminalWidget *pane : tab->panes()) {
+            const ProgramStatusRecord r = pane->programStatus()->mostPressing();
+            if (ProgramStatus::rank(r) > ProgramStatus::rank(best))
+                best = r;
+        }
+    }
+
+    cardstyle::Status status;
+    switch (best.state) {
+    case ProgramStatusRecord::Blocked: status.kind = cardstyle::Status::Blocked; break;
+    case ProgramStatusRecord::Error: status.kind = cardstyle::Status::Error; break;
+    case ProgramStatusRecord::Done: status.kind = cardstyle::Status::Done; break;
+    case ProgramStatusRecord::Working: status.kind = cardstyle::Status::Working; break;
+    default: break;
+    }
+    if (status.kind != cardstyle::Status::None) {
+        status.label = ProgramStatus::label(best);
+        status.progress = best.progress;
+        // The program and what it said; markup is never read in it.
+        QStringList parts;
+        for (const QString &part : {best.app, best.title, best.msg}) {
+            if (!part.isEmpty())
+                parts << part;
+        }
+        status.detail = status.label + (parts.isEmpty() ? QString() : QStringLiteral(": ") + parts.join(QStringLiteral(" · ")));
+    }
+    m_sidebar->setStatus(index, status);
+    m_tabStrip->setStatus(index, status);
+    if (page == currentPage())
+        updateStatus();
 }
 
 void MainWindow::zoomBy(int halfPoints)

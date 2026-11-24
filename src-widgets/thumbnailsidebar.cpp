@@ -26,6 +26,10 @@ constexpr int kSubtitleRole = Qt::UserRole + 2;
 constexpr int kBadgeRole = Qt::UserRole + 3;
 constexpr int kPreviewRole = Qt::UserRole + 4;
 constexpr int kBusyRole = Qt::UserRole + 5;
+constexpr int kStatusKindRole = Qt::UserRole + 6;
+constexpr int kStatusLabelRole = Qt::UserRole + 7;
+constexpr int kStatusProgressRole = Qt::UserRole + 8;
+constexpr int kStatusDetailRole = Qt::UserRole + 9;
 
 // Card geometry, in logical pixels.
 constexpr int kSide = 8;        // between the sidebar edge and a card
@@ -127,6 +131,26 @@ public:
             p->drawRoundedRect(pill, pill.height() / 2.0, pill.height() / 2.0);
             p->setPen(Qt::white);
             p->drawText(pill, Qt::AlignCenter, text);
+        }
+
+        // What the program says it's doing, top left; its progress along
+        // the bottom.
+        const auto kind = cardstyle::Status::Kind(index.data(kStatusKindRole).toInt());
+        if (kind != cardstyle::Status::None) {
+            cardstyle::Status status;
+            status.kind = kind;
+            status.label = index.data(kStatusLabelRole).toString();
+            cardstyle::paintStatusPill(p, preview.topLeft() + QPoint(4, 4), status, small,
+                                       preview.width() - 2 * kClose);
+            const int progress = index.data(kStatusProgressRole).toInt();
+            if (progress >= 0) {
+                const QRectF track(preview.left() + 1, preview.bottom() - 3, preview.width() - 2, 3);
+                p->setPen(Qt::NoPen);
+                p->setBrush(QColor(0, 0, 0, 120));
+                p->drawRect(track);
+                p->setBrush(cardstyle::statusColour(kind));
+                p->drawRect(QRectF(track.topLeft(), QSizeF(track.width() * progress / 100.0, track.height())));
+            }
         }
 
         // Close button, only while hovered.
@@ -298,8 +322,18 @@ void ThumbnailSidebar::setTitle(int index, const QString &title)
     if (QListWidgetItem *item = card(index)) {
         const QString text = title.isEmpty() ? tr("Terminal") : title;
         item->setData(kTitleRole, text);
-        item->setToolTip(text);
+        updateToolTip(item);
     }
+}
+
+void ThumbnailSidebar::updateToolTip(QListWidgetItem *item)
+{
+    // The title, and under it what a program there says it's doing. Both
+    // come from programs, so escaped: Qt would take text that looks like
+    // HTML as HTML.
+    const QString detail = item->data(kStatusDetailRole).toString();
+    item->setToolTip(QStringLiteral("<qt>") + item->data(kTitleRole).toString().toHtmlEscaped()
+                     + (detail.isEmpty() ? QString() : QStringLiteral("<br>") + detail.toHtmlEscaped()));
 }
 
 void ThumbnailSidebar::setSubtitle(int index, const QString &subtitle)
@@ -318,6 +352,18 @@ void ThumbnailSidebar::setPreview(int index, const QPixmap &pixmap)
 {
     if (QListWidgetItem *item = card(index))
         item->setData(kPreviewRole, pixmap);
+}
+
+void ThumbnailSidebar::setStatus(int index, const cardstyle::Status &status)
+{
+    QListWidgetItem *item = card(index);
+    if (!item)
+        return;
+    item->setData(kStatusKindRole, int(status.kind));
+    item->setData(kStatusLabelRole, status.label);
+    item->setData(kStatusProgressRole, status.kind == cardstyle::Status::None ? -1 : status.progress);
+    item->setData(kStatusDetailRole, status.detail);
+    updateToolTip(item);
 }
 
 void ThumbnailSidebar::setBusy(int index, bool busy)

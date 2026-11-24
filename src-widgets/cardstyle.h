@@ -7,6 +7,8 @@
 #pragma once
 
 #include <QColor>
+#include <QFont>
+#include <QFontMetrics>
 #include <QGuiApplication>
 #include <QIcon>
 #include <QPainter>
@@ -122,6 +124,52 @@ inline QIcon chevronIcon(const QColor &colour, qreal dpr)
 }
 
 /* The new-output dot as a menu icon, centred in its square. */
+/*
+ * What a program in the tab says it is doing (see ProgramStatus), as a card
+ * or tab shows it: a coloured label on the preview, a bar for progress, a
+ * dot in the strip.
+ */
+struct Status {
+    enum Kind { None, Working, Blocked, Done, Error };
+    Kind kind = None;
+    QString label;       // "Needs approval", "Working 40%"
+    int progress = -1;   // 0 to 100; -1 for none
+    QString detail;      // for a tooltip: the program and its message
+};
+
+/* Waiting on you stands out; done is quiet; working takes the accent. */
+inline QColor statusColour(Status::Kind kind)
+{
+    switch (kind) {
+    case Status::Blocked: return QColor(0xe8, 0xa3, 0x17);
+    case Status::Error: return QColor(0xe0, 0x4f, 0x4f);
+    case Status::Done: return QColor(0x3f, 0xb9, 0x50);
+    case Status::Working:
+    case Status::None: break;
+    }
+    return accent();
+}
+
+/* A status label: a pill with a dot in its colour, at `topLeft`. Returns
+ * the pill's rectangle. */
+inline QRect paintStatusPill(QPainter *p, const QPoint &topLeft, const Status &status,
+                             const QFont &font, int maxWidth)
+{
+    const QFontMetrics fm(font);
+    const int dot = 6;
+    const QString text = fm.elidedText(status.label, Qt::ElideRight, maxWidth - dot - 16);
+    const QRect pill(topLeft, QSize(fm.horizontalAdvance(text) + dot + 16, fm.height() + 2));
+    p->setPen(Qt::NoPen);
+    p->setBrush(QColor(0, 0, 0, 170));
+    p->drawRoundedRect(pill, pill.height() / 2.0, pill.height() / 2.0);
+    p->setBrush(statusColour(status.kind));
+    p->drawEllipse(QPointF(pill.left() + 6 + dot / 2.0, pill.center().y() + 0.5), dot / 2.0, dot / 2.0);
+    p->setFont(font);
+    p->setPen(Qt::white);
+    p->drawText(pill.adjusted(dot + 10, 0, -6, 0), Qt::AlignVCenter | Qt::AlignLeft, text);
+    return pill;
+}
+
 inline QIcon dotIcon(qreal dpr)
 {
     QPixmap dot(QSize(16, 16) * dpr);

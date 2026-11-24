@@ -9,6 +9,7 @@
 #include "colorscheme.h"
 #include "formername.h"
 #include "procinfo.h"
+#include "programstatus.h"
 #include "screenshotoverlay.h"
 
 #include <QAction>
@@ -24,6 +25,7 @@
 #include <QPainter>
 #include <QScrollBar>
 #include <QStyle>
+#include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -73,6 +75,15 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings,
     connect(m_terminal, &QTermWidget::finished, this, [this]() {
         emit sessionFinished();
     });
+
+    m_status = new ProgramStatus(this);
+    m_statusWatch = new QTimer(this);
+    m_statusWatch->setInterval(500);
+    connect(m_statusWatch, &QTimer::timeout, this, &TerminalWidget::checkProgramStatusOwner);
+    connect(m_terminal, &QTermWidget::programStatusReport, this, &TerminalWidget::onProgramStatusReport);
+    connect(m_terminal, &QTermWidget::fullReset, m_status, &ProgramStatus::reset);
+    // Back at this terminal: what finished here has been seen.
+    connect(m_terminal, &QTermWidget::termKeyPressed, m_status, &ProgramStatus::markSeen);
 
     // A link's hot spot fires at any click on it, which mostly means to
     // select or to place the cursor: only a Ctrl-click (Cmd on a Mac) opens it.
@@ -445,6 +456,32 @@ bool TerminalWidget::hasRunningProcess() const
     const int reference = (shellPgrp > 0) ? shellPgrp : shellPid;
     return fgPgrp != reference;
 #endif
+}
+
+void TerminalWidget::onProgramStatusReport(const QString &body)
+{
+    if (!m_status->apply(body))
+        return;
+    // Held while the program that sent it is in the foreground. (tmux's
+    // panes have no pty here to look at; their reports don't reach us.)
+    if (isExternal())
+        return;
+    m_statusOwner = m_terminal->getForegroundProcessId();
+    const auto records = m_status->records();
+    const bool transient = std::any_of(records.begin(), records.end(),
+        [](const ProgramStatusRecord &r) { return !r.finished(); });
+    if (transient && m_statusOwner > 0)
+        m_statusWatch->start();
+    else
+        m_statusWatch->stop();
+}
+
+void TerminalWidget::checkProgramStatusOwner()
+{
+    if (m_terminal->getForegroundProcessId() == m_statusOwner)
+        return;
+    m_statusWatch->stop();
+    m_status->programEnded();
 }
 
 QString TerminalWidget::foregroundProgramName() const

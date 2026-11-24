@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "cardstyle.h"
+
 #include <QColor>
 #include <QWidget>
 
@@ -45,6 +47,8 @@ public:
     void setPreview(int index, const QPixmap &pixmap);
     /* Mark a tab that produced output while it was not being watched. */
     void setBusy(int index, bool busy);
+    /* What a program in the tab says it is doing (OSC 7501). */
+    void setStatus(int index, const cardstyle::Status &status);
     /* Move one card, keeping its preview and marks (the tab bar moved a tab). */
     void moveCard(int from, int to);
 
@@ -88,6 +92,7 @@ protected:
 private:
     void updateItemSizes();
     QListWidgetItem *card(int index) const;
+    void updateToolTip(QListWidgetItem *item);
 
     QListWidget *m_list = nullptr;
     QToolButton *m_newTab = nullptr;

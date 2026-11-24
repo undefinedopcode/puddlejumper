@@ -209,6 +209,9 @@ private:
      */
     void refreshPreviews(bool all);
     void updateCardDetails(int index);
+    /* What the programs in a tab say they are doing (OSC 7501), on its card,
+     * its tab and, for the tab on screen, the status bar. */
+    void updateProgramStatus(QWidget *page);
     /* The sidebar and tab strip take their colours from the current tab's scheme. */
     void updateTabColours();
     void setSidebarWidth(int width);

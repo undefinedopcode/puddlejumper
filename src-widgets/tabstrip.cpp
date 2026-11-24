@@ -26,6 +26,7 @@ namespace {
 
 constexpr int kTitleRole = Qt::UserRole + 1;
 constexpr int kBusyRole = Qt::UserRole + 2;
+constexpr int kStatusKindRole = Qt::UserRole + 3;
 constexpr int kNaturalWidthRole = Qt::UserRole + 3;   // before layoutTabs() narrows it
 
 // Tab geometry, in logical pixels.
@@ -119,9 +120,13 @@ public:
                     QFontMetrics(font).elidedText(index.data(kTitleRole).toString(),
                                                   Qt::ElideRight, title.width()));
 
-        if (index.data(kBusyRole).toBool())
+        // A program's status (needing you, failed, done, working) takes the
+        // place of the new-output dot, in its colour.
+        const auto kind = cardstyle::Status::Kind(index.data(kStatusKindRole).toInt());
+        if (kind != cardstyle::Status::None || index.data(kBusyRole).toBool())
             cardstyle::paintDot(p, QPointF(title.right() + 6 + kDot / 2.0,
-                                           title.center().y() + 0.5), accent);
+                                           title.center().y() + 0.5),
+                                kind != cardstyle::Status::None ? cardstyle::statusColour(kind) : accent);
 
         // The close button: on the current tab and under the mouse, as a
         // tab bar shows it, so the others stay quiet.
@@ -389,6 +394,12 @@ void TabStrip::setTabToolTip(int index, const QString &toolTip)
 {
     if (QListWidgetItem *tab = item(index))
         tab->setToolTip(toolTip);
+}
+
+void TabStrip::setStatus(int index, const cardstyle::Status &status)
+{
+    if (QListWidgetItem *tab = item(index); tab && tab->data(kStatusKindRole).toInt() != int(status.kind))
+        tab->setData(kStatusKindRole, int(status.kind));
 }
 
 void TabStrip::setBusy(int index, bool busy)

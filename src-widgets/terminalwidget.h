@@ -11,7 +11,9 @@
 #include "profiles.h"
 #include "settings.h"
 
+class ProgramStatus;
 class QTermWidget;
+class QTimer;
 class QMenu;
 class QPoint;
 
@@ -171,6 +173,15 @@ public:
     /* Monotonic count of output chunks, for cheap change detection. */
     quint64 outputSeq() const { return m_outputSeq; }
 
+    /*
+     * What the programs here report of themselves (OSC 7501, see
+     * ProgramStatus). Working, blocked and idle records go once the
+     * foreground program that reported them is no longer in the foreground
+     * (it exited, or the shell is back at its prompt); done and error ones
+     * count as seen once a key is pressed here.
+     */
+    ProgramStatus *programStatus() const { return m_status; }
+
 signals:
     void titleChanged(const QString &title);
     void sessionFinished();
@@ -213,6 +224,8 @@ private:
     Konsole::TerminalDisplay *display() const;
 
     void onOutput();
+    void onProgramStatusReport(const QString &body);
+    void checkProgramStatusOwner();
     void showContextMenu(const QPoint &globalPos);
     /* The web address under a point on screen; none if no link is there. */
     QUrl linkAt(const QPoint &globalPos) const;
@@ -231,6 +244,12 @@ private:
      * told apart from one that inherits it after a global change.
      */
     QString m_appliedColorScheme;
+
+    ProgramStatus *m_status = nullptr;
+    // The foreground process group when a record was last reported, and a
+    // look every so often while one is held that its going ends.
+    int m_statusOwner = 0;
+    QTimer *m_statusWatch = nullptr;
 
     bool m_dirty = false;
     quint64 m_outputSeq = 0;

@@ -168,6 +168,7 @@ void Vt102Emulation::reset()
 void Vt102Emulation::resetTokenizer()
 {
   tokenBufferPos = 0;
+  tokenOverflow = false;
   argc = 0;
   argv[0] = 0;
   argv[1] = 0;
@@ -189,6 +190,8 @@ void Vt102Emulation::addArgument()
 void Vt102Emulation::addToCurrentToken(char32_t cc)
 {
   tokenBuffer[tokenBufferPos] = cc;
+  if (tokenBufferPos + 1 >= MAX_TOKEN_LENGTH)
+    tokenOverflow = true;
   tokenBufferPos = qMin(tokenBufferPos+1,MAX_TOKEN_LENGTH-1);
 }
 
@@ -455,6 +458,23 @@ void Vt102Emulation::processWindowAttributeChange()
   // ignored, only the second char in ST ("\e\\") is appended to tokenBuffer.
   QString newValue = QString::fromUcs4(tokenBuffer + i + 1, tokenBufferPos-i-2);
 
+  // puddlejumper: OSC 7501, program status. Every report, as it comes (the
+  // title updates below keep only the last of each kind); none that didn't
+  // fit (the protocol discards it whole); and the support query answered.
+  if (attributeToChange == 7501)
+  {
+    if (tokenOverflow)
+      return;
+    if (newValue.trimmed() == QLatin1String("?"))
+    {
+      if (answerQueries())
+        sendString("\033]7501;?\033\\");
+      return;
+    }
+    emit programStatusReport(newValue);
+    return;
+  }
+
   _pendingTitleUpdates[attributeToChange] = newValue;
   _titleUpdateTimer->start(20);
 }
@@ -537,7 +557,7 @@ void Vt102Emulation::processToken(int token, char32_t p, int q)
     case TY_ESC('H'      ) : _currentScreen->changeTabStop        (true      ); break; //VT100
     case TY_ESC('M'      ) : _currentScreen->reverseIndex         (          ); break; //VT100
     case TY_ESC('Z'      ) :      reportTerminalType   (          ); break;
-    case TY_ESC('c'      ) :      reset                (          ); break;
+    case TY_ESC('c'      ) :      reset                (          ); emit fullReset(); break;
 
     case TY_ESC('n'      ) :      useCharset           (         2); break;
     case TY_ESC('o'      ) :      useCharset           (         3); break;

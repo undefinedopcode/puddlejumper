@@ -395,6 +395,13 @@ signals:
   void titleChanged(int title,const QString& newTitle);
 
   /**
+   * puddlejumper: an OSC 7501 (program status) report, its body after
+   * "7501;" as it came; and a full reset (RIS), which removes the records.
+   */
+  void programStatusReport(const QString &body);
+  void fullReset();
+
+  /**
    * Emitted when the program running in the terminal changes the
    * screen size.
    */

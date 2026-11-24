@@ -51,6 +51,8 @@ qt_add_executable(puddlejumper
     src-widgets/main.cpp
     src-widgets/mainwindow.cpp
     src-widgets/mainwindow.h
+    src-widgets/programstatus.cpp
+    src-widgets/programstatus.h
     src-widgets/settingsdialog.cpp
     src-widgets/settingsdialog.h
     src-widgets/tab.h
@@ -252,6 +254,18 @@ set_target_properties(probe-settingsdialog PROPERTIES AUTOMOC ON)
 # Probe sources live under src-widgets/dev, so give it access to the parent
 # headers without "../..".
 target_include_directories(probe-settingsdialog PRIVATE src-widgets)
+
+# ---------------------------------------------------------------------------
+# test-programstatus — the OSC 7501 parser and records against the spec's
+# rules. Dev tool only; never installed. Run: ./build/test-programstatus
+# ---------------------------------------------------------------------------
+qt_add_executable(test-programstatus
+    src-widgets/dev/test_programstatus.cpp
+    src-widgets/programstatus.cpp src-widgets/programstatus.h
+)
+target_link_libraries(test-programstatus PRIVATE Qt6::Core)
+set_target_properties(test-programstatus PROPERTIES AUTOMOC ON)
+target_include_directories(test-programstatus PRIVATE src-widgets)
 
 # ---------------------------------------------------------------------------
 # puddlejumper-qml — the original Qt Quick implementation.

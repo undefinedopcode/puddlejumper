@@ -311,6 +311,11 @@ signals:
 
     void titleChanged();
 
+    /* puddlejumper: an OSC 7501 (program status) report, its body after
+     * "7501;"; and a full reset (RIS) of the terminal. */
+    void programStatusReport(const QString &body);
+    void fullReset();
+
     /**
      * Emitted when the current working directory of the active session
      * has changed.
