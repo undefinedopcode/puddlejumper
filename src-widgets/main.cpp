@@ -7,6 +7,7 @@
 #include "mainwindow.h"
 
 #include "colorscheme.h"
+#include "disclaim.h"
 #include "formername.h"
 #include "settings.h"
 
@@ -27,6 +28,8 @@
 
 int main(int argc, char *argv[])
 {
+    runDisclaimedIfAsked(argc, argv);   // macOS: started to become a command (see disclaim.h)
+
 #ifdef PUDDLEJUMPER_WEB
     // Web tabs' pages are drawn with OpenGL contexts shared with the window's.
     QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);

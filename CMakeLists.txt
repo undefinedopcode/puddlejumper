@@ -45,6 +45,8 @@ qt_add_executable(puddlejumper
     src-widgets/appicon.cpp
     src-widgets/appicon.h
     src-widgets/cardstyle.h
+    src-widgets/disclaim.cpp
+    src-widgets/disclaim.h
     src-widgets/formername.cpp
     src-widgets/formername.h
     src-widgets/macwindow.h

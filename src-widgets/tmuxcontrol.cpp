@@ -6,6 +6,8 @@
 
 #include "tmuxcontrol.h"
 
+#include "disclaim.h"
+
 #include "terminaltab.h"   // PaneLayout
 
 #include <QJsonArray>
@@ -177,7 +179,9 @@ void TmuxControl::start(const QStringList &command)
     });
 
     qCInfo(lcTmux) << "starting" << command;
-    m_process->start(command.first(), command.mid(1));
+    // It may start the tmux server, which mustn't count as part of the app.
+    const QStringList run = disclaimedCommand(command);
+    m_process->start(run.first(), run.mid(1));
 }
 
 bool TmuxControl::isRunning() const

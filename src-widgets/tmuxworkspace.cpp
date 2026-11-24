@@ -6,6 +6,8 @@
 
 #include "tmuxworkspace.h"
 
+#include "disclaim.h"
+
 #include <QDir>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -20,8 +22,10 @@ const QString kSetupWindow = QStringLiteral("__puddlejumper_setup");
 
 bool run(const QStringList &tmux, const QStringList &args, QString *output, QString *error)
 {
+    // It may start the tmux server, which mustn't count as part of the app.
+    const QStringList command = disclaimedCommand(tmux + args);
     QProcess p;
-    p.start(tmux.first(), tmux.mid(1) + args);
+    p.start(command.first(), command.mid(1));
     if (!p.waitForFinished(10000) || p.exitStatus() != QProcess::NormalExit || p.exitCode() != 0) {
         if (error) {
             const QString err = QString::fromLocal8Bit(p.readAllStandardError()).trimmed();
