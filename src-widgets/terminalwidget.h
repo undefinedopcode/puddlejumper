@@ -181,6 +181,9 @@ public:
      * count as seen once a key is pressed here.
      */
     ProgramStatus *programStatus() const { return m_status; }
+    /* The program that reported has gone (said by a tmux pane's session,
+     * or a shell's prompt): its working, blocked and idle records go. */
+    void programEnded();
 
 signals:
     void titleChanged(const QString &title);
@@ -212,6 +215,9 @@ signals:
      * or an external pane was given new columns and lines. */
     void resized();
 
+    /* A program here reported its status (programStatus() has it). */
+    void programStatusReported();
+
     /* A link in the output was Ctrl-clicked, or opened from the menu. */
     void linkOpened(const QUrl &url);
 
@@ -226,6 +232,9 @@ private:
     void onOutput();
     void onProgramStatusReport(const QString &body);
     void checkProgramStatusOwner();
+    void watchProgramStatusOwner();
+    /* Who is in the foreground, as far as status records care. */
+    int statusOwner() const;
     void showContextMenu(const QPoint &globalPos);
     /* The web address under a point on screen; none if no link is there. */
     QUrl linkAt(const QPoint &globalPos) const;
@@ -250,6 +259,9 @@ private:
     // look every so often while one is held that its going ends.
     int m_statusOwner = 0;
     QTimer *m_statusWatch = nullptr;
+    bool m_statusFromShell = false;   // reported while the shell had the foreground
+    bool m_statusSawCommand = false;  // ... and a command has run since
+    bool m_promptMarks = false;       // the shell marks its prompts (OSC 133)
 
     bool m_dirty = false;
     quint64 m_outputSeq = 0;

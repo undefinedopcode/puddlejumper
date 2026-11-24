@@ -82,6 +82,15 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings,
     connect(m_statusWatch, &QTimer::timeout, this, &TerminalWidget::checkProgramStatusOwner);
     connect(m_terminal, &QTermWidget::programStatusReport, this, &TerminalWidget::onProgramStatusReport);
     connect(m_terminal, &QTermWidget::fullReset, m_status, &ProgramStatus::reset);
+    connect(m_terminal, &QTermWidget::progressReport, this, [this](int state, int progress) {
+        if (m_status->applyProgress(state, progress))
+            watchProgramStatusOwner();
+    });
+    // A shell with semantic prompts (OSC 133) says when it is back.
+    connect(m_terminal, &QTermWidget::promptStarted, this, [this]() {
+        m_promptMarks = true;
+        programEnded();
+    });
     // Back at this terminal: what finished here has been seen.
     connect(m_terminal, &QTermWidget::termKeyPressed, m_status, &ProgramStatus::markSeen);
 
@@ -460,28 +469,62 @@ bool TerminalWidget::hasRunningProcess() const
 
 void TerminalWidget::onProgramStatusReport(const QString &body)
 {
-    if (!m_status->apply(body))
-        return;
-    // Held while the program that sent it is in the foreground. (tmux's
-    // panes have no pty here to look at; their reports don't reach us.)
+    if (m_status->apply(body))
+        watchProgramStatusOwner();
+}
+
+void TerminalWidget::programEnded()
+{
+    m_statusWatch->stop();
+    m_status->programEnded();
+}
+
+void TerminalWidget::watchProgramStatusOwner()
+{
+    emit programStatusReported();
+    // Held while the program that sent it is in the foreground. (A tmux
+    // pane has no pty here to look at: its TmuxSession says when.)
     if (isExternal())
         return;
-    m_statusOwner = m_terminal->getForegroundProcessId();
+    m_statusOwner = statusOwner();
+    // Sent by the shell itself (a function at the prompt, or between the
+    // commands it runs): held until its next prompt, which a shell marking
+    // its prompts says; for one that doesn't, until a command has run and
+    // it's back.
+    m_statusFromShell = !hasRunningProcess();
+    m_statusSawCommand = false;
     const auto records = m_status->records();
     const bool transient = std::any_of(records.begin(), records.end(),
         [](const ProgramStatusRecord &r) { return !r.finished(); });
-    if (transient && m_statusOwner > 0)
+    if (transient && m_statusOwner != 0 && !(m_statusFromShell && m_promptMarks))
         m_statusWatch->start();
     else
         m_statusWatch->stop();
 }
 
+int TerminalWidget::statusOwner() const
+{
+#ifdef Q_OS_WIN
+    // No process groups: what's in the foreground changes with every child
+    // a program starts. Whether a program is running (1) or the shell is at
+    // its prompt (-1) is what changes when one exits, or one starts.
+    return hasRunningProcess() ? 1 : -1;
+#else
+    return m_terminal->getForegroundProcessId();
+#endif
+}
+
 void TerminalWidget::checkProgramStatusOwner()
 {
-    if (m_terminal->getForegroundProcessId() == m_statusOwner)
+    if (!m_statusFromShell) {
+        if (statusOwner() != m_statusOwner)
+            programEnded();
         return;
-    m_statusWatch->stop();
-    m_status->programEnded();
+    }
+    if (hasRunningProcess())
+        m_statusSawCommand = true;
+    else if (m_statusSawCommand)
+        programEnded();
 }
 
 QString TerminalWidget::foregroundProgramName() const

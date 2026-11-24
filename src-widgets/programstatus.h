@@ -58,6 +58,14 @@ public:
 
     /* Apply a report's body. False if it was ignored or discarded. */
     bool apply(const QString &body);
+    /*
+     * OSC 9;4 progress (state 0 none, 1 percent, 2 error, 3 indeterminate,
+     * 4 paused), as the root record: as the spec allows, until a program
+     * has reported with OSC 7501 itself (a mapped report would wipe its
+     * record's kind and message), and again after a full reset. False if
+     * not applied.
+     */
+    bool applyProgress(int state, int progress);
     /* A full reset of the terminal (RIS): every record goes. */
     void reset();
     /* The program exited, or the shell showed a prompt: working, blocked and
@@ -85,6 +93,9 @@ signals:
     void changed();
 
 private:
+    void store(ProgramStatusRecord record);
+
     QList<ProgramStatusRecord> m_records;
     quint64 m_clock = 0;
+    bool m_reported = false;   // an OSC 7501 report since the last reset
 };

@@ -400,6 +400,13 @@ signals:
    */
   void programStatusReport(const QString &body);
   void fullReset();
+  /**
+   * puddlejumper: OSC 9;4 (progress: state 0 none, 1 percent, 2 error,
+   * 3 indeterminate, 4 paused; progress -1 if absent), and OSC 133;A (a
+   * shell prompt starts).
+   */
+  void progressReport(int state, int progress);
+  void promptStarted();
 
   /**
    * Emitted when the program running in the terminal changes the

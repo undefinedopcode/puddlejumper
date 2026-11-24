@@ -197,8 +197,37 @@ bool ProgramStatus::apply(const QString &body)
         return true;
     }
 
+    m_reported = true;
+    store(report->record);
+    return true;
+}
+
+bool ProgramStatus::applyProgress(int state, int progress)
+{
+    if (m_reported)
+        return false;
+    if (state == 0) {
+        const qsizetype before = m_records.size();
+        m_records.removeIf([](const ProgramStatusRecord &r) { return r.id.isEmpty(); });
+        if (m_records.size() != before)
+            emit changed();
+        return true;
+    }
+    ProgramStatusRecord record;
+    switch (state) {
+    case 1: case 4: record.state = ProgramStatusRecord::Working; break;
+    case 3: record.state = ProgramStatusRecord::Working; progress = -1; break;
+    case 2: record.state = ProgramStatusRecord::Error; progress = -1; break;
+    default: return false;
+    }
+    record.progress = progress >= 0 && progress <= 100 ? progress : -1;
+    store(record);
+    return true;
+}
+
+void ProgramStatus::store(ProgramStatusRecord record)
+{
     // A report replaces its record whole.
-    ProgramStatusRecord record = report->record;
     record.updated = ++m_clock;
     auto it = std::find_if(m_records.begin(), m_records.end(),
                            [&record](const ProgramStatusRecord &r) { return r.id == record.id; });
@@ -214,11 +243,11 @@ bool ProgramStatus::apply(const QString &body)
         m_records.append(record);
     }
     emit changed();
-    return true;
 }
 
 void ProgramStatus::reset()
 {
+    m_reported = false;
     if (m_records.isEmpty())
         return;
     m_records.clear();

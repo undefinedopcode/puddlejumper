@@ -192,6 +192,26 @@ int main(int argc, char *argv[])
         CHECK(s.mostPressing().id == QLatin1String("x"));
     }
 
+    // OSC 9;4 progress is the root record, until a program reports with
+    // OSC 7501; a full reset lets it in again.
+    {
+        ProgramStatus s;
+        CHECK(s.applyProgress(1, 30));
+        CHECK(s.mostPressing().state == ProgramStatusRecord::Working && s.mostPressing().progress == 30);
+        CHECK(s.applyProgress(3, 50));
+        CHECK(s.mostPressing().progress == -1);
+        CHECK(s.applyProgress(2, 0));
+        CHECK(s.mostPressing().state == ProgramStatusRecord::Error);
+        CHECK(s.applyProgress(0, 0));
+        CHECK(s.isEmpty());
+        CHECK(!s.applyProgress(9, 0));
+        CHECK(s.applyProgress(1, 101) && s.mostPressing().progress == -1);
+        s.apply(QStringLiteral("state=blocked:kind=question:id=x"));
+        CHECK(!s.applyProgress(1, 10));
+        s.reset();
+        CHECK(s.applyProgress(1, 10));
+    }
+
     // At most 256 records: the least recently updated makes way.
     {
         ProgramStatus s;

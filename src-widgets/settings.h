@@ -110,6 +110,12 @@ public:
         bool    confirmCloseWithRunningProcesses = true;
 
         /*
+         * A desktop notification when a program in a tab not being looked
+         * at says (OSC 7501) it needs you, has finished or has failed.
+         */
+        bool    notifyProgramStatus = true;
+
+        /*
          * Reopen the workspaces and tabs that were open at quit: their
          * layouts, directories and names (programs are not restarted), and
          * tmux sessions on this machine that are still running.
@@ -152,6 +158,7 @@ public:
     void setConfirmCloseWithRunningProcesses(bool v);
     void setRestoreSession(bool v);
     void setMonitorActivity(bool v);
+    void setNotifyProgramStatus(bool v);
     void setMonitorSilence(bool v);
     void setSilenceTimeout(int v);
     void setConfirmMultilinePaste(bool v);

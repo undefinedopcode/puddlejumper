@@ -22,6 +22,8 @@
 
 // Own
 #include "Vt102Emulation.h"
+
+#include <string>
 #include "tools.h"
 
 // Standard
@@ -169,6 +171,7 @@ void Vt102Emulation::resetTokenizer()
 {
   tokenBufferPos = 0;
   tokenOverflow = false;
+  tmuxEscPending = false;
   argc = 0;
   argv[0] = 0;
   argv[1] = 0;
@@ -279,10 +282,63 @@ void Vt102Emulation::initTokenizer()
 #define DEL 127
 
 // process an incoming unicode character
+bool Vt102Emulation::inTmuxPassthrough() const
+{
+  static const char32_t prefix[] = { ESC, 'P', 't', 'm', 'u', 'x', ';' };
+  if (tokenBufferPos < 7)
+    return false;
+  for (int i = 0; i < 7; ++i) {
+    if (tokenBuffer[i] != prefix[i])
+      return false;
+  }
+  return true;
+}
+
+// puddlejumper: what a program sends past tmux to the terminal outside (a
+// tmux pane's output in control mode carries it as it was written, and a
+// tmux inside a pane passes it on with allow-passthrough) is meant for the
+// terminal: the inner sequence, its ESCs undoubled, is taken as if sent
+// plainly.
+void Vt102Emulation::unwrapTmuxPassthrough()
+{
+  const bool overflow = tokenOverflow;
+  const std::u32string inner(tokenBuffer + 7, tokenBuffer + tokenBufferPos);
+  resetTokenizer();
+  if (overflow)
+    return;
+  for (char32_t c : inner)
+    receiveChar(c);
+}
+
 void Vt102Emulation::receiveChar(char32_t cc)
 {
   if (cc == DEL)
     return; //VT100: ignore.
+
+  // puddlejumper: inside tmux's passthrough, ESC ESC is an ESC of the inner
+  // sequence, and ESC \ the end of the whole.
+  if (inTmuxPassthrough())
+  {
+    if (cc == ESC)
+    {
+      if (tmuxEscPending)
+        addToCurrentToken(ESC);
+      tmuxEscPending = !tmuxEscPending;
+      return;
+    }
+    if (tmuxEscPending)
+    {
+      tmuxEscPending = false;
+      if (cc == '\\')
+      {
+        unwrapTmuxPassthrough();
+        return;
+      }
+      addToCurrentToken(ESC);
+    }
+    addToCurrentToken(cc);
+    return;
+  }
 
   if (ces(CTL))
   {
@@ -467,11 +523,32 @@ void Vt102Emulation::processWindowAttributeChange()
       return;
     if (newValue.trimmed() == QLatin1String("?"))
     {
-      if (answerQueries())
-        sendString("\033]7501;?\033\\");
+      // Answered even where other queries aren't (behind tmux, which
+      // answers those itself but not this one).
+      sendString("\033]7501;?\033\\");
       return;
     }
     emit programStatusReport(newValue);
+    return;
+  }
+
+  // puddlejumper: OSC 9;4 (ConEmu's progress: 4;state;percent), as it comes.
+  if (attributeToChange == 9 && newValue.startsWith(QLatin1String("4;")))
+  {
+    const QStringList f = newValue.split(QLatin1Char(';'));
+    bool stateOk = false, progressOk = false;
+    const int state = f.value(1).toInt(&stateOk);
+    const int progress = f.value(2).toInt(&progressOk);
+    if (stateOk)
+      emit progressReport(state, progressOk ? progress : -1);
+    return;
+  }
+
+  // puddlejumper: OSC 133 (semantic prompts): A, the shell's prompt starts.
+  if (attributeToChange == 133)
+  {
+    if (newValue.startsWith(QLatin1Char('A')))
+      emit promptStarted();
     return;
   }
 

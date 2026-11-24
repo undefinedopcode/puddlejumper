@@ -315,6 +315,9 @@ signals:
      * "7501;"; and a full reset (RIS) of the terminal. */
     void programStatusReport(const QString &body);
     void fullReset();
+    /* puddlejumper: OSC 9;4 progress, and OSC 133;A (a prompt starts). */
+    void progressReport(int state, int progress);
+    void promptStarted();
 
     /**
      * Emitted when the current working directory of the active session

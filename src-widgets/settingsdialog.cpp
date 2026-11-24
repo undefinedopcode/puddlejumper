@@ -489,6 +489,14 @@ QWidget *SettingsDialog::buildWindowPage()
     watch->addRow(QString(), makeHint(tr("A handy \"build finished\" cue. Marks clear "
                                          "when you select the tab."), page));
 
+    m_notifyProgramStatusBox = new QCheckBox(tr("Notify when a program needs you, finishes or fails"), page);
+    connect(m_notifyProgramStatusBox, &QCheckBox::toggled, this, [this](bool v) {
+        m_settings.setNotifyProgramStatus(v);
+    });
+    watch->addRow(tr("Programs"), m_notifyProgramStatusBox);
+    watch->addRow(QString(), makeHint(tr("For programs that say what they're doing (OSC 7501), "
+                                         "such as Claude Code, in a tab you aren't looking at."), page));
+
     // ---- quitting --------------------------------------------------------------
     QFormLayout *quitting = addGroup(layout, tr("Quitting"));
 
@@ -1040,6 +1048,7 @@ void SettingsDialog::syncFromSettings()
     if (layoutIndex >= 0)
         m_tabLayoutBox->setCurrentIndex(layoutIndex);
     m_monitorActivityBox->setChecked(s.monitorActivity);
+    m_notifyProgramStatusBox->setChecked(s.notifyProgramStatus);
     m_monitorSilenceBox->setChecked(s.monitorSilence);
     m_silenceTimeoutBox->setValue(s.silenceTimeout);
     m_silenceTimeoutBox->setEnabled(s.monitorSilence);

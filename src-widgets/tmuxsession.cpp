@@ -175,6 +175,20 @@ TmuxSession::TmuxSession(const QString &label, const QStringList &command,
 
     connect(m_control, &TmuxControl::paused, this, &TmuxSession::resyncPane);
 
+    connect(m_control, &TmuxControl::subscriptionChanged, this,
+            [this](const QString &name, int pane, const QString &command) {
+        if (name != QLatin1String("pj-command") || pane < 0)
+            return;
+        // Away from the program that reported (changes come up to a second
+        // late, so one to it may follow its report): it has ended.
+        const auto owner = m_statusOwners.constFind(pane);
+        if (owner == m_statusOwners.cend() || *owner == command)
+            return;
+        m_statusOwners.remove(pane);
+        if (TerminalWidget *p = m_panes.value(pane))
+            p->programEnded();
+    });
+
     connect(m_control, &TmuxControl::exited, this, [this](const QString &reason) {
         if (m_ended)
             return;
@@ -236,8 +250,12 @@ void TmuxSession::onReady()
             return;
         const int major = m.captured(1).toInt();
         const int minor = m.captured(2).toInt();
-        if (major > 3 || (major == 3 && minor >= 2))
+        if (major > 3 || (major == 3 && minor >= 2)) {
             m_control->command(QStringLiteral("refresh-client -f pause-after=5"));
+            // Each pane's program, so its status records (OSC 7501) can go
+            // with it: there's no pty here to watch.
+            m_control->command(QStringLiteral("refresh-client -B 'pj-command:%*:#{pane_current_command}'"));
+        }
     });
 
     // Size first, so the windows listed next already have the size their
@@ -461,6 +479,15 @@ TerminalWidget *TmuxSession::makePane(int paneId)
     pane->applyScrolling();
     connect(pane, &TerminalWidget::externalInput, this, [this, paneId](const QByteArray &bytes) {
         sendInput(paneId, bytes);
+    });
+    // A program reported its status: which one, so that its going ends it.
+    connect(pane, &TerminalWidget::programStatusReported, this, [this, paneId]() {
+        m_control->command(QStringLiteral("display-message -p -t ") + paneTarget(paneId)
+                               + QStringLiteral(" '#{pane_current_command}'"),
+                           [this, paneId](bool ok, const QList<QByteArray> &lines) {
+            if (ok && !lines.isEmpty())
+                m_statusOwners.insert(paneId, QString::fromUtf8(lines.first()));
+        });
     });
     m_panes.insert(paneId, pane);
 

@@ -363,6 +363,16 @@ void TmuxControl::handleNotification(const QByteArray &line)
         const QList<QByteArray> f = fields(line, 3);
         if (f.size() == 3)
             emit sessionChanged(parseId(f.at(1)), QString::fromUtf8(f.at(2)));
+    } else if (name == "%subscription-changed") {
+        // %subscription-changed name $session @window index %pane ... : value
+        const int colon = line.indexOf(" : ");
+        if (colon > 0) {
+            const QList<QByteArray> f = line.left(colon).split(' ');
+            const QByteArray pane = f.value(5);
+            emit subscriptionChanged(QString::fromUtf8(f.value(1)),
+                                     pane.startsWith('%') ? parseId(pane) : -1,
+                                     QString::fromUtf8(line.mid(colon + 3)));
+        }
     } else if (name == "%pause") {
         emit paused(parseId(fields(line, 2).value(1)));
     } else if (name == "%exit") {

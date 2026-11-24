@@ -34,6 +34,7 @@ constexpr auto kFlowCtrlWarn   = "scrolling/flowControlWarning";
 constexpr auto kConfirmCloseRunning = "scrolling/confirmCloseWithRunningProcesses";
 constexpr auto kRestoreSession = "window/restoreSession";
 constexpr auto kMonitorActivity = "scrolling/monitorActivity";
+constexpr auto kNotifyProgramStatus = "scrolling/notifyProgramStatus";
 constexpr auto kMonitorSilence  = "scrolling/monitorSilence";
 constexpr auto kSilenceTimeout  = "scrolling/silenceTimeout";
 constexpr auto kConfirmMultilinePaste = "input/confirmMultilinePaste";
@@ -122,6 +123,8 @@ void Settings::load()
         m_settings.value(kRestoreSession, m_scrolling.restoreSession).toBool();
     m_scrolling.monitorActivity =
         m_settings.value(kMonitorActivity, m_scrolling.monitorActivity).toBool();
+    m_scrolling.notifyProgramStatus =
+        m_settings.value(kNotifyProgramStatus, m_scrolling.notifyProgramStatus).toBool();
     m_scrolling.monitorSilence =
         m_settings.value(kMonitorSilence, m_scrolling.monitorSilence).toBool();
     m_scrolling.silenceTimeout =
@@ -396,6 +399,15 @@ void Settings::setMonitorActivity(bool v)
     m_settings.setValue(kMonitorActivity, v);
     m_settings.sync();
     emit monitoringChanged();
+}
+
+void Settings::setNotifyProgramStatus(bool v)
+{
+    if (m_scrolling.notifyProgramStatus == v) return;
+    m_scrolling.notifyProgramStatus = v;
+    m_settings.setValue(kNotifyProgramStatus, v);
+    m_settings.sync();
+    emit scrollingChanged();
 }
 
 void Settings::setMonitorSilence(bool v)

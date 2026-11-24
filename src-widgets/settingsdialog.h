@@ -132,6 +132,7 @@ private:
     // Tabs & Window.
     QComboBox *m_tabLayoutBox = nullptr;
     QCheckBox *m_monitorActivityBox = nullptr;
+    QCheckBox *m_notifyProgramStatusBox = nullptr;
     QCheckBox *m_monitorSilenceBox = nullptr;
     QSpinBox *m_silenceTimeoutBox = nullptr;
     QCheckBox *m_confirmCloseBox = nullptr;

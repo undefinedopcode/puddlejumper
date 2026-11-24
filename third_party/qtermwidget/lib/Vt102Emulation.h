@@ -140,6 +140,11 @@ private:
   char32_t tokenBuffer[MAX_TOKEN_LENGTH]; //FIXME: overflow?
   int tokenBufferPos;
   bool tokenOverflow = false;
+  // puddlejumper: tmux's passthrough (ESC P tmux; ... ESC \), whose inner
+  // sequence has its ESCs doubled: one seen and not yet paired.
+  bool tmuxEscPending = false;
+  bool inTmuxPassthrough() const;
+  void unwrapTmuxPassthrough();
 #define MAXARGS 15
   void addDigit(int dig);
   void addArgument();

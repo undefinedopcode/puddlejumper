@@ -9,6 +9,7 @@
 #include "appicon.h"
 #include "formername.h"
 #include "macwindow.h"
+#include "notifier.h"
 #include "procinfo.h"
 #include "programstatus.h"
 #include "settingsdialog.h"
@@ -131,6 +132,13 @@ constexpr int kDefaultSidebarWidth = 220;
 // On a tab: it has output that hasn't been seen (kept while it is parked).
 constexpr char kBusyProperty[] = "puddlejumperBusy";
 
+// On a tab: the program status it was last notified of (see
+// notifyProgramStatus()), when, and whether a look again is due.
+constexpr char kNotified[] = "puddlejumperNotified";
+constexpr char kNotifiedAt[] = "puddlejumperNotifiedAt";
+constexpr char kPending[] = "puddlejumperNotifyPending";
+constexpr qint64 kNotifyInterval = 5000;   // at most one a tab in this many ms
+
 // On a new tab: until when (ms since the epoch) its output is its shell
 // starting up, not news.
 constexpr char kQuietUntilProperty[] = "puddlejumperQuietUntil";
@@ -249,6 +257,26 @@ MainWindow::MainWindow(QWidget *parent)
         reloadAfterCommands();   // nothing unless a web tab asks for it
     });
     m_previewTimer->start();
+
+    // Programs' notifications (see notifyProgramStatus()): clicking one shows
+    // its tab; coming back to the window takes the current tab's away.
+    m_notifier = new Notifier(this);
+    connect(m_notifier, &Notifier::activated, this, [this](const QString &key) {
+        for (Tab *page : allPages()) {
+            if (notificationKey(page) == key) {
+                showTab(page);
+                break;
+            }
+        }
+        if (isMinimized())
+            showNormal();
+        raise();
+        activateWindow();
+    });
+    connect(qApp, &QGuiApplication::applicationStateChanged, this, [this](Qt::ApplicationState state) {
+        if (state == Qt::ApplicationActive && currentPage())
+            m_notifier->withdraw(notificationKey(currentPage()));
+    });
 
     connect(&m_settings, &Settings::appearanceChanged,
             this, &MainWindow::applyAppearanceToAll);
@@ -381,7 +409,9 @@ void MainWindow::onCurrentTabChanged(int index)
         // sees the same one.
         if (auto *session = tmuxSessionFor(tab))
             session->selectWindow(qobject_cast<TerminalTab *>(tab));
-        // Selecting a tab counts as having seen its output.
+        // Selecting a tab counts as having seen its output, and what a
+        // notification said about it.
+        m_notifier->withdraw(notificationKey(tab));
         m_sidebar->setBusy(index, false);
         m_tabStrip->setBusy(index, false);
         tab->setProperty(kBusyProperty, false);
@@ -1941,19 +1971,21 @@ void MainWindow::updateStatus()
 
 void MainWindow::updateProgramStatus(QWidget *page)
 {
-    const int index = page ? m_tabs->indexOf(page) : -1;
-    if (index < 0)
-        return;   // gone, or in a workspace not on screen (synced when it is)
-
     // The most pressing record of any pane in the tab.
     ProgramStatusRecord best;
-    if (auto *tab = qobject_cast<TerminalTab *>(page)) {
+    auto *tab = qobject_cast<TerminalTab *>(page);
+    if (tab) {
         for (TerminalWidget *pane : tab->panes()) {
             const ProgramStatusRecord r = pane->programStatus()->mostPressing();
             if (ProgramStatus::rank(r) > ProgramStatus::rank(best))
                 best = r;
         }
+        notifyProgramStatus(tab, best);   // in any workspace
     }
+
+    const int index = page ? m_tabs->indexOf(page) : -1;
+    if (index < 0)
+        return;   // gone, or in a workspace not on screen (synced when it is)
 
     cardstyle::Status status;
     switch (best.state) {
@@ -1978,6 +2010,86 @@ void MainWindow::updateProgramStatus(QWidget *page)
     m_tabStrip->setStatus(index, status);
     if (page == currentPage())
         updateStatus();
+}
+
+QString MainWindow::notificationKey(const QWidget *tab)
+{
+    return QStringLiteral("tab-%1").arg(quintptr(tab), 0, 16);
+}
+
+QString MainWindow::describeTab(TerminalTab *tab) const
+{
+    QString name = tab->customTitle();
+    if (name.isEmpty()) {
+        if (TmuxSession *session = tmuxSessionFor(tab))
+            name = tr("tmux %1 — %2").arg(session->label(), session->windowName(tab));
+        else if (TerminalWidget *pane = tab->activePane())
+            name = pane->sessionTitle();
+    }
+    if (name.isEmpty())
+        name = tr("Terminal");
+    const int w = workspaceOf(tab);
+    if (m_workspaces.size() > 1 && w >= 0)
+        name = tr("%1 (%2)").arg(name, m_workspaces.at(w).name);
+    return name;
+}
+
+void MainWindow::notifyProgramStatus(TerminalTab *tab, const ProgramStatusRecord &record)
+{
+
+    // Only what wants the user: needing them, done, failed. Anything less
+    // (working again, or seen) takes the notification away.
+    if (ProgramStatus::rank(record) < 2) {
+        if (!tab->property(kNotified).toString().isEmpty()) {
+            tab->setProperty(kNotified, QString());
+            m_notifier->withdraw(notificationKey(tab));
+        }
+        return;
+    }
+    const QString what = QStringList{QString::number(record.state), record.id, record.kind,
+                                     record.app, record.title, record.msg}.join(QChar(0x1f));
+    if (what == tab->property(kNotified).toString())
+        return;
+
+    // Not for the tab being looked at.
+    const bool watched = isActiveWindow() && !isMinimized() && tab == currentPage();
+    if (watched || !m_settings.scrolling().notifyProgramStatus) {
+        tab->setProperty(kNotified, what);
+        return;
+    }
+
+    // Rate-limited: a later change within the interval is looked at again
+    // when it is over.
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    const qint64 last = tab->property(kNotifiedAt).toLongLong();
+    if (now - last < kNotifyInterval) {
+        if (!tab->property(kPending).toBool()) {
+            tab->setProperty(kPending, true);
+            QTimer::singleShot(kNotifyInterval - (now - last), this, [this, tab = QPointer<TerminalTab>(tab)]() {
+                if (!tab)
+                    return;
+                tab->setProperty(kPending, false);
+                updateProgramStatus(tab);
+            });
+        }
+        return;
+    }
+    tab->setProperty(kNotified, what);
+    tab->setProperty(kNotifiedAt, now);
+
+    // Which tab, always: a program can't pass for another one.
+    const QString title = tr("%1 — %2").arg(ProgramStatus::label(record), describeTab(tab));
+    QStringList body;
+    if (!record.app.isEmpty())
+        body << record.app;
+    if (!record.title.isEmpty())
+        body << record.title;
+    if (!record.msg.isEmpty())
+        body << record.msg;
+    m_notifier->notify(notificationKey(tab), title, body.join(QStringLiteral(": ")));
+    // Waiting on the user: the taskbar or Dock asks for attention too.
+    if (record.state == ProgramStatusRecord::Blocked)
+        QApplication::alert(this);
 }
 
 void MainWindow::zoomBy(int halfPoints)

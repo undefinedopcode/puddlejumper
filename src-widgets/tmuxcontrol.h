@@ -77,6 +77,9 @@ signals:
     void activePaneChanged(int window, int pane);
     /* The session this client is attached to: its id ($1 is 1) and name. */
     void sessionChanged(int session, const QString &name);
+    /* A format subscribed to with refresh-client -B changed for a pane
+     * (-1 for a subscription not about panes). */
+    void subscriptionChanged(const QString &name, int pane, const QString &value);
     /* Flow control (refresh-client -f pause-after): output for `pane` was
      * dropped because we fell behind, and it waits for "continue". */
     void paused(int pane);

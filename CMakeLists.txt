@@ -51,6 +51,8 @@ qt_add_executable(puddlejumper
     src-widgets/main.cpp
     src-widgets/mainwindow.cpp
     src-widgets/mainwindow.h
+    src-widgets/notifier.cpp
+    src-widgets/notifier.h
     src-widgets/programstatus.cpp
     src-widgets/programstatus.h
     src-widgets/settingsdialog.cpp
@@ -121,8 +123,8 @@ set_target_properties(puddlejumper PROPERTIES AUTOMOC ON)
 # self-contained one, in a disk image.
 if(APPLE)
     enable_language(OBJCXX)
-    target_sources(puddlejumper PRIVATE src-widgets/macwindow.mm)
-    target_link_libraries(puddlejumper PRIVATE "-framework AppKit")
+    target_sources(puddlejumper PRIVATE src-widgets/macwindow.mm src-widgets/notifier_mac.mm)
+    target_link_libraries(puddlejumper PRIVATE "-framework AppKit" "-framework UserNotifications")
 
     set(PUDDLEJUMPER_ICNS icons/puddlejumper.icns)
     set_source_files_properties(${PUDDLEJUMPER_ICNS} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
@@ -138,6 +140,15 @@ if(APPLE)
         MACOSX_BUNDLE_BUNDLE_VERSION ${PROJECT_VERSION}
         MACOSX_BUNDLE_COPYRIGHT "GNU General Public License v2 or later"
     )
+endif()
+
+# Desktop notifications go over D-Bus on Linux and the BSDs (notifier.cpp).
+if(UNIX AND NOT APPLE)
+    find_package(Qt6 6.5 QUIET OPTIONAL_COMPONENTS DBus)
+    if(TARGET Qt6::DBus)
+        target_compile_definitions(puddlejumper PRIVATE PUDDLEJUMPER_DBUS)
+        target_link_libraries(puddlejumper PRIVATE Qt6::DBus)
+    endif()
 endif()
 
 # Windows: a GUI program (no console window of its own), PuddleJumper.exe.

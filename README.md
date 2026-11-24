@@ -745,6 +745,37 @@ How it works:
 Tested against tmux 3.8. Connecting over ssh uses the same code path but has
 only been tried locally.
 
+## Program status
+
+A program can say what it is doing — working, waiting on you, done,
+failed — and why, with the [Program Status Protocol (OSC
+7501)](https://www.superlogical.com/rex/docs/build/program-status). Claude
+Code does (since 2.1.295), and a shell script can:
+
+```sh
+status() { printf '\e]7501;state=%s:msg=%s\e\\' "$1" "$(printf '%s' "$2" | base64 | tr -d '\n')"; }
+status working "Building"; make; status done "Built"
+```
+
+The tab's card shows it on its preview — amber for **Needs approval**,
+**Question** or **Needs sign-in**, red for **Failed**, green for **Done**,
+**Working** with a progress bar — and the tab strip as a dot in that colour;
+the status bar adds the message for the tab on screen, and the card's tooltip
+the program's name. Of a split tab's panes, the one most in need shows.
+
+While you aren't looking at the tab (another tab, another workspace, another
+window in front), needing you, finishing and failing bring a desktop
+notification (at most one a tab every five seconds); clicking it shows the
+tab, and it goes away once you have. Needing you also flashes the taskbar
+(bounces the Dock). **Settings → Scrolling → Watch a Terminal → Programs**
+turns notifications off.
+
+A program's working and waiting go once it has gone (exited, or the shell is
+back at its prompt); done and failed stay until you press a key in the pane.
+It works in tmux tabs too, sent plainly or through tmux's passthrough
+(`ESC P tmux; …`), and ConEmu's progress (OSC 9;4) shows as working until a
+program reports with OSC 7501 itself.
+
 ## Web tabs
 
 A web tab shows a page beside the terminals: the app you are building, in the

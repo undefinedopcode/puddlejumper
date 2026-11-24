@@ -126,6 +126,8 @@ private:
 
     QHash<int, Window> m_windows;
     QHash<int, QPointer<TerminalWidget>> m_panes;
+    // Per pane with status records (OSC 7501): the program that reported.
+    QHash<int, QString> m_statusOwners;
     // Output for panes not yet created (their window's layout is still on the
     // way), and panes whose output is ignored until their history is restored.
     QHash<int, QByteArray> m_earlyOutput;
