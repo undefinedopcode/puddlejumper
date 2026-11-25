@@ -7,6 +7,7 @@
 #pragma once
 
 #include "profiles.h"
+#include "rexkeymap.h"
 #include "terminaltab.h"
 #include "terminalwidget.h"
 
@@ -114,6 +115,22 @@ public:
     void toggleZoom(TerminalWidget *pane);
     bool isZoomed(const TerminalTab *tab) const;
 
+    /* Keymaps and actions. Before start(): what client.keymap is sent (this
+     * app's actions and default bindings); without it no keymap is fetched.
+     * The keymap is fetched once attached and again when the server's
+     * configuration changes (keymapChanged). */
+    void setKeymapRequest(std::function<QJsonObject()> request) { m_keymapRequest = std::move(request); }
+    const RexKeymap &keymap() const { return m_keymap; }
+    /* Run one of the server's actions (client.action) on a pane's block
+     * (or the session's focused one); actionFinished or actionFailed
+     * follows. origin: "key", "palette", "menu" or "api". */
+    void runAction(const QString &name, const QJsonObject &args, const TerminalWidget *pane, const QString &origin);
+    /* Answer a server's call (performRequested, promptRequested): a result,
+     * or an error {code, message}. */
+    void replyCall(const QString &callId, const QJsonValue &result, const QJsonObject &error = {});
+    /* This connection's client id, as the server knows it. */
+    QString clientId() const;
+
     /* The sessions on a server, for a menu: calls back with (id, label)
      * pairs, or an error. */
     static void listSessions(const QUrl &server, QObject *context,
@@ -130,6 +147,21 @@ signals:
     /* Gone: detached, destroyed, emptied, or the connection lost for good.
      * All tabs have been removed already. `reason` may be empty. */
     void ended(const QString &reason);
+    /* A (new) keymap arrived. */
+    void keymapChanged();
+    /* The server (for another client, or an action of its own) asks this
+     * client to run one of its actions; answer with replyCall(). `pane` is
+     * the block it names, if it is one of this session's. */
+    void performRequested(const QString &callId, const QString &action, const QJsonObject &args,
+                          TerminalWidget *pane);
+    /* An action asks a question (client_prompt_requested): {kind: input |
+     * pick, title, placeholder, value, items, multiple, allow_other}; answer
+     * {text}, {ids} or {cancelled: true} with replyCall(). */
+    void promptRequested(const QString &callId, const QJsonObject &prompt);
+    /* The question is no longer wanted; close it without answering. */
+    void promptEnded(const QString &callId);
+    void actionFinished(const QString &action, const QJsonValue &result);
+    void actionFailed(const QString &action, const QString &message);
 
 private:
     struct Block
@@ -174,6 +206,7 @@ private:
     void onSnapshot(Block *b, const GhosttySnapshot::Snapshot &snapshot);
     void onMarker(Block *b, const QJsonObject &marker);
     void onEvent(const QJsonObject &event);
+    void fetchKeymap();
     void sendInput(Block *b, const QByteArray &bytes);
     void sendSize(Block *b, const QSize &cells, bool again = false);
     void checkSize(Block *b);
@@ -211,4 +244,7 @@ private:
     bool m_attached = false;
     bool m_finished = false;
     bool m_followingFocus = false;  // taking the server's focus: not sent back
+    std::function<QJsonObject()> m_keymapRequest;
+    RexKeymap m_keymap;
+    bool m_keymapPending = false;
 };

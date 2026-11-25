@@ -15,11 +15,19 @@
  *   closing a pane and a window; a shell exiting in a split, and failing at
  *   once (kept to be read, then closed);
  *   detaching and attaching again: the windows, splits and history back;
+ *   keymaps and actions: the keymap (this client's defaults merged with the
+ *   server's), server actions run, the client's actions performed for the
+ *   server, prompts answered and cancelled, a reloaded configuration;
  *   ending the session; nothing left behind on the server.
  *
  * Use a server of its own on loopback (it creates and destroys sessions):
  *   tuxosaurus --listen 127.0.0.1:51499 --state-dir /tmp/x --shell /bin/sh
  *   ./build/test-rexsession http://127.0.0.1:51499
+ * The actions tests want a configuration with test actions (and skip
+ * them without), and reload it, so it should be a copy somewhere temporary:
+ *   atlantis --config /tmp/x/keys.lua ...   (keys.lua: see keymapTests)
+ * atlantis reloads only for its local socket, or SIGHUP: give its PID in
+ * PUDDLEJUMPER_TEST_REX_PID to test that.
  */
 
 #include "qtermprobe.h"
@@ -30,12 +38,16 @@
 #include "terminalwidget.h"
 
 #include <QApplication>
+#include <QDir>
+#include <QFile>
 #include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QThread>
+
+#include <csignal>
 
 #include "ScreenWindow.h"
 #include "TerminalDisplay.h"
@@ -176,6 +188,16 @@ struct Client
     void open(const QUrl &url, const QString &sid, const Settings &settings, const TerminalProfile &profile)
     {
         session = new RexSession(url, sid, settings, profile);
+        // As the app does: its actions and their default keys.
+        session->setKeymapRequest([] {
+            return QJsonDocument::fromJson(R"({
+              "actions": [{"name": "client.tab.new", "kind": "client", "title": "New Tab"},
+                          {"name": "pane.copy", "kind": "client", "title": "Copy"}],
+              "defaults": [{"name": "puddlejumper", "bindings": [
+                  {"keys": ["ctrl+shift+t"], "action": "client.tab.new"},
+                  {"keys": ["ctrl+shift+c"], "action": "pane.copy"}]}]
+            })").object();
+        });
         QObject::connect(session, &RexSession::tabAdded, [this](TerminalTab *tab, const QString &name) {
             tabs << tab;
             names.insert(tab, name);
@@ -263,6 +285,208 @@ void type(TerminalWidget *pane, const QString &text)
 }
 
 } // namespace
+
+/*
+ * Keymaps and actions. With a configuration like this (the server's
+ * --config), all of it; without, the keymap only:
+ *
+ *   rex.action{name = 'hello', run = function(ctx) return 'hi ' .. ctx.client_id end}
+ *   rex.action{name = 'ask', run = function(ctx)
+ *     local t, err = rex.ui.input{title = 'Your name?'}; return t or err end}
+ *   rex.action{name = 'choose', run = function(ctx)
+ *     local r, err = rex.ui.pick{title = 'Which?', items = {{id = 'a'}, {id = 'b'}}}
+ *     return r or err end}
+ *   rex.action{name = 'via_client', run = function(ctx)
+ *     return rex.perform('client.tab.new', {why = 'test'}) end}
+ *   rex.bind('ctrl+shift+h', 'hello')
+ *   rex.bind('ctrl+a>c', 'hello')
+ *   rex.unbind('ctrl+shift+t')
+ */
+void keymapTests(Server &server, Client &c)
+{
+    RexSession *s = c.session;
+    QObject guard;
+    int keymaps = 0;
+    QStringList finished, failed;
+    QList<QJsonValue> results;
+    QString performCall, performAction, promptCall;
+    QJsonObject performArgs, prompt;
+    QObject::connect(s, &RexSession::keymapChanged, &guard, [&] { ++keymaps; });
+    QObject::connect(s, &RexSession::actionFinished, &guard, [&](const QString &a, const QJsonValue &r) {
+        finished << a;
+        results << r;
+    });
+    QObject::connect(s, &RexSession::actionFailed, &guard, [&](const QString &a, const QString &) { failed << a; });
+    QObject::connect(s, &RexSession::performRequested, &guard,
+                     [&](const QString &call, const QString &action, const QJsonObject &args, TerminalWidget *) {
+                         performCall = call;
+                         performAction = action;
+                         performArgs = args;
+                     });
+    QObject::connect(s, &RexSession::promptRequested, &guard, [&](const QString &call, const QJsonObject &p) {
+        promptCall = call;
+        prompt = p;
+    });
+
+    if (!check(waitFor([&] { return s->keymap().isLoaded(); }), QStringLiteral("a keymap")))
+        return;
+    const RexKeymap &km = s->keymap();
+    const auto all = [](const QString &) { return true; };
+    const RexKeymap::Binding *b = nullptr;
+    check(km.lookup({}, {{"ctrl+shift+c"}}, all, &b) == RexKeymap::Result::Run && b->action == QLatin1String("pane.copy"),
+          QStringLiteral("the client's default binding"));
+    check(km.action(QStringLiteral("com.superlogical.terminal.clear")) != nullptr, QStringLiteral("block actions listed"));
+    check(!km.action(QStringLiteral("client.tab.new")), QStringLiteral("the client's own actions aren't"));
+
+    // A block action, and one there is none of.
+    s->runAction(QStringLiteral("com.superlogical.terminal.clear"), {}, c.tabs.value(0)->activePane(), QStringLiteral("api"));
+    check(waitFor([&] { return finished.contains(QStringLiteral("com.superlogical.terminal.clear")); }),
+          QStringLiteral("a block action ran"));
+    s->runAction(QStringLiteral("no.such.action"), {}, nullptr, QStringLiteral("api"));
+    check(waitFor([&] { return failed.contains(QStringLiteral("no.such.action")); }), QStringLiteral("an unknown action fails"));
+
+    // Another client asks this one to run its action.
+    {
+        QJsonObject result, err;
+        bool done = false;
+        server.control.request(QStringLiteral("client.perform"),
+                               QJsonObject{{QStringLiteral("action"), QStringLiteral("client.tab.new")},
+                                           {QStringLiteral("client_id"), s->clientId()},
+                                           {QStringLiteral("args"), QJsonObject{{QStringLiteral("n"), 2}}}},
+                               [&](const QJsonObject &p, const QJsonObject &e) {
+                                   result = p;
+                                   err = e;
+                                   done = true;
+                               });
+        if (check(waitFor([&] { return !performCall.isEmpty(); }), QStringLiteral("client_perform_requested"))) {
+            check(performAction == QLatin1String("client.tab.new") && performArgs.value("n").toInt() == 2,
+                  QStringLiteral("the action and its arguments"));
+            s->replyCall(std::exchange(performCall, QString()), QJsonObject{{QStringLiteral("made"), true}});
+        }
+        check(waitFor([&] { return done; }) && err.isEmpty()
+                  && result.value("result").toObject().value("made").toBool()
+                  && result.value("performed_by").toString() == s->clientId(),
+              QStringLiteral("client.perform answered: %1 %2")
+                  .arg(QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact)),
+                       QString::fromUtf8(QJsonDocument(err).toJson(QJsonDocument::Compact))));
+        // One this client didn't declare: refused by the server.
+        server.call(QStringLiteral("client.perform"),
+                    QJsonObject{{QStringLiteral("action"), QStringLiteral("client.nothing")},
+                                {QStringLiteral("client_id"), s->clientId()}},
+                    true);
+        check(performCall.isEmpty(), QStringLiteral("an undeclared action isn't asked for"));
+    }
+
+    if (!km.action(QStringLiteral("ask")) || !km.action(QStringLiteral("via_client"))) {
+        QTextStream(stdout) << "keymap: no test actions configured; actions skipped\n";
+        return;
+    }
+    // The configuration's bindings: first, a sequence, an unbound default.
+    check(km.lookup({}, {{"ctrl+shift+h"}}, all, &b) == RexKeymap::Result::Run && b->action == QLatin1String("hello"),
+          QStringLiteral("a configured binding"));
+    check(km.lookup({}, {{"ctrl+a"}}, all) == RexKeymap::Result::Prefix
+              && km.lookup({}, {{"ctrl+a"}, {"c"}}, all) == RexKeymap::Result::Run,
+          QStringLiteral("a configured sequence"));
+    check(km.lookup({}, {{"ctrl+shift+t"}}, all) == RexKeymap::Result::Unbound, QStringLiteral("a default unbound"));
+
+    finished.clear();
+    results.clear();
+    s->runAction(QStringLiteral("hello"), {}, nullptr, QStringLiteral("key"));
+    check(waitFor([&] { return finished.contains(QStringLiteral("hello")); })
+              && results.value(0).toString() == QStringLiteral("hi ") + s->clientId(),
+          QStringLiteral("a Lua action's result"));
+
+    // Prompts: answered, picked, cancelled.
+    const auto answer = [&](const QString &action, const QJsonObject &reply, const QString &kind) -> QJsonValue {
+        finished.clear();
+        results.clear();
+        promptCall.clear();
+        s->runAction(action, {}, nullptr, QStringLiteral("palette"));
+        if (!check(waitFor([&] { return !promptCall.isEmpty(); }), action + QStringLiteral(": a prompt")))
+            return {};
+        check(prompt.value("kind").toString() == kind, action + QStringLiteral(": a ") + kind + QStringLiteral(" prompt"));
+        s->replyCall(promptCall, reply);
+        waitFor([&] { return finished.contains(action); });
+        return results.value(0);
+    };
+    check(answer(QStringLiteral("ask"), QJsonObject{{QStringLiteral("text"), QStringLiteral("bob")}}, QStringLiteral("input"))
+              == QJsonValue(QStringLiteral("bob")),
+          QStringLiteral("an answer"));
+    check(prompt.value("value").toString() == QLatin1String("x"), QStringLiteral("the prompt's value"));
+    check(answer(QStringLiteral("choose"), QJsonObject{{QStringLiteral("ids"), QJsonArray{QStringLiteral("b")}}},
+                 QStringLiteral("pick"))
+              == QJsonValue(QStringLiteral("b")),
+          QStringLiteral("a pick"));
+    check(prompt.value("items").toArray().size() == 2, QStringLiteral("the pick's items"));
+    check(answer(QStringLiteral("ask"), QJsonObject{{QStringLiteral("cancelled"), true}}, QStringLiteral("input"))
+              == QJsonValue(QStringLiteral("cancelled")),
+          QStringLiteral("cancelled"));
+
+    // An action that runs one of the client's.
+    finished.clear();
+    results.clear();
+    s->runAction(QStringLiteral("via_client"), {}, nullptr, QStringLiteral("key"));
+    if (check(waitFor([&] { return !performCall.isEmpty(); }), QStringLiteral("rex.perform asks the client"))) {
+        check(performArgs.value("why").toString() == QLatin1String("test"), QStringLiteral("with its arguments"));
+        s->replyCall(std::exchange(performCall, QString()), {},
+                     QJsonObject{{QStringLiteral("code"), QStringLiteral("not_supported")},
+                                 {QStringLiteral("message"), QStringLiteral("not here")}});
+        check(waitFor([&] { return failed.contains(QStringLiteral("via_client")); }),
+              QStringLiteral("the client's refusal fails the action"));
+    }
+
+    // The configuration reloaded: a new keymap.
+    const QString path = km.configPath();
+    if (path.isEmpty() || !path.startsWith(QDir::tempPath())) {
+        QTextStream(stdout) << "keymap: configuration not in " << QDir::tempPath() << "; reload skipped\n";
+        return;
+    }
+    // server.config_reload may be for the local socket only; a signal does
+    // as well, to a server given by its PID.
+    const qint64 pid = qEnvironmentVariableIntValue("PUDDLEJUMPER_TEST_REX_PID");
+    const auto reload = [&]() {
+        if (pid > 0)
+            ::kill(pid_t(pid), SIGHUP);
+        else
+            server.call(QStringLiteral("server.config_reload"), {}, true);
+    };
+    if (pid <= 0) {
+        QJsonObject err;
+        bool done = false;
+        server.control.request(QStringLiteral("server.config_reload"), {},
+                               [&](const QJsonObject &, const QJsonObject &e) { err = e; done = true; });
+        waitFor([&] { return done; });
+        if (!err.isEmpty()) {
+            QTextStream(stdout) << "keymap: " << err.value("message").toString()
+                                << "; reload skipped (PUDDLEJUMPER_TEST_REX_PID=<server pid> sends SIGHUP)\n";
+            return;
+        }
+    }
+    QFile f(path);
+    if (!check(f.open(QIODevice::ReadOnly), QStringLiteral("read ") + path))
+        return;
+    const QByteArray original = f.readAll();
+    f.close();
+    const auto write = [&](const QByteArray &data) {
+        QFile w(path);
+        check(w.open(QIODevice::WriteOnly | QIODevice::Truncate) && w.write(data) == data.size(),
+              QStringLiteral("write ") + path);
+    };
+    const int before = keymaps;
+    write(original + "\nrex.bind('ctrl+shift+y', 'hello')\n");
+    reload();
+    check(waitFor([&] { return keymaps > before; })
+              && s->keymap().lookup({}, {{"ctrl+shift+y"}}, all) == RexKeymap::Result::Run,
+          QStringLiteral("keymap_changed: fetched again"));
+    write(original + "\nthis is not lua\n");
+    reload();
+    check(waitFor([&] { return keymaps > before + 1; }) && !s->keymap().diagnostics().isEmpty(),
+          QStringLiteral("a broken configuration's diagnostics"));
+    write(original);
+    reload();
+    check(waitFor([&] { return keymaps > before + 2; }) && s->keymap().diagnostics().isEmpty(),
+          QStringLiteral("and fixed again"));
+}
 
 int main(int argc, char *argv[])
 {
@@ -645,6 +869,9 @@ int main(int argc, char *argv[])
               QStringLiteral("a change to the window"));
         check(holder && pane->parentWidget() == holder, QStringLiteral("not rebuilt for it"));
     }
+
+    // ---- Keymaps and actions.
+    keymapTests(server, c);
 
     // ---- Closing a window.
     c.session->closeWindow(c.tabs.value(1));

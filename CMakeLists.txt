@@ -52,6 +52,8 @@ qt_add_executable(puddlejumper
     src-widgets/macwindow.h
     src-widgets/main.cpp
     src-widgets/mainwindow.cpp
+    src-widgets/rexactions.cpp
+    src-widgets/commandpalette.cpp src-widgets/commandpalette.h
     src-widgets/mainwindow.h
     src-widgets/notifier.cpp
     src-widgets/notifier.h
@@ -161,6 +163,7 @@ if(TARGET Qt6::WebSockets)
     message(STATUS "Rex tabs: on")
     target_sources(puddlejumper PRIVATE
         src-widgets/rexsession.cpp src-widgets/rexsession.h
+        src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
         src-widgets/rexclient.cpp src-widgets/rexclient.h
         src-widgets/rexterminalstream.cpp src-widgets/rexterminalstream.h
         src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
@@ -353,6 +356,15 @@ target_include_directories(test-rexterminalstream PRIVATE src-widgets)
 target_compile_definitions(test-rexterminalstream PRIVATE
     PJ_REX_CAPTURES="${CMAKE_CURRENT_SOURCE_DIR}/src-widgets/dev/rex-capture")
 
+# test-rexkeymap — a Rex keymap: key spellings, lookups, sequences and modes.
+# Dev tool only; never installed. Run: ./build/test-rexkeymap
+qt_add_executable(test-rexkeymap
+    src-widgets/dev/test_rexkeymap.cpp
+    src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
+)
+target_link_libraries(test-rexkeymap PRIVATE Qt6::Core Qt6::Gui)
+target_include_directories(test-rexkeymap PRIVATE src-widgets)
+
 # test-rexclient — the Rex client classes against a running Rex-compatible
 # server (tuxosaurus on loopback will do): sessions, the terminal stream,
 # resume, resize, exit. Dev tool only; never installed.
@@ -374,6 +386,7 @@ if(TARGET Qt6::WebSockets)
     qt_add_executable(test-rexsession
         src-widgets/dev/test_rexsession.cpp
         src-widgets/rexsession.cpp src-widgets/rexsession.h
+        src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
         src-widgets/rexclient.cpp src-widgets/rexclient.h
         src-widgets/rexterminalstream.cpp src-widgets/rexterminalstream.h
         src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h

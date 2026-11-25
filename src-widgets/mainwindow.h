@@ -222,7 +222,24 @@ private:
     /* Before closing a Rex tab or pane: false to leave it open (cancelled,
      * or detached instead because it would end the session). */
     bool confirmRexClose(RexSession *session, TerminalTab *tab, bool pane);
+    /* Keymaps and actions (rexactions.cpp). The app's actions, by their Rex
+     * names, for client.keymap; a session's calls to this client; keys in
+     * Rex panes, routed by the session's keymap. */
+    QJsonObject rexKeymapRequest() const;
+    void wireRexActions(RexSession *session);
+    bool routeRexKey(QKeyEvent *event);
+    /* Run a binding: one of the app's actions here, the server's there. */
+    void runRexAction(RexSession *session, TerminalWidget *pane, const QString &name, const QJsonObject &args,
+                      const QString &origin);
+    /* One of the app's actions, by name; false (and why) if there is none
+     * or it can't run now. */
+    bool performClientAction(const QString &name, const QJsonObject &args, TerminalWidget *pane, QString *error);
+    void showRexPrompt(RexSession *session, const QString &callId, const QJsonObject &prompt);
 #endif
+    /* Every action by name; a Rex pane's server actions too. */
+    void showCommandPalette();
+    /* The window's actions with Rex names (menus' included). */
+    QList<QAction *> namedActions() const;
 
     void splitPane(TerminalWidget *pane, Qt::Orientation orientation);
     void closePane(TerminalWidget *pane);
@@ -337,6 +354,14 @@ private:
 #ifdef PUDDLEJUMPER_REX
     QList<RexSession *> m_rexSessions;
     QHash<RexSession *, QString> m_rexWorkspace;   // workspace id
+    // Keys typed so far of a sequence, and the keymap mode, in m_rexKeySession.
+    QList<QStringList> m_rexTyped;
+    QString m_rexMode;
+    QPointer<RexSession> m_rexKeySession;
+    // The prompt shown for a server's action, if any.
+    QPointer<QDialog> m_rexPrompt;
+    QString m_rexPromptCall;
+    QPointer<RexSession> m_rexPromptSession;
 #endif
     // The workspace (id) each session's tabs belong to.
     QHash<TmuxSession *, QString> m_sessionWorkspace;

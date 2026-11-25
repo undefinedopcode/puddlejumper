@@ -323,6 +323,7 @@ void RexSession::attach()
                            m_attached = true;
                            qCInfo(lcRex) << "attached" << m_sessionId << "on" << m_server;
                            applyView(payload.value(QLatin1String("view")).toObject());
+                           fetchKeymap();
                        });
 }
 
@@ -717,6 +718,45 @@ void RexSession::onEvent(const QJsonObject &message)
     const QJsonObject outer = message.value(QLatin1String("payload")).toObject();
     const QString kind = str(outer, "type");
     const QJsonObject body = outer.value(QLatin1String("payload")).toObject();
+    // Calls from the server, and its configuration changing.
+    if (kind == QLatin1String("client_perform_requested")) {
+        const QString callId = str(body, "call_id");
+        if (callId.isEmpty())
+            return;
+        TerminalWidget *pane = str(body, "session_id") == m_sessionId ? paneForBlock(str(body, "block_id")) : nullptr;
+        emit performRequested(callId, str(body, "action"), body.value(QLatin1String("args")).toObject(), pane);
+        return;
+    }
+    if (kind == QLatin1String("client_prompt_requested")) {
+        const QString callId = str(body, "call_id");
+        const QJsonObject prompt = body.value(QLatin1String("prompt")).toObject();
+        if (callId.isEmpty())
+            return;
+        if (str(prompt, "title").isEmpty() || (str(prompt, "kind") != QLatin1String("input")
+                                               && str(prompt, "kind") != QLatin1String("pick"))) {
+            replyCall(callId, {}, QJsonObject{{QStringLiteral("code"), QStringLiteral("not_supported")},
+                                              {QStringLiteral("message"), QStringLiteral("PuddleJumper can't show this prompt")}});
+            return;
+        }
+        emit promptRequested(callId, prompt);
+        return;
+    }
+    if (kind == QLatin1String("client_prompt_ended")) {
+        emit promptEnded(str(body, "call_id"));
+        return;
+    }
+    if (kind == QLatin1String("client_call_requested")) {
+        if (!str(body, "call_id").isEmpty())
+            replyCall(str(body, "call_id"), {},
+                      QJsonObject{{QStringLiteral("code"), QStringLiteral("not_supported")},
+                                  {QStringLiteral("message"), QStringLiteral("PuddleJumper can't reach other servers for actions")}});
+        return;
+    }
+    if (kind == QLatin1String("keymap_changed")) {
+        if (!m_keymap.isLoaded() || str(body, "hash") != m_keymap.hash())
+            fetchKeymap();
+        return;
+    }
     if (kind == QLatin1String("session_destroyed")) {
         if (str(body, "session_id") == m_sessionId)
             finish(tr("the session was ended"));
@@ -738,6 +778,68 @@ void RexSession::onEvent(const QJsonObject &message)
                                        .value(QLatin1String("exit_code")).toInt();
         }
     }
+}
+
+// ---- Keymaps and actions. ---------------------------------------------------
+
+void RexSession::fetchKeymap()
+{
+    if (!m_keymapRequest || m_finished)
+        return;
+    if (m_keymapPending)
+        return;
+    m_keymapPending = true;
+    m_control->request(QStringLiteral("client.keymap"), m_keymapRequest(),
+                       [this](const QJsonObject &payload, const QJsonObject &error) {
+                           m_keymapPending = false;
+                           if (m_finished)
+                               return;
+                           if (!error.isEmpty()) {
+                               // An older server: no keymap, the app's own shortcuts stand.
+                               qCInfo(lcRex) << "no keymap:" << str(error, "message");
+                               return;
+                           }
+                           m_keymap.parse(payload);
+                           for (const QString &d : m_keymap.diagnostics())
+                               qCWarning(lcRex) << "keymap:" << d;
+                           emit keymapChanged();
+                       });
+}
+
+void RexSession::runAction(const QString &name, const QJsonObject &args, const TerminalWidget *pane,
+                           const QString &origin)
+{
+    QJsonObject p{{QStringLiteral("action"), name}, {QStringLiteral("origin"), origin},
+                  {QStringLiteral("session_id"), m_sessionId}};
+    if (!args.isEmpty())
+        p.insert(QStringLiteral("args"), args);
+    const QString block = pane ? blockId(pane) : QString();
+    if (!block.isEmpty())
+        p.insert(QStringLiteral("block_id"), block);
+    m_control->request(QStringLiteral("client.action"), p,
+                       [this, name](const QJsonObject &payload, const QJsonObject &error) {
+                           if (!error.isEmpty())
+                               emit actionFailed(name, str(error, "message").isEmpty() ? str(error, "code")
+                                                                                       : str(error, "message"));
+                           else
+                               emit actionFinished(name, payload.value(QLatin1String("result")));
+                       });
+}
+
+void RexSession::replyCall(const QString &callId, const QJsonValue &result, const QJsonObject &error)
+{
+    QJsonObject p{{QStringLiteral("call_id"), callId}};
+    if (!error.isEmpty())
+        p.insert(QStringLiteral("error"), error);
+    else
+        p.insert(QStringLiteral("result"), result);
+    // A reply nobody waits for any more is not_found: nothing to do.
+    m_control->request(QStringLiteral("client.reply"), p);
+}
+
+QString RexSession::clientId() const
+{
+    return m_control->clientId();
 }
 
 // ---- Input, sizes, colours. -------------------------------------------------

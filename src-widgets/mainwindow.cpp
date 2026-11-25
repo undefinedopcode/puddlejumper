@@ -88,6 +88,16 @@
 namespace {
 
 /*
+ * An action's name for Rex keymaps, palettes and client.perform (rexia's
+ * name where rexia has the same action), and its category.
+ */
+void tagRexAction(QAction *action, const char *name, const char *category)
+{
+    action->setProperty("rexAction", QString::fromLatin1(name));
+    action->setProperty("rexCategory", QString::fromLatin1(category));
+}
+
+/*
  * Toolbar buttons are icon-only, so the tooltip is the only place a button's
  * name and shortcut appear. Qt doesn't add the shortcut itself.
  */
@@ -262,6 +272,10 @@ MainWindow::MainWindow(QWidget *parent)
     buildLayout();
     buildMenus();
     buildStatusBar();
+#ifdef PUDDLEJUMPER_REX
+    // Keys in Rex panes go by the server's keymap (see routeRexKey).
+    qApp->installEventFilter(this);
+#endif
 
     // Live previews: a few times a second, redraw the cards of tabs that
     // have had output since. Previews are drawn from the panes' screens, so
@@ -460,6 +474,11 @@ void MainWindow::setSidebarWidth(int width)
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
 {
+#ifdef PUDDLEJUMPER_REX
+    if ((event->type() == QEvent::ShortcutOverride || event->type() == QEvent::KeyPress)
+        && watched == QApplication::focusWidget() && routeRexKey(static_cast<QKeyEvent *>(event)))
+        return true;
+#endif
     if (watched == m_tabs && event->type() == QEvent::Resize) {
         // Cards take the terminal area's shape, which is the tab widget's: its
         // own bar is hidden. (The pages haven't been resized yet when this runs.)
@@ -494,6 +513,7 @@ void MainWindow::buildMenus()
     auto *file = menuBar()->addMenu(tr("&File"));
 
     auto *newAct = file->addAction(tr("&New Tab"));
+    tagRexAction(newAct, "client.tab.new", "Tab");
     newAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+T")));
     connect(newAct, &QAction::triggered, this, &MainWindow::newTab);
 
@@ -559,19 +579,23 @@ void MainWindow::buildMenus()
 #endif
 
     auto *closeAct = file->addAction(tr("&Close Tab"));
+    tagRexAction(closeAct, "client.tab.close", "Tab");
     closeAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+W")));
     connect(closeAct, &QAction::triggered, this, [this]() { closeTab(m_tabs->currentIndex()); });
 
     auto *renameAct = file->addAction(tr("&Rename Tab…"));
+    tagRexAction(renameAct, "client.tab.rename", "Tab");
     connect(renameAct, &QAction::triggered, this, [this]() { renameTab(m_tabs->currentIndex()); });
 
     auto *nextAct = file->addAction(tr("&Next Tab"));
+    tagRexAction(nextAct, "client.tab.next", "Tab");
     nextAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Tab")));
     connect(nextAct, &QAction::triggered, this, [this]() {
         m_tabs->setCurrentIndex((m_tabs->currentIndex() + 1) % qMax(1, m_tabs->count()));
     });
 
     auto *prevAct = file->addAction(tr("&Previous Tab"));
+    tagRexAction(prevAct, "client.tab.previous", "Tab");
     prevAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+Tab")));
     connect(prevAct, &QAction::triggered, this, [this]() {
         const int n = qMax(1, m_tabs->count());
@@ -580,16 +604,19 @@ void MainWindow::buildMenus()
 
     // Ctrl+Shift+J: unused by terminal programs, as the others here.
     m_nextNeedingYouAct = file->addAction(tr("Next Tab Needing &You"));
+    tagRexAction(m_nextNeedingYouAct, "client.tab.next_needing_you", "Tab");
     m_nextNeedingYouAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+J")));
     connect(m_nextNeedingYouAct, &QAction::triggered, this, &MainWindow::showNextNeedingYou);
 
     file->addSeparator();
     auto *settingsAct = file->addAction(tr("&Settings…"));
+    tagRexAction(settingsAct, "client.settings", "App");
     settingsAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+,")));
     connect(settingsAct, &QAction::triggered, this, [this]() { openSettings(); });
 
     file->addSeparator();
     auto *quitAct = file->addAction(tr("&Quit"));
+    tagRexAction(quitAct, "client.quit", "App");
     // NOT QKeySequence::Quit -- that is plain Ctrl+Q on Linux, and a QAction
     // shortcut is consumed by the shortcut map before the focused widget sees
     // the key. Ctrl+Q belongs to the program in the terminal (it is micro's
@@ -603,6 +630,7 @@ void MainWindow::buildMenus()
 
     auto *edit = menuBar()->addMenu(tr("&Edit"));
     auto *copyAct = edit->addAction(tr("&Copy"));
+    tagRexAction(copyAct, "pane.copy", "Pane");
     copyAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+C")));
     connect(copyAct, &QAction::triggered, this, [this]() {
         if (auto *t = currentTerminal())
@@ -610,6 +638,7 @@ void MainWindow::buildMenus()
     });
 
     auto *pasteAct = edit->addAction(tr("&Paste"));
+    tagRexAction(pasteAct, "pane.paste", "Pane");
     pasteAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+V")));
     connect(pasteAct, &QAction::triggered, this, [this]() {
         if (auto *t = currentTerminal())
@@ -618,6 +647,7 @@ void MainWindow::buildMenus()
 
     edit->addSeparator();
     auto *findAct = edit->addAction(tr("&Find…"));
+    tagRexAction(findAct, "client.find.open", "Find");
     findAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+F")));
     connect(findAct, &QAction::triggered, this, [this]() {
         // Built into QTermWidget -- no overlay to implement.
@@ -627,6 +657,7 @@ void MainWindow::buildMenus()
 
     edit->addSeparator();
     auto *shotRegionAct = edit->addAction(tr("Screenshot &Region…"));
+    tagRexAction(shotRegionAct, "client.screenshot.region", "Pane");
     shotRegionAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+S")));
     connect(shotRegionAct, &QAction::triggered, this, [this]() {
         if (auto *t = currentTerminal())
@@ -634,6 +665,7 @@ void MainWindow::buildMenus()
     });
 
     auto *shotTermAct = edit->addAction(tr("Screens&hot Terminal"));
+    tagRexAction(shotTermAct, "client.screenshot.pane", "Pane");
     shotTermAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+P")));
     connect(shotTermAct, &QAction::triggered, this, [this]() {
         if (auto *t = currentTerminal())
@@ -667,11 +699,13 @@ void MainWindow::buildMenus()
             [this]() { closeWorkspace(m_currentWorkspace); });
     // Ctrl+Shift+PgUp/PgDn: no terminal program has a use for them.
     m_nextWorkspaceAct = new QAction(tr("Ne&xt Workspace"), this);
+    tagRexAction(m_nextWorkspaceAct, "client.workspace.next", "Workspace");
     m_nextWorkspaceAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+PgDown")));
     connect(m_nextWorkspaceAct, &QAction::triggered, this, [this]() {
         switchWorkspace((m_currentWorkspace + 1) % m_workspaces.size());
     });
     m_prevWorkspaceAct = new QAction(tr("Pre&vious Workspace"), this);
+    tagRexAction(m_prevWorkspaceAct, "client.workspace.previous", "Workspace");
     m_prevWorkspaceAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+PgUp")));
     connect(m_prevWorkspaceAct, &QAction::triggered, this, [this]() {
         const int n = m_workspaces.size();
@@ -693,15 +727,26 @@ void MainWindow::buildMenus()
     connect(&m_servers, &ServerStore::changed, this, &MainWindow::rebuildServersMenu);
     rebuildServersMenu();
 
+    // Every action by name. Ctrl+Shift+A, as JetBrains' "Find Action": free
+    // in terminals, as the other Ctrl+Shift letters here.
+    auto *paletteAct = view->addAction(tr("Command &Palette…"));
+    paletteAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+A")));
+    tagRexAction(paletteAct, "client.palette.toggle", "App");
+    connect(paletteAct, &QAction::triggered, this, &MainWindow::showCommandPalette);
+    view->addSeparator();
+
     auto *zoomIn = view->addAction(tr("Zoom &In"));
+    tagRexAction(zoomIn, "client.font.increase", "View");
     zoomIn->setShortcut(QKeySequence(QStringLiteral("Ctrl+=")));
     connect(zoomIn, &QAction::triggered, this, [this]() { zoomBy(+1); });
 
     auto *zoomOut = view->addAction(tr("Zoom &Out"));
+    tagRexAction(zoomOut, "client.font.decrease", "View");
     zoomOut->setShortcut(QKeySequence(QStringLiteral("Ctrl+-")));
     connect(zoomOut, &QAction::triggered, this, [this]() { zoomBy(-1); });
 
     auto *zoomReset = view->addAction(tr("&Reset Zoom"));
+    tagRexAction(zoomReset, "client.font.reset", "View");
     zoomReset->setShortcut(QKeySequence(QStringLiteral("Ctrl+0")));
     connect(zoomReset, &QAction::triggered, this, [this]() {
         m_settings.setFontSize(13.0);
@@ -709,18 +754,21 @@ void MainWindow::buildMenus()
 
     view->addSeparator();
     auto *splitRightAct = view->addAction(tr("Split &Right"));
+    tagRexAction(splitRightAct, "pane.split.right", "Pane");
     splitRightAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+E")));
     connect(splitRightAct, &QAction::triggered, this, [this]() {
         if (auto *t = currentTerminal())
             splitPane(t, Qt::Horizontal);
     });
     auto *splitDownAct = view->addAction(tr("Split &Down"));
+    tagRexAction(splitDownAct, "pane.split.down", "Pane");
     splitDownAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+O")));
     connect(splitDownAct, &QAction::triggered, this, [this]() {
         if (auto *t = currentTerminal())
             splitPane(t, Qt::Vertical);
     });
     auto *closePaneAct = view->addAction(tr("Close Pa&ne"));
+    tagRexAction(closePaneAct, "pane.close", "Pane");
     closePaneAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+X")));
     connect(closePaneAct, &QAction::triggered, this, [this]() {
         if (auto *t = currentTerminal())
@@ -729,6 +777,7 @@ void MainWindow::buildMenus()
 #ifdef PUDDLEJUMPER_REX
     // Rex panes can float over their window, and dock back.
     auto *floatPaneAct = view->addAction(tr("&Float or Dock Pane"));
+    tagRexAction(floatPaneAct, "pane.float", "Pane");
     floatPaneAct->setStatusTip(tr("Float a Rex pane over its window, or dock a floating one back"));
     connect(floatPaneAct, &QAction::triggered, this, [this]() {
         TerminalWidget *t = currentTerminal();
@@ -743,6 +792,7 @@ void MainWindow::buildMenus()
             rex->floatPane(t);
     });
     auto *zoomPaneAct = view->addAction(tr("&Zoom Pane"));
+    tagRexAction(zoomPaneAct, "pane.zoom", "Pane");
     zoomPaneAct->setCheckable(true);
     zoomPaneAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+Z")));
     zoomPaneAct->setStatusTip(tr("Let a Rex pane fill its window, or put the others back"));
@@ -754,6 +804,7 @@ void MainWindow::buildMenus()
             statusBar()->showMessage(tr("Only Rex panes can zoom"), 3000);
     });
     auto *swapPaneAct = view->addAction(tr("S&wap with Next Pane"));
+    tagRexAction(swapPaneAct, "pane.swap_next", "Pane");
     swapPaneAct->setStatusTip(tr("Swap a Rex pane with the next one in its window"));
     connect(swapPaneAct, &QAction::triggered, this, [this]() {
         TerminalWidget *t = currentTerminal();
@@ -802,12 +853,14 @@ void MainWindow::buildMenus()
     });
 #endif
     auto *nextPaneAct = view->addAction(tr("Ne&xt Pane"));
+    tagRexAction(nextPaneAct, "pane.focus_next", "Pane");
     nextPaneAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+N")));
     connect(nextPaneAct, &QAction::triggered, this, [this]() {
         if (auto *tab = currentTab())
             tab->cyclePane(+1);
     });
     auto *prevPaneAct = view->addAction(tr("Pre&vious Pane"));
+    tagRexAction(prevPaneAct, "pane.focus_previous", "Pane");
     prevPaneAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+M")));
     connect(prevPaneAct, &QAction::triggered, this, [this]() {
         if (auto *tab = currentTab())
@@ -816,6 +869,7 @@ void MainWindow::buildMenus()
 
     view->addSeparator();
     auto *toggleLayout = view->addAction(tr("&Thumbnail Sidebar"));
+    tagRexAction(toggleLayout, "client.sidebar.toggle", "View");
     toggleLayout->setCheckable(true);
     toggleLayout->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+B")));
     connect(toggleLayout, &QAction::triggered, this, [this](bool on) {
@@ -1725,6 +1779,29 @@ void MainWindow::rebuildServersMenu()
     m_serversMenu->addAction(appIcon("plus"), tr("Connect to &Rex Server…"), this, &MainWindow::newRexTab);
     if (RexSession *rex = rexSessionFor(currentTab())) {
         QPointer<RexSession> session(rex);
+        // The server's own actions (from its init.lua, and the terminal's).
+        if (!rex->keymap().actions().isEmpty()) {
+            auto *actionsMenu = m_serversMenu->addMenu(tr("Rex &Actions"));
+            QHash<QString, QMenu *> byCategory;
+            for (const RexKeymap::Action &a : rex->keymap().actions()) {
+                QMenu *into = actionsMenu;
+                if (!a.category.isEmpty()) {
+                    if (!byCategory.contains(a.category))
+                        byCategory.insert(a.category, actionsMenu->addMenu(a.category));
+                    into = byCategory.value(a.category);
+                }
+                QAction *item = into->addAction(a.title);
+                item->setToolTip(a.description.isEmpty() ? a.name : a.description);
+                const QStringList keys = rex->keymap().keysFor(a.name);
+                if (!keys.isEmpty())
+                    item->setText(a.title + QLatin1Char('\t') + RexKeymap::display(keys));
+                const QString name = a.name;
+                connect(item, &QAction::triggered, this, [this, session, name]() {
+                    if (session)
+                        session->runAction(name, {}, currentTerminal(), QStringLiteral("menu"));
+                });
+            }
+        }
         m_serversMenu->addAction(tr("&Detach Rex Session “%1”").arg(rex->label()), this, [session]() {
             if (session)
                 session->detach();
@@ -2048,6 +2125,7 @@ void MainWindow::openRex(const QUrl &server, const QString &sessionId, const QSt
         }
     });
     connect(session, &RexSession::tabRemoved, this, &MainWindow::removeTab);
+    wireRexActions(session);
     connect(session, &RexSession::ended, this, [this, session, shownAny, quiet](const QString &reason) {
         m_rexSessions.removeOne(session);
         m_rexWorkspace.remove(session);
