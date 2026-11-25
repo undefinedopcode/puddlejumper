@@ -12,6 +12,7 @@
 #include <QImage>
 #include <QList>
 #include <QRect>
+#include <QSet>
 #include <QSize>
 
 namespace Konsole
@@ -46,9 +47,11 @@ struct GraphicsPlacement
  *   ESC _ G <key=value,...> ; <base64 payload> ESC \
  *
  * Spec: https://sw.kovidgoyal.net/kitty/graphics-protocol/. Images come in
- * the escape code itself (t=d), as PNG, RGB or RGBA, zlib-compressed or not,
- * in chunks. Not done: other transmission media (files, shared memory),
- * indexed colour, animation, relative placements.
+ * the escape code itself (in chunks), from a file or from shared memory, as
+ * PNG, RGB, RGBA or indexed colour, zlib-compressed or not. Images can be
+ * animated: frames, composed from parts of others, played by the terminal
+ * (see animate()) or stepped through by the program. Not done: relative
+ * placements.
  */
 class TerminalGraphics
 {
@@ -96,16 +99,41 @@ public:
 
     bool isEmpty() const { return m_placements.isEmpty(); }
     QList<GraphicsPlacement> placements() const { return m_placements; }
-    QImage image(quint32 id) const { return m_images.value(id).image; }
+    /* The image's frame showing now. An indexed-colour image (f=8, f=16) is
+     * Format_Grayscale16 holding the palette index in the low byte and the
+     * alpha in the high one; colourize() makes it a picture. */
+    QImage image(quint32 id) const;
+    static bool isIndexed(const QImage &image) { return image.format() == QImage::Format_Grayscale16; }
+    /* An indexed image in the colours given: 0-247 the 256-colour table's,
+     * 248 the default background, 249 the default foreground, and so on. */
+    static QImage colourize(const QImage &indexed, const QRgb *palette256);
+
+    /* Moves the running animations of the images `shown` on to the frame due
+     * now; returns the milliseconds until one is next due (-1: none). Others
+     * wait, and catch up when shown again. */
+    qint64 animate(const QSet<quint32> &shown);
     /* Changes with every placement made, moved or gone. */
     quint64 generation() const { return m_generation; }
 
 private:
-    struct Image
+    struct Frame
     {
         QImage image;
+        int gap = 0;            // ms it shows for when playing; 0: skipped over
+    };
+
+    struct Image
+    {
+        QList<Frame> frames;    // the first is the image itself (the root frame)
         quint32 number = 0;
         quint64 serial = 0;     // order of arriving
+        // Animation
+        enum State { Stopped, Loading, Running } state = Stopped;
+        int current = 0;        // the frame showing
+        qint64 shownAt = 0;     // when it began to (clock())
+        int loops = 0;          // v: 0 or 1 forever, else loops - 1 times
+        int loopsDone = 0;
+        qint64 bytes() const;
     };
 
     struct Command
@@ -120,11 +148,14 @@ private:
         quint32 id = 0;         // i
         quint32 number = 0;     // I
         quint32 placementId = 0;    // p
-        int width = 0, height = 0;  // s, v: the data's size in pixels
+        int width = 0, height = 0;  // s, v: the data's size in pixels (a=a: state, loops)
         int dataSize = 0;       // S
+        qint64 dataOffset = 0;  // O
         int x = 0, y = 0, w = 0, h = 0;     // the source rectangle
         int cellX = 0, cellY = 0;           // X, Y: offset in the cell, in pixels
         int columns = 0, rows = 0;          // c, r
+        quint32 keyX = 0, keyY = 0;         // X, Y and c, r as given: in animation
+        quint32 keyC = 0, keyR = 0;         // they are flags, colours and frames
         qint32 z = 0;
         bool noCursorMove = false;          // C=1
         bool unicodePlaceholder = false;    // U=1
@@ -138,9 +169,18 @@ private:
     Result transmit(const Command &cmd, const QByteArray &data, const Context &context);
     Result put(const Command &cmd, quint32 id, const Context &context);
     Result remove(const Command &cmd, const Context &context);
+    Result frame(const Command &cmd, const QByteArray &data);
+    Result animation(const Command &cmd);
+    Result compose(const Command &cmd);
     QByteArray decode(const Command &cmd, const QByteArray &data, QImage &image) const;
-    /* Make room for `bytes` more, dropping the oldest images (unplaced first). */
-    void makeRoom(qint64 bytes);
+    /* The data from where t= says: the payload itself, a file or shared
+     * memory named by it. */
+    static QByteArray read(const Command &cmd, const QByteArray &payload, QByteArray &data);
+    /* Make room for `bytes` more, dropping the oldest images (unplaced first),
+     * but not `keep`. */
+    void makeRoom(qint64 bytes, quint32 keep = 0);
+    bool isPlaced(quint32 id) const;
+    static qint64 clock();
     void dropImage(quint32 id);
     quint32 newestWithNumber(quint32 number) const;
     quint32 freeId() const;

@@ -244,6 +244,17 @@ QImage ScreenWindow::graphicsImage(quint32 id) const
     return _screen->graphics().image(id);
 }
 
+qint64 ScreenWindow::graphicsAnimate()
+{
+    // The images in view, and those placeholders may show.
+    QSet<quint32> shown;
+    for (const GraphicsPlacement &p : graphicsPlacements())
+        shown.insert(p.imageId);
+    for (const GraphicsPlacement &p : graphicsVirtualPlacements())
+        shown.insert(p.imageId);
+    return _screen->graphics().animate(shown);
+}
+
 quint64 ScreenWindow::graphicsGeneration() const
 {
     return _screen->graphics().generation();

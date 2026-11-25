@@ -168,6 +168,9 @@ public:
     /* The virtual placements (U=1), shown through placeholder characters. */
     QList<GraphicsPlacement> graphicsVirtualPlacements() const;
     quint64 graphicsGeneration() const;
+    /* Moves animations on; the milliseconds until the next frame is due
+     * (-1: none). */
+    qint64 graphicsAnimate();
 
     /**
      * Returns the position of the cursor

@@ -1736,6 +1736,21 @@ void TerminalDisplay::paintEvent( QPaintEvent* pe )
   }
   // puddlejumper: images in their layers (kitty's z-index): under cells with
   // a background colour of their own, under text, and over it.
+  // Animations on to the frame due, and back when the next is.
+  if (_screenWindow)
+  {
+    const qint64 due = _screenWindow->graphicsAnimate();
+    if (due >= 0)
+    {
+      if (!_graphicsAnimationTimer)
+      {
+        _graphicsAnimationTimer = new QTimer(this);
+        _graphicsAnimationTimer->setSingleShot(true);
+        connect(_graphicsAnimationTimer, &QTimer::timeout, this, qOverload<>(&QWidget::update));
+      }
+      _graphicsAnimationTimer->start(int(qBound(qint64(10), due, qint64(60000))));
+    }
+  }
   const QList<GraphicsPlacement> graphics =
       _screenWindow ? _screenWindow->graphicsPlacements() : QList<GraphicsPlacement>();
   constexpr qint32 kUnderBackgrounds = -1073741824;   // INT32_MIN / 2
@@ -1775,29 +1790,57 @@ void TerminalDisplay::drawGraphics(QPainter &painter, const QList<GraphicsPlacem
 
 QPixmap TerminalDisplay::graphicsPixmap(const GraphicsPlacement &p, const QSize &pixels)
 {
-  // Scaled once, not at every paint: the screen is drawn again whenever
-  // anything changes while images show.
-  const QString key = QStringLiteral("%1/%2,%3,%4,%5/%6x%7")
-                          .arg(p.imageId).arg(p.source.x()).arg(p.source.y())
-                          .arg(p.source.width()).arg(p.source.height())
-                          .arg(pixels.width()).arg(pixels.height());
-  QPixmap pixmap = _graphicsPixmaps.value(key);
-  const QImage image = _screenWindow->graphicsImage(p.imageId);
-  if (!pixmap.isNull() && _graphicsPixmapImages.value(key) == image.cacheKey())
-    return pixmap;
+  QImage image = _screenWindow->graphicsImage(p.imageId);
   if (image.isNull())
     return {};
-  if (_graphicsPixmaps.size() > 64)
+  // Scaled once, not at every paint: the screen is drawn again whenever
+  // anything changes while images show. Each frame of an animation is an
+  // image of its own; an indexed one is drawn again in new colours.
+  QRgb palette[256];
+  size_t colours = 0;
+  const bool indexed = TerminalGraphics::isIndexed(image);
+  if (indexed)
   {
-    _graphicsPixmaps.clear();
-    _graphicsPixmapImages.clear();
+    graphicsPalette(palette);
+    colours = qHashBits(palette, sizeof palette);
   }
-  pixmap = QPixmap::fromImage(image.copy(p.source).scaled(pixels, Qt::IgnoreAspectRatio,
-                                                            Qt::SmoothTransformation));
+  const QString key = QStringLiteral("%1/%2/%3,%4,%5,%6/%7x%8/%9")
+                          .arg(p.imageId).arg(image.cacheKey())
+                          .arg(p.source.x()).arg(p.source.y())
+                          .arg(p.source.width()).arg(p.source.height())
+                          .arg(pixels.width()).arg(pixels.height()).arg(colours);
+  QPixmap pixmap = _graphicsPixmaps.value(key);
+  if (!pixmap.isNull())
+    return pixmap;
+  if (_graphicsPixmaps.size() > 128)
+    _graphicsPixmaps.clear();
+  if (indexed)
+    image = TerminalGraphics::colourize(image.copy(p.source), palette);
+  else
+    image = image.copy(p.source);
+  pixmap = QPixmap::fromImage(image.scaled(pixels, Qt::IgnoreAspectRatio,
+                                           indexed ? Qt::FastTransformation : Qt::SmoothTransformation));
   pixmap.setDevicePixelRatio(devicePixelRatioF());
   _graphicsPixmaps.insert(key, pixmap);
-  _graphicsPixmapImages.insert(key, image.cacheKey());
   return pixmap;
+}
+
+void TerminalDisplay::graphicsPalette(QRgb *palette256) const
+{
+  for (int i = 0; i < 248; i++)
+    palette256[i] = CharacterColor(COLOR_SPACE_256, i).color(_colorTable).rgb();
+  const QRgb foreground = _colorTable[DEFAULT_FORE_COLOR].color.rgb();
+  const QRgb background = _colorTable[DEFAULT_BACK_COLOR].color.rgb();
+  palette256[248] = background;
+  palette256[249] = foreground;
+  // Selection and cursor text colours come from the cell here: kitty's
+  // stand-ins for that case.
+  palette256[250] = foreground;   // selection background
+  palette256[251] = background;   // selection foreground
+  palette256[252] = _cursorColor.isValid() ? _cursorColor.rgb() : foreground;
+  palette256[253] = background;   // cursor text
+  palette256[254] = foreground;   // a link under the mouse
+  palette256[255] = foreground;
 }
 
 // The base character of a cell, and its combining characters (if any).

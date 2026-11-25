@@ -795,10 +795,16 @@ and others that speak it. Images scroll with the text, into the scrollback and
 out of it, and can sit under the text as well as over it; `clear` clears them,
 and the alternate screen has its own.
 
-Images come in the escape code itself, as PNG, RGB or RGBA, compressed or not.
-Not supported yet: sending a file name or shared memory instead (programs that
-ask are told so and fall back to the escape code), palette images, animation,
-and placing images relative to others.
+Images can come in the escape code itself, or, from programs on the same
+machine, in a file or shared memory, which is much faster; as PNG, RGB, RGBA
+or palette colours (drawn in the colour scheme's colours, and redrawn when it
+changes), compressed or not. Animations play (`kitten icat` shows animated
+GIFs), but only while in view. Not supported yet: placing images relative to
+others.
+
+A program can name any file to show, so puddlejumper only reads regular
+files, nowhere under `/proc`, `/sys` or `/dev`, and answers every failure the
+same way, so a program learns nothing about files it couldn't read itself.
 
 In tmux, run `tmux set -g allow-passthrough on` first. Programs then use
 **Unicode placeholders**: they send the image through tmux and then print

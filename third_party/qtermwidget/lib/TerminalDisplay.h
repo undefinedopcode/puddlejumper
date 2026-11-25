@@ -774,7 +774,7 @@ private:
     // image, source rectangle and size; the image each came from; and what
     // the last update saw of them.
     QHash<QString, QPixmap> _graphicsPixmaps;
-    QHash<QString, qint64> _graphicsPixmapImages;
+    QTimer *_graphicsAnimationTimer = nullptr;
     bool _graphicsShown = false;
     quint64 _graphicsGeneration = 0;
     void drawGraphics(QPainter &painter, const QList<GraphicsPlacement> &placements,
@@ -783,6 +783,9 @@ private:
     // the image their colour names.
     void drawPlaceholders(QPainter &painter);
     QPixmap graphicsPixmap(const GraphicsPlacement &p, const QSize &pixels);
+    // The colours of an indexed image's palette (kitty's 256: the 256-colour
+    // table's first 248, then the default background, foreground, and so on).
+    void graphicsPalette(QRgb *palette256) const;
 
     int _leftMargin;    // offset
     int _topMargin;    // offset

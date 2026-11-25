@@ -6,11 +6,23 @@
 
 #include "TerminalGraphics.h"
 
+#include <QDir>
+#include <QElapsedTimer>
+#include <QFile>
+#include <QFileInfo>
+#include <QPainter>
 #include <QtEndian>
 
 #include <algorithm>
 #include <climits>
 #include <cmath>
+
+#ifdef Q_OS_UNIX
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 using namespace Konsole;
 
@@ -28,6 +40,85 @@ bool parseInt(const QByteArray &value, qint64 min, qint64 max, qint64 &out)
     out = value.toLongLong(&ok);
     return ok && out >= min && out <= max;
 }
+
+// Every failure to read a file or shared memory gets the same answer, so a
+// program (perhaps on another machine) learns nothing of files it can't read.
+const QByteArray kReadError = "EBADF:Failed to read image file";
+
+// Places a path may not lead, merely opening some of which does things.
+bool isSensitive(const QString &path)
+{
+    if (path.startsWith(QLatin1String("/dev/shm/")))
+        return false;
+    for (const char *dir : {"/proc", "/sys", "/dev"}) {
+        const QString d = QLatin1String(dir);
+        if (path == d || path.startsWith(d + QLatin1Char('/')))
+            return true;
+    }
+    return false;
+}
+
+// Bytes [offset, offset + size) of something `total` long (size 0: the rest).
+bool span(qint64 total, qint64 offset, qint64 size, qint64 &wanted)
+{
+    wanted = size > 0 ? size : total - offset;
+    return offset >= 0 && offset <= total && wanted >= 0 && offset + wanted <= total
+        && wanted <= Konsole::TerminalGraphics::kQuota;
+}
+
+bool readFile(const QString &real, qint64 offset, qint64 size, QByteArray &out)
+{
+    QFile file(real);
+    qint64 wanted = 0;
+    if (!file.open(QIODevice::ReadOnly) || file.isSequential()
+        || !span(file.size(), offset, size, wanted) || !file.seek(offset))
+        return false;
+    out = file.read(wanted);
+    return out.size() == wanted;
+}
+
+// A temporary file kitty's way: in a temporary directory, and named so.
+bool isTemporary(const QString &real)
+{
+    if (!real.contains(QLatin1String("tty-graphics-protocol")))
+        return false;
+    QStringList dirs = {QStringLiteral("/tmp"), QStringLiteral("/dev/shm"), QDir::tempPath()};
+    const QString env = qEnvironmentVariable("TMPDIR");
+    if (!env.isEmpty())
+        dirs << env;
+    for (const QString &dir : std::as_const(dirs)) {
+        const QString canonical = QFileInfo(dir).canonicalFilePath();
+        if (!canonical.isEmpty() && real.startsWith(canonical + QLatin1Char('/')))
+            return true;
+    }
+    return false;
+}
+
+#ifdef Q_OS_UNIX
+bool readSharedMemory(const QByteArray &name, qint64 offset, qint64 size, QByteArray &out)
+{
+    if (name.isEmpty() || name.contains('\0') || name.size() > 255)
+        return false;
+    const int fd = shm_open(name.constData(), O_RDONLY, 0);
+    if (fd < 0)
+        return false;
+    bool ok = false;
+    struct stat st;
+    qint64 wanted = 0;
+    if (fstat(fd, &st) == 0 && st.st_size > 0 && span(st.st_size, offset, size, wanted)) {
+        void *map = mmap(nullptr, size_t(st.st_size), PROT_READ, MAP_SHARED, fd, 0);
+        if (map != MAP_FAILED) {
+            out = QByteArray(static_cast<const char *>(map) + offset, wanted);
+            munmap(map, size_t(st.st_size));
+            ok = true;
+        }
+    }
+    // Read once: the program leaves it to the terminal to remove.
+    close(fd);
+    shm_unlink(name.constData());
+    return ok;
+}
+#endif
 
 } // namespace
 
@@ -68,20 +159,20 @@ bool TerminalGraphics::parse(const QByteArray &control, Command &cmd)
         case 's': cmd.width = int(qMin<qint64>(n, INT_MAX)); break;
         case 'v': cmd.height = int(qMin<qint64>(n, INT_MAX)); break;
         case 'S': cmd.dataSize = int(qMin<qint64>(n, INT_MAX)); break;
+        case 'O': cmd.dataOffset = n; break;
         case 'x': cmd.x = int(qMin<qint64>(n, INT_MAX)); break;
         case 'y': cmd.y = int(qMin<qint64>(n, INT_MAX)); break;
         case 'w': cmd.w = int(qMin<qint64>(n, INT_MAX)); break;
         case 'h': cmd.h = int(qMin<qint64>(n, INT_MAX)); break;
-        case 'X': cmd.cellX = int(qMin<qint64>(n, INT_MAX)); break;
-        case 'Y': cmd.cellY = int(qMin<qint64>(n, INT_MAX)); break;
-        case 'c': cmd.columns = int(qMin<qint64>(n, 1000)); break;
-        case 'r': cmd.rows = int(qMin<qint64>(n, 1000)); break;
+        case 'X': cmd.cellX = int(qMin<qint64>(n, INT_MAX)); cmd.keyX = quint32(n); break;
+        case 'Y': cmd.cellY = int(qMin<qint64>(n, INT_MAX)); cmd.keyY = quint32(n); break;
+        case 'c': cmd.columns = int(qMin<qint64>(n, 1000)); cmd.keyC = quint32(n); break;
+        case 'r': cmd.rows = int(qMin<qint64>(n, 1000)); cmd.keyR = quint32(n); break;
         case 'z': cmd.z = qint32(n); cmd.hasZ = true; break;
         case 'C': cmd.noCursorMove = n == 1; break;
         case 'U': cmd.unicodePlaceholder = n == 1; break;
         case 'P': case 'Q': case 'H': case 'V': cmd.relative = cmd.relative || n != 0; break;
-        case 'e': break;    // a letter; see below
-        default: break;   // ones this doesn't know, or that don't matter here (O, N, e)
+        default: break;   // ones this doesn't know, or that don't matter here (N)
         }
     }
     return true;
@@ -92,9 +183,9 @@ QByteArray TerminalGraphics::featureReply(const Command &cmd, const QByteArray &
     if (!cmd.hasId)
         return {};   // a query needs one
     const char action = cmd.featureAction;
-    const bool placing = action == 'T' || action == 't' || action == 'p';
+    const bool placing = action == 'T' || action == 't' || action == 'p' || action == 'q';
     QByteArray keys;
-    if (placing || action == 'd') {
+    if (placing || QByteArray("dfac").contains(action)) {
         keys = ",e=" + QByteArray(1, action);
         for (const QByteArray &pair : control.split(',')) {
             if (pair.size() < 3 || pair.at(1) != '=')
@@ -102,20 +193,43 @@ QByteArray TerminalGraphics::featureReply(const Command &cmd, const QByteArray &
             const char key = pair.at(0);
             const QByteArray value = pair.mid(2);
             bool known = false;
+#ifdef Q_OS_UNIX
+            const QByteArray media = "dfts";
+#else
+            const QByteArray media = "dft";
+#endif
+            const bool medium = value.size() == 1 && media.contains(value.at(0));
             if (placing) {
                 switch (key) {
-                case 'f': known = value == "24" || value == "32" || value == "100"; break;
-                case 't': known = value == "d"; break;
+                case 'f': known = value == "8" || value == "16" || value == "24" || value == "32" || value == "100"; break;
+                case 't': known = medium; break;
                 case 'o': known = value == "z"; break;
                 case 'U': case 'C': known = value == "1"; break;
-                case 's': case 'v': case 'S': case 'x': case 'y': case 'w': case 'h':
+                case 's': case 'v': case 'S': case 'O': case 'x': case 'y': case 'w': case 'h':
                 case 'X': case 'Y': case 'c': case 'r': case 'z': case 'p':
                     known = true;
                     break;
                 default: break;   // P, Q, H, V (relative placements), N and the rest
                 }
+            } else if (action == 'f') {
+                switch (key) {
+                case 'f': known = value == "24" || value == "32" || value == "100"; break;
+                case 't': known = medium; break;
+                case 'o': known = value == "z"; break;
+                case 'X': known = value == "1"; break;
+                case 's': case 'v': case 'S': case 'O': case 'x': case 'y':
+                case 'c': case 'r': case 'z': case 'Y':
+                    known = true;
+                    break;
+                default: break;
+                }
+            } else if (action == 'a') {
+                known = (key == 's' && (value == "1" || value == "2" || value == "3"))
+                     || QByteArray("rzcv").contains(key);
+            } else if (action == 'c') {
+                known = (key == 'C' && value == "1") || QByteArray("rcxywhXY").contains(key);
             } else {
-                known = key == 'd' && value.size() == 1 && QByteArray("aAiInNcCpPqQxXyYzZrR").contains(value.at(0));
+                known = key == 'd' && value.size() == 1 && QByteArray("aAiInNcCfFpPqQxXyYzZrR").contains(value.at(0));
                 known = known || (key != 'd' && QByteArray("ixyzpI").contains(key));
             }
             // Defaults, and a, i, I, m, q and e themselves, aren't listed.
@@ -154,6 +268,11 @@ TerminalGraphics::Result TerminalGraphics::command(const QByteArray &body, const
         r.reply = reply(cmd, cmd.id, "EINVAL:Malformed control data");
         return r;
     }
+    if (cmd.hasId && cmd.hasNumber) {
+        Result r;
+        r.reply = reply(cmd, cmd.id, "EINVAL:Both an image id and number given");
+        return r;
+    }
 
     const auto base64 = QByteArray::fromBase64Encoding(payload, QByteArray::AbortOnBase64DecodingErrors);
     if (!base64) {
@@ -173,9 +292,11 @@ TerminalGraphics::Result TerminalGraphics::command(const QByteArray &body, const
         return r;
     }
 
-    // The rest of an image coming in chunks: only m (and q) after the first.
+    // The rest of an image coming in chunks: only m (and q) after the first,
+    // and a=f for a frame's.
     if (m_loading) {
-        if (!cmd.hasAction && !cmd.hasId && !cmd.hasNumber) {
+        const bool sameAction = !cmd.hasAction || (cmd.action == 'f' && m_load.action == 'f');
+        if (sameAction && !cmd.hasId && !cmd.hasNumber) {
             if (m_loadData.size() + base64.decoded.size() > kQuota) {
                 m_loading = false;
                 m_loadData.clear();
@@ -191,7 +312,7 @@ TerminalGraphics::Result TerminalGraphics::command(const QByteArray &body, const
             m_loading = false;
             const QByteArray data = std::move(m_loadData);
             m_loadData.clear();
-            return transmit(m_load, data, context);
+            return m_load.action == 'f' ? frame(m_load, data) : transmit(m_load, data, context);
         }
         // Anything else abandons it (a delete, as the spec says; anything,
         // rather than take a new command's data for the old image's).
@@ -203,31 +324,24 @@ TerminalGraphics::Result TerminalGraphics::command(const QByteArray &body, const
     case 't':
     case 'T':
     case 'q':
-        if (cmd.medium != 'd') {
-            Result r;
-            r.reply = reply(cmd, cmd.id, "EINVAL:Only direct transmission is supported");
-            return r;
-        }
+    case 'f':
         if (cmd.more) {
             m_loading = true;
             m_load = cmd;
             m_loadData = *base64;
             return {};
         }
-        return transmit(cmd, *base64, context);
+        return cmd.action == 'f' ? frame(cmd, *base64) : transmit(cmd, *base64, context);
     case 'p': {
         const quint32 id = cmd.hasId ? cmd.id : newestWithNumber(cmd.number);
         return put(cmd, id, context);
     }
     case 'd':
         return remove(cmd, context);
-    case 'f':
     case 'a':
-    case 'c': {
-        Result r;
-        r.reply = reply(cmd, cmd.id, "EINVAL:Animation is not supported");
-        return r;
-    }
+        return animation(cmd);
+    case 'c':
+        return compose(cmd);
     default: {
         Result r;
         r.reply = reply(cmd, cmd.id, "EINVAL:Unknown action");
@@ -243,6 +357,10 @@ QByteArray TerminalGraphics::decode(const Command &cmd, const QByteArray &data, 
         bytesPerPixel = 4;
     else if (cmd.format == 24)
         bytesPerPixel = 3;
+    else if (cmd.format == 16)
+        bytesPerPixel = 2;
+    else if (cmd.format == 8)
+        bytesPerPixel = 1;
     else if (cmd.format != 100)
         return "EINVAL:Unsupported format";
     if (bytesPerPixel && (cmd.width <= 0 || cmd.height <= 0 || cmd.width > kMaxSide || cmd.height > kMaxSide))
@@ -251,8 +369,11 @@ QByteArray TerminalGraphics::decode(const Command &cmd, const QByteArray &data, 
     QByteArray raw = data;
     if (cmd.compression == 'z') {
         // qUncompress() wants the size up front; a guess grows as need be.
+        // (S is the PNG's size only when the data came in the escape code;
+        // from a file, it's how much to read.)
         const qint64 expected = bytesPerPixel ? qint64(cmd.width) * cmd.height * bytesPerPixel
-                                              : (cmd.dataSize > 0 ? cmd.dataSize : data.size() * 4LL);
+                                : cmd.dataSize > 0 && cmd.medium == 'd' ? cmd.dataSize
+                                : data.size() * 4LL;
         if (expected > kQuota)
             return "ENOSPC:Image too large";
         QByteArray framed(4, Qt::Uninitialized);
@@ -268,6 +389,21 @@ QByteArray TerminalGraphics::decode(const Command &cmd, const QByteArray &data, 
         const qint64 needed = qint64(cmd.width) * cmd.height * bytesPerPixel;
         if (raw.size() < needed)
             return "ENODATA:Insufficient image data";
+        if (bytesPerPixel <= 2) {
+            // Indexed: the palette index, and the alpha (opaque for f=8),
+            // kept as they are; colourize() gives them the colours of the day.
+            image = QImage(cmd.width, cmd.height, QImage::Format_Grayscale16);
+            const auto *src = reinterpret_cast<const uchar *>(raw.constData());
+            for (int y = 0; y < cmd.height; y++) {
+                auto *dst = reinterpret_cast<quint16 *>(image.scanLine(y));
+                const uchar *line = src + qint64(y) * cmd.width * bytesPerPixel;
+                for (int x = 0; x < cmd.width; x++) {
+                    const quint16 alpha = bytesPerPixel == 2 ? line[x * 2 + 1] : 255;
+                    dst[x] = quint16(line[x * bytesPerPixel]) | quint16(alpha << 8);
+                }
+            }
+            return {};
+        }
         image = QImage(reinterpret_cast<const uchar *>(raw.constData()), cmd.width, cmd.height,
                        cmd.width * bytesPerPixel,
                        bytesPerPixel == 4 ? QImage::Format_RGBA8888 : QImage::Format_RGB888)
@@ -283,12 +419,42 @@ QByteArray TerminalGraphics::decode(const Command &cmd, const QByteArray &data, 
     return {};
 }
 
-TerminalGraphics::Result TerminalGraphics::transmit(const Command &cmd, const QByteArray &data,
+QByteArray TerminalGraphics::read(const Command &cmd, const QByteArray &payload, QByteArray &data)
+{
+    switch (cmd.medium) {
+    case 'd':
+        data = payload;
+        return {};
+    case 'f':
+    case 't': {
+        // Checked before opening, symlinks followed: a regular file, and
+        // nowhere sensitive.
+        const QString path = QString::fromUtf8(payload);
+        const QString real = QFileInfo(path).canonicalFilePath();
+        const bool ok = QDir::isAbsolutePath(path) && !real.isEmpty() && !isSensitive(real)
+                     && QFileInfo(real).isFile() && readFile(real, cmd.dataOffset, cmd.dataSize, data);
+        if (cmd.medium == 't' && !real.isEmpty() && isTemporary(real))
+            QFile::remove(real);
+        return ok ? QByteArray() : kReadError;
+    }
+#ifdef Q_OS_UNIX
+    case 's':
+        return readSharedMemory(payload, cmd.dataOffset, cmd.dataSize, data) ? QByteArray() : kReadError;
+#endif
+    default:
+        return "EINVAL:Unsupported transmission medium";
+    }
+}
+
+TerminalGraphics::Result TerminalGraphics::transmit(const Command &cmd, const QByteArray &payload,
                                                     const Context &context)
 {
     Result r;
+    QByteArray data;
+    QByteArray error = read(cmd, payload, data);
     QImage image;
-    const QByteArray error = decode(cmd, data, image);
+    if (error.isEmpty())
+        error = decode(cmd, data, image);
     if (!error.isEmpty()) {
         r.reply = reply(cmd, cmd.id, error);
         return r;
@@ -302,7 +468,11 @@ TerminalGraphics::Result TerminalGraphics::transmit(const Command &cmd, const QB
     const quint32 id = cmd.hasId ? cmd.id : freeId();
     dropImage(id);   // the same id again replaces it
     makeRoom(image.sizeInBytes());
-    m_images.insert(id, Image{image, cmd.number, ++m_serial});
+    Image stored;
+    stored.frames = {Frame{image, 0}};
+    stored.number = cmd.number;
+    stored.serial = ++m_serial;
+    m_images.insert(id, stored);
 
     if (cmd.action == 'T')
         return put(cmd, id, context);
@@ -323,7 +493,7 @@ TerminalGraphics::Result TerminalGraphics::put(const Command &cmd, quint32 id, c
         return r;
     }
 
-    const QRect full = it->image.rect();
+    const QRect full = it->frames.first().image.rect();
     const QRect source = QRect(cmd.x, cmd.y,
                                cmd.w > 0 ? cmd.w : full.width() - cmd.x,
                                cmd.h > 0 ? cmd.h : full.height() - cmd.y) & full;
@@ -342,8 +512,6 @@ TerminalGraphics::Result TerminalGraphics::put(const Command &cmd, quint32 id, c
     p.source = source;
     p.offsetX = qreal(qMin(cmd.cellX, cell.width() - 1)) / cell.width();
     p.offsetY = qreal(qMin(cmd.cellY, cell.height() - 1)) / cell.height();
-    // Given columns and rows, it fills them; given one, the other keeps its
-    // shape; given neither, it shows at its own size.
     // Given columns and rows, it's fitted in them, its shape kept (letter-
     // or pillarboxed, centred); given one, the other follows from its shape;
     // given neither, it shows at its own size. The offset adds no cells.
@@ -479,7 +647,18 @@ TerminalGraphics::Result TerminalGraphics::remove(const Command &cmd, const Cont
             return p.imageId >= quint32(cmd.x) && p.imageId <= quint32(cmd.y);
         }, freeImages);
         break;
-    default:    // f: animation frames, which there are none of
+    case 'f': { // an image's frames, but the first
+        const quint32 id = cmd.hasId ? cmd.id : newestWithNumber(cmd.number);
+        const auto it = m_images.find(id);
+        if (it != m_images.end() && it->frames.size() > 1) {
+            it->frames.resize(1);
+            it->current = 0;
+            it->state = Image::Stopped;
+            ++m_generation;
+        }
+        break;
+    }
+    default:
         break;
     }
 
@@ -496,29 +675,280 @@ void TerminalGraphics::dropImage(quint32 id)
     ++m_generation;
 }
 
-void TerminalGraphics::makeRoom(qint64 bytes)
+void TerminalGraphics::makeRoom(qint64 bytes, quint32 keep)
 {
     qint64 used = 0;
     for (const Image &image : std::as_const(m_images))
-        used += image.image.sizeInBytes();
-    while (used + bytes > kQuota && !m_images.isEmpty()) {
+        used += image.bytes();
+    while (used + bytes > kQuota && m_images.size() > (m_images.contains(keep) ? 1 : 0)) {
         // The oldest no longer shown, else the oldest.
         quint32 victim = 0;
         quint64 oldest = ~0ULL;
         bool victimPlaced = true;
         for (auto it = m_images.cbegin(); it != m_images.cend(); ++it) {
             const quint32 id = it.key();
-            const bool placed = std::any_of(m_placements.cbegin(), m_placements.cend(),
-                                            [id](const GraphicsPlacement &p) { return p.imageId == id; });
+            if (id == keep && keep != 0)
+                continue;
+            const bool placed = isPlaced(id);
             if ((victimPlaced && !placed) || (placed == victimPlaced && it->serial < oldest)) {
                 victim = id;
                 oldest = it->serial;
                 victimPlaced = placed;
             }
         }
-        used -= m_images.value(victim).image.sizeInBytes();
+        used -= m_images.value(victim).bytes();
         dropImage(victim);
     }
+}
+
+bool TerminalGraphics::isPlaced(quint32 id) const
+{
+    return std::any_of(m_placements.cbegin(), m_placements.cend(),
+                       [id](const GraphicsPlacement &p) { return p.imageId == id; });
+}
+
+qint64 TerminalGraphics::Image::bytes() const
+{
+    qint64 total = 0;
+    for (const Frame &f : frames)
+        total += f.image.sizeInBytes();
+    return total;
+}
+
+QImage TerminalGraphics::image(quint32 id) const
+{
+    const auto it = m_images.constFind(id);
+    if (it == m_images.constEnd() || it->frames.isEmpty())
+        return {};
+    return it->frames.at(qBound(0, it->current, int(it->frames.size()) - 1)).image;
+}
+
+QImage TerminalGraphics::colourize(const QImage &indexed, const QRgb *palette256)
+{
+    QImage out(indexed.size(), QImage::Format_ARGB32_Premultiplied);
+    for (int y = 0; y < indexed.height(); y++) {
+        const auto *src = reinterpret_cast<const quint16 *>(indexed.constScanLine(y));
+        auto *dst = reinterpret_cast<QRgb *>(out.scanLine(y));
+        for (int x = 0; x < indexed.width(); x++) {
+            const QRgb c = palette256[src[x] & 0xff];
+            dst[x] = qPremultiply(qRgba(qRed(c), qGreen(c), qBlue(c), src[x] >> 8));
+        }
+    }
+    return out;
+}
+
+qint64 TerminalGraphics::clock()
+{
+    static QElapsedTimer timer;
+    if (!timer.isValid())
+        timer.start();
+    return timer.elapsed();
+}
+
+// An animation frame's data (a=f): a new frame, on a blank canvas or a copy
+// of another frame (c), or an edit of one (r); the data goes at x, y.
+TerminalGraphics::Result TerminalGraphics::frame(const Command &cmd, const QByteArray &payload)
+{
+    Result r;
+    const quint32 id = cmd.hasId ? cmd.id : newestWithNumber(cmd.number);
+    auto it = m_images.find(id);
+    if (id == 0 || it == m_images.end()) {
+        r.reply = reply(cmd, id, "ENOENT:No such image");
+        return r;
+    }
+    if (isIndexed(it->frames.first().image) || cmd.format == 8 || cmd.format == 16) {
+        r.reply = reply(cmd, id, "EINVAL:Indexed images can't be animated");
+        return r;
+    }
+    QByteArray data;
+    QByteArray error = read(cmd, payload, data);
+    QImage patch;
+    if (error.isEmpty())
+        error = decode(cmd, data, patch);
+    if (!error.isEmpty()) {
+        r.reply = reply(cmd, id, error);
+        return r;
+    }
+    const QRect canvas = it->frames.first().image.rect();
+    const QRect area(cmd.x, cmd.y, patch.width(), patch.height());
+    if (!canvas.contains(area)) {
+        r.reply = reply(cmd, id, "EINVAL:Frame data is out of bounds");
+        return r;
+    }
+    const int count = int(it->frames.size());
+    if (cmd.keyR > quint32(count) || cmd.keyC > quint32(count)) {
+        r.reply = reply(cmd, id, "ENOENT:No such frame");
+        return r;
+    }
+
+    QImage target;
+    if (cmd.keyR > 0) {
+        target = it->frames.at(cmd.keyR - 1).image;
+    } else if (cmd.keyC > 0) {
+        target = it->frames.at(cmd.keyC - 1).image;
+    } else {
+        target = QImage(canvas.size(), QImage::Format_ARGB32_Premultiplied);
+        const quint32 rgba = cmd.keyY;   // the background, RGBA
+        target.fill(QColor(int(rgba >> 24), int(rgba >> 16) & 0xff, int(rgba >> 8) & 0xff, int(rgba & 0xff)));
+    }
+    target = target.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    {
+        QPainter painter(&target);
+        painter.setCompositionMode(cmd.keyX == 1 ? QPainter::CompositionMode_Source
+                                                 : QPainter::CompositionMode_SourceOver);
+        painter.drawImage(area.topLeft(), patch);
+    }
+
+    // The gap to the next: z > 0 milliseconds, z < 0 none; else as it was,
+    // or 40 ms for a new frame.
+    if (cmd.keyR > 0) {
+        Frame &f = it->frames[cmd.keyR - 1];
+        f.image = target;
+        if (cmd.hasZ && cmd.z != 0)
+            f.gap = qMax(0, cmd.z);
+    } else {
+        // Others make room for it, but it can't outgrow the quota itself.
+        if (it->bytes() + target.sizeInBytes() > kQuota) {
+            r.reply = reply(cmd, id, "ENOSPC:Too many frames");
+            return r;
+        }
+        makeRoom(target.sizeInBytes(), id);
+        it = m_images.find(id);
+        it->frames.append(Frame{target, cmd.hasZ && cmd.z != 0 ? qMax(0, cmd.z) : 40});
+    }
+    ++m_generation;
+    r.changed = true;
+    r.reply = reply(cmd, id, "OK");
+    return r;
+}
+
+// Controlling an animation (a=a): a frame's gap, the frame showing, playing.
+TerminalGraphics::Result TerminalGraphics::animation(const Command &cmd)
+{
+    Result r;
+    const quint32 id = cmd.hasId ? cmd.id : newestWithNumber(cmd.number);
+    const auto it = m_images.find(id);
+    if (id == 0 || it == m_images.end()) {
+        r.reply = reply(cmd, id, "ENOENT:No such image");
+        return r;
+    }
+    Image &image = *it;
+    const int count = int(image.frames.size());
+    if (cmd.keyR > quint32(count) || cmd.keyC > quint32(count)) {
+        r.reply = reply(cmd, id, "ENOENT:No such frame");
+        return r;
+    }
+    const qint64 now = clock();
+    if (cmd.keyR > 0 && cmd.hasZ && cmd.z != 0)
+        image.frames[cmd.keyR - 1].gap = qMax(0, cmd.z);
+    if (cmd.keyC > 0) {
+        image.current = int(cmd.keyC) - 1;
+        image.shownAt = now;
+    }
+    switch (cmd.width) {    // s
+    case 1:
+        image.state = Image::Stopped;
+        image.loopsDone = 0;
+        break;
+    case 2:
+    case 3:
+        if (image.state == Image::Stopped)
+            image.shownAt = now;
+        image.state = cmd.width == 2 ? Image::Loading : Image::Running;
+        break;
+    default:
+        break;
+    }
+    if (cmd.height > 0)     // v
+        image.loops = cmd.height;
+    ++m_generation;
+    r.changed = true;   // and no reply but errors, as kitty (icat doesn't read one)
+    return r;
+}
+
+// Composing (a=c): a rectangle of frame r (at X, Y) onto frame c (at x, y).
+TerminalGraphics::Result TerminalGraphics::compose(const Command &cmd)
+{
+    Result r;
+    const quint32 id = cmd.hasId ? cmd.id : newestWithNumber(cmd.number);
+    const auto it = m_images.find(id);
+    if (id == 0 || it == m_images.end()) {
+        r.reply = reply(cmd, id, "ENOENT:No such image");
+        return r;
+    }
+    const int count = int(it->frames.size());
+    if (cmd.keyR == 0 || cmd.keyC == 0 || cmd.keyR > quint32(count) || cmd.keyC > quint32(count)) {
+        r.reply = reply(cmd, id, "ENOENT:No such frame");
+        return r;
+    }
+    const QRect canvas = it->frames.first().image.rect();
+    const int w = cmd.w > 0 ? cmd.w : canvas.width();
+    const int h = cmd.h > 0 ? cmd.h : canvas.height();
+    const QRect from(int(qMin<quint32>(cmd.keyX, INT_MAX / 2)), int(qMin<quint32>(cmd.keyY, INT_MAX / 2)), w, h);
+    const QRect to(cmd.x, cmd.y, w, h);
+    if (isIndexed(it->frames.first().image) || !canvas.contains(from) || !canvas.contains(to)
+        || (cmd.keyR == cmd.keyC && from.intersects(to))) {
+        r.reply = reply(cmd, id, "EINVAL:Bad rectangle or frames");
+        return r;
+    }
+    const QImage source = it->frames.at(cmd.keyR - 1).image;
+    QImage &target = it->frames[cmd.keyC - 1].image;
+    target = target.convertToFormat(QImage::Format_ARGB32_Premultiplied);
+    {
+        QPainter painter(&target);
+        painter.setCompositionMode(cmd.noCursorMove ? QPainter::CompositionMode_Source   // C=1
+                                                    : QPainter::CompositionMode_SourceOver);
+        painter.drawImage(to.topLeft(), source, from);
+    }
+    ++m_generation;
+    r.changed = true;
+    r.reply = reply(cmd, id, "OK");
+    return r;
+}
+
+qint64 TerminalGraphics::animate(const QSet<quint32> &shown)
+{
+    const qint64 now = clock();
+    qint64 next = -1;
+    for (auto it = m_images.begin(); it != m_images.end(); ++it) {
+        Image &image = *it;
+        const int count = int(image.frames.size());
+        if (image.state == Image::Stopped || count < 2 || !shown.contains(it.key()))
+            continue;
+        bool waiting = false;
+        int steps = 0;
+        // On to the frame due now, past those with no gap; a frame or two
+        // when drawn often, many when it hasn't been for a while.
+        for (; steps < 100000; steps++) {
+            const int gap = image.frames.at(image.current).gap;
+            if (image.shownAt + gap > now)
+                break;
+            int following = image.current + 1;
+            if (following >= count) {
+                if (image.state == Image::Loading) {
+                    waiting = true;   // for more frames
+                    break;
+                }
+                ++image.loopsDone;
+                if (image.loops > 1 && image.loopsDone >= image.loops - 1) {
+                    image.state = Image::Stopped;
+                    image.loopsDone = 0;
+                    break;
+                }
+                following = 0;
+            }
+            image.shownAt += gap;
+            image.current = following;
+        }
+        if (steps == 100000)
+            image.shownAt = now;   // all gapless, or long unseen: start afresh
+        const int gap = image.frames.at(image.current).gap;
+        if (image.state != Image::Stopped && !waiting && gap > 0) {
+            const qint64 due = qMax<qint64>(0, image.shownAt + gap - now);
+            next = next < 0 ? due : qMin(next, due);
+        }
+    }
+    return next;
 }
 
 quint32 TerminalGraphics::newestWithNumber(quint32 number) const

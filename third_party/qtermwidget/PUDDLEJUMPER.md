@@ -108,10 +108,18 @@ with a `puddlejumper:` comment.
 12. **Images, by kitty's graphics protocol.** New `lib/TerminalGraphics.*`
     keeps each screen's images and placements (the normal and alternate
     screens have their own, as in kitty) and carries out the commands
-    (`ESC _ G … ESC \`): transmitting (direct only, as RGB, RGBA or PNG,
-    zlib-compressed or not, in chunks), placing (source rectangle, cell
+    (`ESC _ G … ESC \`): transmitting (in the escape code, in chunks, or from
+    a file, temporary file or POSIX shared memory; as RGB, RGBA, PNG or
+    indexed colour, zlib-compressed or not), placing (source rectangle, cell
     offset, columns and rows, z-index, `C=1`), querying (with `e=` feature
-    queries) and deleting, with kitty's 320 MB quota a screen. The tokenizer
+    queries), deleting, and animation (frames, composing, playing), with
+    kitty's 320 MB quota a screen. Files are checked before opening (regular,
+    not under `/proc`, `/sys` or `/dev`), and every failure to read one gets
+    the same answer; a temporary file is deleted only from a temporary
+    directory and with `tty-graphics-protocol` in its name. Indexed images
+    keep their palette indices and take the display's colours when drawn.
+    Animations advance when drawn (`animate()`), the display coming back when
+    the next frame is due, and only while in view. The tokenizer
     in `Vt102Emulation` collects the command (up to 64 MB, as it now does a
     tmux passthrough too). `Screen` tells the graphics when lines move,
     scroll into the history, or are cleared, so placements stay with their
@@ -121,9 +129,8 @@ with a `puddlejumper:` comment.
     combining marks in `lib/PlaceholderDiacritics.h`) work too; that is how
     images get through tmux. The pty's size now carries pixels
     (`ws_xpixel`, `ws_ypixel`), and `CSI 14 t` and `CSI 16 t` report the
-    window's and a cell's size in pixels. Not done: files and shared memory,
-    indexed colour, animation, relative placements, and placement ids in the
-    underline colour.
+    window's and a cell's size in pixels. Not done: relative placements, and
+    placement ids in the underline colour.
 
 13. **A CSI sequence with an intermediate byte it doesn't know is ignored.**
     Such a sequence (`CSI * x`, DECSACE, say) used to end the escape at the
