@@ -6,9 +6,14 @@
 
 #include "terminaltab.h"
 
+#include "appicon.h"
 #include "terminalwidget.h"
 
 #include <QApplication>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QMouseEvent>
+#include <QToolButton>
 #include <QJsonArray>
 #include <QPainter>
 #include <QSet>
@@ -76,6 +81,214 @@ QString layoutShape(const PaneLayout &node)
     return out;
 }
 
+// A floating layer's frame: a title strip to move it by, a border to resize
+// it by (right, bottom, or the corner), and a close button.
+constexpr int kFloatBorder = 3;
+constexpr int kFloatTitle = 18;
+
+class FloatingFrame : public QWidget
+{
+public:
+    FloatingFrame(TerminalTab *tab, const QString &id)
+        : QWidget(tab)
+        , m_tab(tab)
+        , m_id(id)
+    {
+        setMouseTracking(true);
+        auto *v = new QVBoxLayout(this);
+        v->setContentsMargins(kFloatBorder, 0, kFloatBorder, kFloatBorder);
+        v->setSpacing(0);
+        m_title = new QWidget(this);
+        m_title->setFixedHeight(kFloatTitle);
+        m_title->setCursor(Qt::SizeAllCursor);
+        m_title->installEventFilter(this);
+        auto *h = new QHBoxLayout(m_title);
+        h->setContentsMargins(4, 0, 0, 0);
+        h->setSpacing(2);
+        m_label = new QLabel(m_title);
+        QFont small = m_label->font();
+        small.setPointSizeF(small.pointSizeF() * 0.85);
+        m_label->setFont(small);
+        h->addWidget(m_label, 1);
+        auto *close = new QToolButton(m_title);
+        close->setAutoRaise(true);
+        close->setIcon(appIcon("x"));
+        close->setIconSize(QSize(kFloatTitle - 6, kFloatTitle - 6));
+        close->setFixedSize(kFloatTitle, kFloatTitle);
+        close->setCursor(Qt::ArrowCursor);
+        close->setToolTip(QObject::tr("Close this floating pane"));
+        QObject::connect(close, &QToolButton::clicked, this, [this]() {
+            emit m_tab->floatingCloseRequested(m_id);
+        });
+        h->addWidget(close);
+        v->addWidget(m_title);
+    }
+
+    void setContent(QWidget *content)
+    {
+        if (content == m_content)
+            return;
+        if (m_content)
+            layout()->removeWidget(m_content);
+        m_content = content;
+        if (content) {
+            static_cast<QVBoxLayout *>(layout())->addWidget(content, 1);
+            content->show();
+        }
+    }
+
+    void setActive(bool on)
+    {
+        if (on == m_active)
+            return;
+        m_active = on;
+        update();
+    }
+
+    void setTitle(const QString &title)
+    {
+        m_label->setText(m_label->fontMetrics().elidedText(title, Qt::ElideRight,
+                                                           qMax(20, width() - 2 * kFloatTitle)));
+    }
+
+    void setColours(const QColor &background, const QColor &foreground)
+    {
+        if (background == m_background)
+            return;
+        m_background = background;
+        QPalette pal = m_label->palette();
+        pal.setColor(QPalette::WindowText, foreground);
+        m_label->setPalette(pal);
+        update();
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        const QColor edge = m_active ? palette().color(QPalette::Highlight) : palette().color(QPalette::Mid);
+        p.fillRect(rect(), m_background.isValid() ? m_background : palette().color(QPalette::Window));
+        // The title strip a shade of the frame colour over the terminal's
+        // background, so it reads as part of the layer.
+        QColor strip = edge;
+        strip.setAlphaF(m_active ? 0.55 : 0.35);
+        p.fillRect(QRect(0, 0, width(), kFloatTitle), strip);
+        p.setPen(QPen(edge, 1));
+        p.drawRect(rect().adjusted(0, 0, -1, -1));
+    }
+
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (watched != m_title)
+            return false;
+        switch (event->type()) {
+        case QEvent::MouseButtonPress: {
+            auto *me = static_cast<QMouseEvent *>(event);
+            if (me->button() == Qt::LeftButton)
+                begin(Move, me->globalPosition().toPoint());
+            return false;
+        }
+        case QEvent::MouseMove:
+            if (m_drag == Move)
+                drag(static_cast<QMouseEvent *>(event)->globalPosition().toPoint());
+            return false;
+        case QEvent::MouseButtonRelease:
+            if (m_drag == Move)
+                finish();
+            return false;
+        default:
+            return false;
+        }
+    }
+
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        const int e = edgesAt(event->position().toPoint());
+        if (event->button() == Qt::LeftButton && e != None)
+            begin(e, event->globalPosition().toPoint());
+    }
+
+    void mouseMoveEvent(QMouseEvent *event) override
+    {
+        if (m_drag != None) {
+            drag(event->globalPosition().toPoint());
+            return;
+        }
+        const int e = edgesAt(event->position().toPoint());
+        setCursor(e == (Right | Bottom) ? Qt::SizeFDiagCursor
+                  : e == Right          ? Qt::SizeHorCursor
+                  : e == Bottom         ? Qt::SizeVerCursor
+                                        : Qt::ArrowCursor);
+    }
+
+    void mouseReleaseEvent(QMouseEvent *) override
+    {
+        if (m_drag != None)
+            finish();
+    }
+
+private:
+    enum { None = 0, Right = 1, Bottom = 2, Move = 4 };
+
+    int edgesAt(const QPoint &pos) const
+    {
+        const int grab = kFloatBorder * 2;
+        int e = None;
+        if (pos.x() >= width() - grab)
+            e |= Right;
+        if (pos.y() >= height() - grab)
+            e |= Bottom;
+        return e;
+    }
+
+    void begin(int what, const QPoint &global)
+    {
+        m_drag = what;
+        m_pressed = global;
+        m_start = geometry();
+        raise();
+    }
+
+    void drag(const QPoint &global)
+    {
+        const QPoint delta = global - m_pressed;
+        const QRect area = m_tab->layoutRect();
+        QRect r = m_start;
+        if (m_drag == Move) {
+            r.moveTopLeft(r.topLeft() + delta);
+            r.moveLeft(qMax(area.left(), qMin(r.left(), area.right() - r.width() + 1)));
+            r.moveTop(qMax(area.top(), qMin(r.top(), area.bottom() - r.height() + 1)));
+        } else {
+            const int minW = qMin(10 * kFloatTitle, area.width());
+            const int minH = qMin(4 * kFloatTitle, area.height());
+            if (m_drag & Right)
+                r.setWidth(qMax(minW, qMin(m_start.width() + delta.x(), area.right() - r.left() + 1)));
+            if (m_drag & Bottom)
+                r.setHeight(qMax(minH, qMin(m_start.height() + delta.y(), area.bottom() - r.top() + 1)));
+        }
+        setGeometry(r);
+    }
+
+    void finish()
+    {
+        const bool moved = geometry() != m_start;
+        m_drag = None;
+        if (moved)
+            emit m_tab->floatingGeometryChanged(m_id, geometry().translated(-m_tab->layoutRect().topLeft()));
+    }
+
+    TerminalTab *m_tab;
+    QString m_id;
+    QWidget *m_title = nullptr;
+    QLabel *m_label = nullptr;
+    QPointer<QWidget> m_content;
+    QColor m_background;
+    bool m_active = false;
+    int m_drag = None;
+    QPoint m_pressed;
+    QRect m_start;
+};
+
 } // namespace
 
 TerminalTab::TerminalTab(TerminalWidget *firstPane, QWidget *parent)
@@ -105,7 +318,30 @@ QList<TerminalWidget *> TerminalTab::panes() const
 {
     QList<TerminalWidget *> out;
     collectPanes(m_root, out);
+    for (const Floating &f : m_floating)
+        collectPanes(f.root, out);
     return out;
+}
+
+QString TerminalTab::floatingLayerOf(const TerminalWidget *pane) const
+{
+    for (const Floating &f : m_floating) {
+        QList<TerminalWidget *> in;
+        collectPanes(f.root, in);
+        if (in.contains(const_cast<TerminalWidget *>(pane)))
+            return f.id;
+    }
+    return {};
+}
+
+QSize TerminalTab::floatingChrome()
+{
+    return QSize(2 * kFloatBorder, kFloatTitle + kFloatBorder);
+}
+
+QRect TerminalTab::layoutRect() const
+{
+    return contentsRect().marginsRemoved(m_layout->contentsMargins());
 }
 
 bool TerminalTab::contains(const TerminalWidget *pane) const
@@ -217,7 +453,8 @@ void TerminalTab::splitPane(TerminalWidget *at, Qt::Orientation orientation,
 
 void TerminalTab::removePane(TerminalWidget *pane)
 {
-    if (!pane || !contains(pane))
+    // Floating layers are laid out by applyLayout() alone.
+    if (!pane || !contains(pane) || !floatingLayerOf(pane).isEmpty())
         return;
 
     auto *parentSplitter = qobject_cast<QSplitter *>(pane->parentWidget());
@@ -348,6 +585,16 @@ void TerminalTab::setActivePane(TerminalWidget *pane, bool giveFocus)
         pane->focusTerminal();
     if (changed)
         emit activePaneChanged(pane);
+    // A floating layer comes to the top when one of its panes is used.
+    if (changed && pane && !m_applyingLayout) {
+        const QString layer = floatingLayerOf(pane);
+        if (!layer.isEmpty() && m_floating.last().id != layer) {
+            for (const Floating &f : std::as_const(m_floating))
+                if (f.id == layer && f.frame)
+                    f.frame->raise();
+            emit floatingRaiseRequested(layer);
+        }
+    }
 }
 
 void TerminalTab::cyclePane(int step)
@@ -376,6 +623,15 @@ void TerminalTab::updateFrames()
         else
             pane->setPaneFrame(TerminalWidget::PaneFrame::Inactive);
     }
+    const QString activeLayer = m_active ? floatingLayerOf(m_active) : QString();
+    for (const Floating &f : std::as_const(m_floating)) {
+        if (auto *frame = static_cast<FloatingFrame *>(f.frame.data())) {
+            frame->setActive(f.id == activeLayer);
+            frame->setColours(backgroundColour(), foregroundColour());
+            if (TerminalWidget *first = firstPaneIn(f.root))
+                frame->setTitle(first->sessionTitle());
+        }
+    }
 }
 
 void TerminalTab::setPadding(int pixels)
@@ -387,7 +643,7 @@ void TerminalTab::setPadding(int pixels)
 
 QSize TerminalTab::layoutArea() const
 {
-    return contentsRect().marginsRemoved(m_layout->contentsMargins()).size();
+    return layoutRect().size();
 }
 
 QColor TerminalTab::backgroundColour() const
@@ -443,6 +699,25 @@ QPixmap TerminalTab::previewPixmap(const QSize &size, qreal devicePixelRatio) co
     // so a split tab previews as its arrangement. Drawn from the panes' screens,
     // which works for a hidden tab: no need to bring it to the front.
     paintPreview(painter, m_root, QRect(QPoint(0, 0), size), devicePixelRatio);
+    // Floating layers over it, where they sit in the tab.
+    const QRect area = layoutRect();
+    if (!area.isEmpty()) {
+        const double sx = double(size.width()) / area.width();
+        const double sy = double(size.height()) / area.height();
+        QColor edge = foregroundColour();
+        edge.setAlphaF(0.5);
+        for (const Floating &f : m_floating) {
+            if (!f.frame || !f.root)
+                continue;
+            const QRect g = f.frame->geometry().translated(-area.topLeft());
+            const QRect box(qRound(g.x() * sx), qRound(g.y() * sy), qRound(g.width() * sx),
+                            qRound(g.height() * sy));
+            painter.fillRect(box, backgroundColour());
+            painter.setPen(edge);
+            painter.drawRect(box.adjusted(0, 0, -1, -1));
+            paintPreview(painter, f.root, box.adjusted(1, 1, -1, -1), devicePixelRatio);
+        }
+    }
     return out;
 }
 
@@ -572,14 +847,21 @@ void TerminalTab::sizeLayout(QWidget *node, const PaneLayout &layout,
 
 void TerminalTab::applyLayout(const PaneLayout &layout,
                               const std::function<TerminalWidget *(int)> &paneFor,
-                              const QSize &cell, const QSize &chrome)
+                              const QSize &cell, const QSize &chrome,
+                              const QList<FloatingLayout> &floating)
 {
     m_applyingLayout = true;
 
     const QString shape = layoutShape(layout);
-    if (shape != m_layoutShape || !m_root) {
-        // A different arrangement: rebuild the splitters. Panes that stay are
-        // lifted out first so deleting the old splitters doesn't take them.
+    QString floatingShape;
+    for (const FloatingLayout &f : floating)
+        floatingShape += f.id + QLatin1Char(':') + layoutShape(f.layout) + QLatin1Char(';');
+    // (No tiled root is right when every pane floats: paneId -1.)
+    const bool rootMissing = !m_root && !(layout.isLeaf() && layout.paneId < 0);
+    if (shape != m_layoutShape || floatingShape != m_floatingShape || rootMissing) {
+        // A different arrangement: rebuild the splitters and floating layers
+        // together (a pane can move between them). Panes that stay are lifted
+        // out first so deleting the old splitters doesn't take them.
         const QList<TerminalWidget *> before = panes();
         TerminalWidget *focused = paneContaining(QApplication::focusWidget());
         for (TerminalWidget *pane : before)
@@ -587,6 +869,14 @@ void TerminalTab::applyLayout(const PaneLayout &layout,
         if (m_root && !qobject_cast<TerminalWidget *>(m_root))
             m_root->deleteLater();
         m_root = nullptr;
+        QHash<QString, FloatingFrame *> frames;
+        for (const Floating &f : std::as_const(m_floating)) {
+            if (f.root && !qobject_cast<TerminalWidget *>(f.root.data()))
+                f.root->deleteLater();
+            if (f.frame)
+                frames.insert(f.id, static_cast<FloatingFrame *>(f.frame.data()));
+        }
+        m_floating.clear();
 
         QList<TerminalWidget *> used;
         QWidget *root = buildLayout(layout, paneFor, used);
@@ -595,6 +885,17 @@ void TerminalTab::applyLayout(const PaneLayout &layout,
             root->show();
             m_root = root;
         }
+        for (const FloatingLayout &f : floating) {
+            FloatingFrame *frame = frames.take(f.id);
+            if (!frame)
+                frame = new FloatingFrame(this, f.id);
+            QWidget *content = buildLayout(f.layout, paneFor, used);
+            frame->setContent(content);
+            frame->show();
+            m_floating.append({f.id, frame, content});
+        }
+        for (FloatingFrame *frame : std::as_const(frames))
+            frame->deleteLater();
         for (TerminalWidget *pane : before) {
             if (!used.contains(pane))
                 pane->deleteLater();
@@ -607,14 +908,28 @@ void TerminalTab::applyLayout(const PaneLayout &layout,
             }
         }
         m_layoutShape = shape;
+        m_floatingShape = floatingShape;
 
         if (!used.contains(m_active.data()))
             m_active = used.value(0);
-        updateFrames();
         if (focused && used.contains(focused))
             focused->focusTerminal();
     }
 
     sizeLayout(m_root, layout, cell, chrome);
+    const QRect area = layoutRect();
+    const QSize extra = floatingChrome();
+    for (int i = 0; i < m_floating.size() && i < floating.size(); ++i) {
+        const Floating &f = m_floating.at(i);
+        const PaneLayout &l = floating.at(i).layout;
+        sizeLayout(f.root, l, cell, chrome);
+        if (!f.frame)
+            continue;
+        const QSize size(l.columns * cell.width() + chrome.width() + extra.width(),
+                         l.lines * cell.height() + chrome.height() + extra.height());
+        f.frame->setGeometry(QRect(area.topLeft() + floating.at(i).position, size));
+        f.frame->raise();  // bottom to top, in order
+    }
+    updateFrames();
     m_applyingLayout = false;
 }

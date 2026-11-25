@@ -38,6 +38,19 @@ struct PaneLayout
 };
 
 /*
+ * A layer floating over a tab's tiled panes: a frame (a title strip to drag
+ * it by, a border to resize it by) holding a layout of its own. `position` is
+ * the frame's top left within the layout area, in pixels; its size follows
+ * from the layout's cells plus TerminalTab::floatingChrome().
+ */
+struct FloatingLayout
+{
+    QString id;
+    QPoint position;
+    PaneLayout layout;
+};
+
+/*
  * One tab: a tree of terminal panes in nested splitters.
  *
  * A tab starts with one pane and splits from there. The active pane is the
@@ -78,7 +91,15 @@ public:
      */
     void applyLayout(const PaneLayout &layout,
                      const std::function<TerminalWidget *(int paneId)> &paneFor,
-                     const QSize &cell, const QSize &chrome);
+                     const QSize &cell, const QSize &chrome,
+                     const QList<FloatingLayout> &floating = {});
+
+    /* A floating frame's pixels round its layout: border and title strip. */
+    static QSize floatingChrome();
+    /* The floating layer a pane is in; empty when it is tiled. */
+    QString floatingLayerOf(const TerminalWidget *pane) const;
+    /* The layout area within the tab (floating frames are kept inside it). */
+    QRect layoutRect() const;
 
     /*
      * Space round the whole layout, filled with the terminal background. tmux
@@ -138,6 +159,13 @@ signals:
      * splitter. tmux tabs turn this into resize-pane; local tabs ignore it.
      */
     void splitterDragged(TerminalWidget *before, Qt::Orientation orientation, int pixels);
+    /* A floating frame moved or resized by the user, to `frame` (relative to
+     * the layout area); it stays there until the next applyLayout(). */
+    void floatingGeometryChanged(const QString &layerId, const QRect &frame);
+    void floatingCloseRequested(const QString &layerId);
+    /* One of a floating layer's panes became active while the layer was
+     * under another. */
+    void floatingRaiseRequested(const QString &layerId);
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
@@ -175,5 +203,13 @@ private:
     bool m_alwaysFramed = false;
     int m_padding = 0;
     QString m_layoutShape;          // applyLayout(): structure of the last layout
+    QString m_floatingShape;        // and of its floating layers
+    struct Floating
+    {
+        QString id;
+        QPointer<QWidget> frame;    // a FloatingFrame
+        QPointer<QWidget> root;     // its pane or splitter
+    };
+    QList<Floating> m_floating;     // bottom to top
     bool m_applyingLayout = false;
 };

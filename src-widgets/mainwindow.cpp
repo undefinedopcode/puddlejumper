@@ -722,6 +722,29 @@ void MainWindow::buildMenus()
         if (auto *t = currentTerminal())
             closePane(t);
     });
+#ifdef PUDDLEJUMPER_REX
+    // Rex panes can float over their window, and dock back.
+    auto *floatPaneAct = view->addAction(tr("&Float or Dock Pane"));
+    floatPaneAct->setStatusTip(tr("Float a Rex pane over its window, or dock a floating one back"));
+    connect(floatPaneAct, &QAction::triggered, this, [this]() {
+        TerminalWidget *t = currentTerminal();
+        RexSession *rex = t ? rexSessionFor(t) : nullptr;
+        if (!rex) {
+            statusBar()->showMessage(tr("Only Rex panes can float"), 3000);
+            return;
+        }
+        if (rex->isFloating(t))
+            rex->dockPane(t);
+        else
+            rex->floatPane(t);
+    });
+    connect(view, &QMenu::aboutToShow, floatPaneAct, [this, floatPaneAct]() {
+        TerminalWidget *t = currentTerminal();
+        RexSession *rex = t ? rexSessionFor(t) : nullptr;
+        floatPaneAct->setVisible(rex != nullptr);
+        floatPaneAct->setText(rex && rex->isFloating(t) ? tr("&Dock Pane") : tr("&Float Pane"));
+    });
+#endif
     auto *nextPaneAct = view->addAction(tr("Ne&xt Pane"));
     nextPaneAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+N")));
     connect(nextPaneAct, &QAction::triggered, this, [this]() {

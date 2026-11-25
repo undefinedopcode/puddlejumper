@@ -380,6 +380,7 @@ if(TARGET Qt6::WebSockets)
         src-widgets/ghosttyreplay.cpp src-widgets/ghosttyreplay.h
         src-widgets/terminalwidget.cpp src-widgets/terminalwidget.h
         src-widgets/terminaltab.cpp src-widgets/terminaltab.h
+        src-widgets/appicon.cpp src-widgets/appicon.h
         src-widgets/tab.h
         src-widgets/settings.cpp src-widgets/settings.h
         src-widgets/profiles.cpp src-widgets/profiles.h
@@ -389,7 +390,7 @@ if(TARGET Qt6::WebSockets)
         src-widgets/programstatus.cpp src-widgets/programstatus.h
         src-widgets/screenshotoverlay.cpp src-widgets/screenshotoverlay.h
     )
-    target_link_libraries(test-rexsession PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets qtermwidget)
+    target_link_libraries(test-rexsession PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::WebSockets qtermwidget)
     target_include_directories(test-rexsession PRIVATE src-widgets)
 endif()
 

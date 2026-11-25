@@ -14,6 +14,7 @@
 #include <QJsonObject>
 #include <QObject>
 #include <QPointer>
+#include <QRectF>
 #include <QSize>
 #include <QUrl>
 
@@ -48,8 +49,14 @@ struct Snapshot;
  * can be read, and closing the pane closes it. A session left with nothing
  * in it is ended rather than left behind empty.
  *
+ * A window's floating layers float over its tiled panes, each a frame placed
+ * by its bounds (proportions of the window) and stacked in the server's order,
+ * holding a layout of its own. Moving or resizing a frame, closing it, or
+ * using a pane in it (which raises it) asks the server; panes can be floated
+ * out of the tiled layout and docked back into it.
+ *
  * Detaching leaves the session running, to be attached again from any Rex
- * client. Floating layers aren't shown yet; their blocks run on unseen.
+ * client.
  */
 class RexSession : public QObject
 {
@@ -87,6 +94,12 @@ public:
     void closePane(TerminalWidget *pane);
     void closeWindow(TerminalTab *tab);
     void renameWindow(TerminalTab *tab, const QString &name);
+    /* Whether a pane is in a floating layer. */
+    bool isFloating(const TerminalWidget *pane) const;
+    /* Float a tiled pane over the window, or dock a floating one back into
+     * the tiled layout (beside the window's focused tiled pane). */
+    void floatPane(TerminalWidget *pane);
+    void dockPane(TerminalWidget *pane);
 
     /* The sessions on a server, for a menu: calls back with (id, label)
      * pairs, or an error. */
@@ -123,6 +136,14 @@ private:
         QString label;
         QPointer<TerminalTab> tab;
         QJsonObject layout;  // the tiled layer's layout tree
+        struct Layer
+        {
+            QString id;
+            QRectF bounds;       // proportions of the window
+            QJsonObject layout;
+        };
+        QList<Layer> floating;   // bottom to top
+        QString focusedBlock;
     };
 
     void attach();
@@ -141,6 +162,11 @@ private:
     void checkSize(Block *b);
     void sendTheme(Block *b);
     void splitterDragged(Window &w, TerminalWidget *before, Qt::Orientation orientation, int pixels);
+    void floatingMoved(Window &w, const QString &layerId, const QRect &frame);
+    /* A window's layout area, and its size in cells. */
+    QSize windowArea(const Window &w);
+    /* Where a floating layer's frame goes in `area`, and its layout's cells. */
+    QRect floatingFrame(const QRectF &bounds, const QSize &area, QSize *cells);
     void finish(const QString &reason);
     void endIfEmpty();
     Window *windowOf(const TerminalTab *tab);

@@ -370,13 +370,29 @@ void RexSession::applyView(const QJsonObject &view)
         w.id = str(wo, "window_id");
         w.label = str(wo, "label");
         w.layout = tiledLayout(wo);
+        w.focusedBlock = str(wo, "focused_block_id");
         for (const Window &old : std::as_const(m_windows))
             if (old.id == w.id)
                 w.tab = old.tab;
         QStringList ids;
         layoutBlocks(w.layout, ids);
+        for (const QJsonValue &lv : wo.value(QLatin1String("layers")).toArray()) {
+            const QJsonObject lo = lv.toObject();
+            if (str(lo, "kind") != QLatin1String("floating"))
+                continue;
+            const QJsonObject b = lo.value(QLatin1String("bounds")).toObject();
+            Window::Layer layer;
+            layer.id = str(lo, "layer_id");
+            layer.bounds = QRectF(b.value(QLatin1String("x")).toDouble(), b.value(QLatin1String("y")).toDouble(),
+                                  b.value(QLatin1String("w")).toDouble(), b.value(QLatin1String("h")).toDouble());
+            layer.layout = lo.value(QLatin1String("layout")).toObject();
+            const qsizetype had = ids.size();
+            layoutBlocks(layer.layout, ids);
+            if (ids.size() > had && layer.bounds.isValid())
+                w.floating << layer;
+        }
         if (ids.isEmpty())
-            continue;  // nothing tiled to show
+            continue;  // nothing to show
         for (const QString &id : std::as_const(ids))
             live.insert(id);
         next << w;
@@ -415,19 +431,50 @@ void RexSession::applyView(const QJsonObject &view)
         endIfEmpty();
 }
 
+QSize RexSession::windowArea(const Window &w)
+{
+    QSize area = w.tab && w.tab->isVisible() ? w.tab->layoutArea() : m_area;
+    if (area.isEmpty()) {
+        const QSize cell = cellSize();
+        const QSize chrome = paneChrome();
+        area = QSize(80 * cell.width() + chrome.width(), 24 * cell.height() + chrome.height());
+    }
+    return area;
+}
+
+QRect RexSession::floatingFrame(const QRectF &bounds, const QSize &area, QSize *cells)
+{
+    // The frame is as much of the bounds as whole cells fill.
+    const QSize cell = cellSize();
+    const QSize chrome = paneChrome() + TerminalTab::floatingChrome();
+    const QRect box(qRound(bounds.x() * area.width()), qRound(bounds.y() * area.height()),
+                    qRound(bounds.width() * area.width()), qRound(bounds.height() * area.height()));
+    const int columns = qMax(4, (box.width() - chrome.width()) / qMax(1, cell.width()));
+    const int lines = qMax(1, (box.height() - chrome.height()) / qMax(1, cell.height()));
+    if (cells)
+        *cells = QSize(columns, lines);
+    return QRect(box.topLeft(), QSize(columns * cell.width() + chrome.width(), lines * cell.height() + chrome.height()));
+}
+
 void RexSession::layoutWindow(Window &w)
 {
     const QSize cell = cellSize();
     const QSize chrome = paneChrome();
-    QSize area = w.tab && w.tab->isVisible() ? w.tab->layoutArea() : m_area;
-    if (area.isEmpty())
-        area = QSize(80 * cell.width() + chrome.width(), 24 * cell.height() + chrome.height());
+    const QSize area = windowArea(w);
     const int columns = qMax(10, (area.width() - chrome.width()) / qMax(1, cell.width()));
     const int lines = qMax(3, (area.height() - chrome.height()) / qMax(1, cell.height()));
 
-    const PaneLayout layout = toPaneLayout(w.layout, columns, lines, [this](const QString &id) {
-        return block(id)->paneId;
-    });
+    const auto paneId = [this](const QString &id) { return block(id)->paneId; };
+    // A window whose blocks all float has no tiled pane (-1: none).
+    PaneLayout layout;
+    if (!firstBlock(w.layout).isEmpty())
+        layout = toPaneLayout(w.layout, columns, lines, paneId);
+    QList<FloatingLayout> floating;
+    for (const Window::Layer &l : std::as_const(w.floating)) {
+        QSize cells;
+        const QRect frame = floatingFrame(l.bounds, area, &cells);
+        floating.append({l.id, frame.topLeft(), toPaneLayout(l.layout, cells.width(), cells.height(), paneId)});
+    }
 
     const bool fresh = !w.tab;
     if (fresh) {
@@ -448,6 +495,23 @@ void RexSession::layoutWindow(Window &w)
             if (Window *win = windowOf(tab))
                 splitterDragged(*win, before, orientation, pixels);
         });
+        connect(tab, &TerminalTab::floatingGeometryChanged, this,
+                [this, tab](const QString &layerId, const QRect &frame) {
+            if (Window *win = windowOf(tab))
+                floatingMoved(*win, layerId, frame);
+        });
+        connect(tab, &TerminalTab::floatingCloseRequested, this, [this](const QString &layerId) {
+            if (!m_finished)
+                m_control->request(QStringLiteral("session.close_layer"),
+                                   QJsonObject{{QStringLiteral("session_id"), m_sessionId},
+                                               {QStringLiteral("layer_id"), layerId}});
+        });
+        connect(tab, &TerminalTab::floatingRaiseRequested, this, [this](const QString &layerId) {
+            if (!m_finished)
+                m_control->request(QStringLiteral("session.raise_layer"),
+                                   QJsonObject{{QStringLiteral("session_id"), m_sessionId},
+                                               {QStringLiteral("layer_id"), layerId}});
+        });
         connect(tab, &TerminalTab::layoutAreaResized, this, [this, tab]() {
             if (!tab->isVisible())
                 return;
@@ -457,15 +521,20 @@ void RexSession::layoutWindow(Window &w)
         });
     }
 
-    w.tab->applyLayout(layout, [this](int paneId) {
+    w.tab->applyLayout(layout, [this](int paneId) -> TerminalWidget * {
+        if (paneId < 0)
+            return nullptr;
         Block *b = block(m_paneBlocks.value(paneId));
         return b->pane ? b->pane.data() : makePane(b);
-    }, cell, chrome);
+    }, cell, chrome, floating);
 
     // Each block the size its pane has; a block's stream opens once it has
     // been sized, so its snapshot comes at that size.
     QHash<int, QSize> sizes;
     collectLeaves(layout, sizes);
+    for (const FloatingLayout &f : std::as_const(floating))
+        collectLeaves(f.layout, sizes);
+    sizes.remove(-1);
     for (auto it = sizes.cbegin(); it != sizes.cend(); ++it)
         sendSize(block(m_paneBlocks.value(it.key())), it.value());
 
@@ -729,11 +798,23 @@ void RexSession::splitterDragged(Window &w, TerminalWidget *before, Qt::Orientat
     const QSize cell = cellSize();
     const QSize chrome = paneChrome();
     const bool across = orientation == Qt::Horizontal;
-    const QSize area = w.tab ? w.tab->layoutArea() : m_area;
-    const int columns = qMax(10, (area.width() - chrome.width()) / qMax(1, cell.width()));
-    const int lines = qMax(3, (area.height() - chrome.height()) / qMax(1, cell.height()));
+    const QSize area = windowArea(w);
+    int columns = qMax(10, (area.width() - chrome.width()) / qMax(1, cell.width()));
+    int lines = qMax(3, (area.height() - chrome.height()) / qMax(1, cell.height()));
+    // The layout the pane is in: the tiled one or a floating layer's.
+    QJsonObject tree = w.layout;
+    const QString layerId = w.tab ? w.tab->floatingLayerOf(before) : QString();
+    for (const Window::Layer &l : std::as_const(w.floating)) {
+        if (l.id != layerId)
+            continue;
+        QSize cells;
+        floatingFrame(l.bounds, area, &cells);
+        tree = l.layout;
+        columns = cells.width();
+        lines = cells.height();
+    }
     QList<SplitInfo> splits;
-    collectSplits(w.layout, columns, lines, across, splits);
+    collectSplits(tree, columns, lines, across, splits);
     const QString beforeId = blockId(before);
     const int unit = qMax(1, across ? cell.width() : cell.height());
     const int cells = qMax(1, qRound(double(pixels - (across ? chrome.width() : chrome.height())) / unit));
@@ -756,7 +837,93 @@ void RexSession::splitterDragged(Window &w, TerminalWidget *before, Qt::Orientat
                                    {QStringLiteral("ratio"), ratio}});
 }
 
+void RexSession::floatingMoved(Window &w, const QString &layerId, const QRect &frame)
+{
+    const QSize area = windowArea(w);
+    if (area.isEmpty() || m_finished)
+        return;
+    for (const Window::Layer &l : std::as_const(w.floating)) {
+        if (l.id != layerId)
+            continue;
+        // Moved, not resized: keep the bounds' size (the frame is only as
+        // big as whole cells fill, so measuring it would shrink the layer).
+        const QRect had = floatingFrame(l.bounds, area, nullptr);
+        double width = frame.size() == had.size() ? l.bounds.width() : double(frame.width()) / area.width();
+        double height = frame.size() == had.size() ? l.bounds.height() : double(frame.height()) / area.height();
+        width = qBound(0.05, width, 1.0);
+        height = qBound(0.05, height, 1.0);
+        const double x = qBound(0.0, double(frame.x()) / area.width(), 1.0 - width);
+        const double y = qBound(0.0, double(frame.y()) / area.height(), 1.0 - height);
+        m_control->request(QStringLiteral("session.resize_layer"),
+                           QJsonObject{{QStringLiteral("session_id"), m_sessionId},
+                                       {QStringLiteral("layer_id"), layerId},
+                                       {QStringLiteral("bounds"), QJsonObject{{QStringLiteral("x"), x},
+                                                                              {QStringLiteral("y"), y},
+                                                                              {QStringLiteral("w"), width},
+                                                                              {QStringLiteral("h"), height}}}},
+                           [this](const QJsonObject &, const QJsonObject &error) {
+                               // Refused: put the frame back where the view says.
+                               if (!error.isEmpty()) {
+                                   qCWarning(lcRex) << "resize_layer refused:" << error;
+                                   for (Window &win : m_windows)
+                                       layoutWindow(win);
+                               }
+                           });
+        return;
+    }
+}
+
 // ---- Actions. ---------------------------------------------------------------
+
+bool RexSession::isFloating(const TerminalWidget *pane) const
+{
+    for (const Window &w : m_windows)
+        if (w.tab && w.tab->contains(pane))
+            return !w.tab->floatingLayerOf(pane).isEmpty();
+    return false;
+}
+
+void RexSession::floatPane(TerminalWidget *pane)
+{
+    const QString id = blockId(pane);
+    if (id.isEmpty() || isFloating(pane))
+        return;
+    m_control->request(QStringLiteral("session.float_block"),
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId},
+                                   {QStringLiteral("block_id"), id},
+                                   {QStringLiteral("bounds"), QJsonObject{{QStringLiteral("x"), 0.2},
+                                                                          {QStringLiteral("y"), 0.15},
+                                                                          {QStringLiteral("w"), 0.6},
+                                                                          {QStringLiteral("h"), 0.6}}}});
+}
+
+void RexSession::dockPane(TerminalWidget *pane)
+{
+    const QString id = blockId(pane);
+    if (id.isEmpty() || !isFloating(pane))
+        return;
+    for (const Window &w : std::as_const(m_windows)) {
+        if (!w.tab || !w.tab->contains(pane))
+            continue;
+        // Beside the window's focused tiled block, or its first.
+        QStringList tiled;
+        layoutBlocks(w.layout, tiled);
+        if (tiled.isEmpty())
+            return;  // nothing tiled to dock beside
+        QString anchor = tiled.first();
+        for (TerminalWidget *p : w.tab->panes()) {
+            const QString bid = blockId(p);
+            if (p == w.tab->activePane() && tiled.contains(bid))
+                anchor = bid;
+        }
+        m_control->request(QStringLiteral("session.move_block"),
+                           QJsonObject{{QStringLiteral("session_id"), m_sessionId},
+                                       {QStringLiteral("block_id"), id},
+                                       {QStringLiteral("anchor_block_id"), anchor},
+                                       {QStringLiteral("direction"), QStringLiteral("horizontal")}});
+        return;
+    }
+}
 
 void RexSession::newWindow()
 {

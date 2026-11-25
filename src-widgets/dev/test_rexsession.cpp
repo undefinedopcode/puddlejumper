@@ -383,6 +383,118 @@ int main(int argc, char *argv[])
         }
     }
 
+    // ---- Floating layers: floated out, typed into, moved and resized here
+    // and elsewhere, another made elsewhere, raised, closed.
+    const auto layersOf = [&](const QString &windowLabel) {
+        QList<QPair<QString, QRectF>> out;
+        for (const QJsonValue &wv : server.view(sid).value(QLatin1String("windows")).toArray()) {
+            const QJsonObject wo = wv.toObject();
+            if (wo.value(QLatin1String("label")).toString() != windowLabel)
+                continue;
+            for (const QJsonValue &lv : wo.value(QLatin1String("layers")).toArray()) {
+                const QJsonObject lo = lv.toObject();
+                if (lo.value(QLatin1String("kind")).toString() != QLatin1String("floating"))
+                    continue;
+                const QJsonObject b = lo.value(QLatin1String("bounds")).toObject();
+                out.append({lo.value(QLatin1String("layer_id")).toString(),
+                            QRectF(b.value(QLatin1String("x")).toDouble(), b.value(QLatin1String("y")).toDouble(),
+                                   b.value(QLatin1String("w")).toDouble(), b.value(QLatin1String("h")).toDouble())});
+            }
+        }
+        return out;
+    };
+    if (second) {
+        const QString label = QStringLiteral("renamed elsewhere");
+        TerminalWidget *floater = second->panes().last();
+        c.session->floatPane(floater);
+        check(waitFor([&] { return !second->floatingLayerOf(floater).isEmpty(); }), QStringLiteral("a pane floated"));
+        check(second->panes().size() == 2 && c.session->isFloating(floater), QStringLiteral("still two panes, one floating"));
+        const QString layer = second->floatingLayerOf(floater);
+        check(layersOf(label).size() == 1 && layersOf(label).value(0).first == layer,
+              QStringLiteral("the server has the layer"));
+        const QSize floatedSize = screenSize(floater);
+        const QSize tiledSize = screenSize(second->panes().first());
+        check(tiledSize.width() > floatedSize.width(), QStringLiteral("the tiled pane has the window back (%1 > %2)")
+                                                           .arg(tiledSize.width()).arg(floatedSize.width()));
+        type(floater, QStringLiteral("echo FLOAT_OK\r"));
+        check(waitFor([&] { return shows(floater, QStringLiteral("FLOAT_OK")); }), QStringLiteral("floating pane typed into"));
+        agrees(server, c, QStringLiteral("floated"));
+
+        // Resized elsewhere.
+        server.call(QStringLiteral("session.resize_layer"),
+                    QJsonObject{{QStringLiteral("session_id"), sid}, {QStringLiteral("layer_id"), layer},
+                                {QStringLiteral("bounds"), QJsonObject{{QStringLiteral("x"), 0.0}, {QStringLiteral("y"), 0.0},
+                                                                       {QStringLiteral("w"), 0.5}, {QStringLiteral("h"), 0.5}}}});
+        check(waitFor([&] { return screenSize(floater).width() < floatedSize.width(); }),
+              QStringLiteral("a layer resized elsewhere is followed"));
+        agrees(server, c, QStringLiteral("layer resized elsewhere"));
+
+        // Moved here (as dragging its title does): the server's bounds follow,
+        // the size kept.
+        QWidget *frame = floater;
+        while (frame && frame->parentWidget() != second)
+            frame = frame->parentWidget();
+        const QSize frameSize = frame ? frame->size() : QSize();
+        emit second->floatingGeometryChanged(layer, QRect(QPoint(second->layoutArea().width() / 4,
+                                                                 second->layoutArea().height() / 4),
+                                                          frameSize));
+        check(waitFor([&] {
+                  const QRectF b = layersOf(label).value(0).second;
+                  return qAbs(b.x() - 0.25) < 0.02 && qAbs(b.y() - 0.25) < 0.02;
+              }), QStringLiteral("moved here: the server's bounds follow"));
+        const QRectF moved = layersOf(label).value(0).second;
+        check(moved.width() == 0.5 && moved.height() == 0.5,
+              QStringLiteral("moved, not resized: size kept (%1 x %2)").arg(moved.width()).arg(moved.height()));
+        QPoint at;
+        check(frame && waitFor([&] {
+                  at = frame->geometry().topLeft() - second->layoutRect().topLeft();
+                  const QPoint want(second->layoutArea().width() / 4, second->layoutArea().height() / 4);
+                  return (at - want).manhattanLength() <= 2;
+              }), QStringLiteral("the frame where the server put it (%1,%2)").arg(at.x()).arg(at.y()));
+
+        // Resized here (as dragging its border does).
+        emit second->floatingGeometryChanged(layer, QRect(frame->geometry().topLeft() - second->layoutRect().topLeft(),
+                                                          frameSize + QSize(120, 60)));
+        check(waitFor([&] { return layersOf(label).value(0).second.width() > 0.55; }),
+              QStringLiteral("resized here: the server's bounds follow"));
+        agrees(server, c, QStringLiteral("layer resized here"));
+        check(shows(floater, QStringLiteral("FLOAT_OK")) || paneLines(floater).join(QString()).contains(QLatin1Char('$')),
+              QStringLiteral("resized here: still shows its shell"));
+        agrees(server, c, QStringLiteral("layer moved here"));
+
+        // Another layer made elsewhere; then the first raised by using it.
+        const QJsonArray windows = server.view(sid).value(QLatin1String("windows")).toArray();
+        QString windowId;
+        for (const QJsonValue &wv : windows)
+            if (wv.toObject().value(QLatin1String("label")).toString() == label)
+                windowId = wv.toObject().value(QLatin1String("window_id")).toString();
+        server.call(QStringLiteral("session.new_layer"),
+                    QJsonObject{{QStringLiteral("session_id"), sid}, {QStringLiteral("window_id"), windowId},
+                                {QStringLiteral("bounds"), QJsonObject{{QStringLiteral("x"), 0.5}, {QStringLiteral("y"), 0.5},
+                                                                       {QStringLiteral("w"), 0.45}, {QStringLiteral("h"), 0.45}}},
+                                {QStringLiteral("layout"), QJsonObject{{QStringLiteral("block"),
+                                    QJsonObject{{QStringLiteral("flavor"), QStringLiteral("com.superlogical.terminal.shell")}}}}}});
+        check(waitFor([&] { return second->panes().size() == 3; }), QStringLiteral("a layer made elsewhere is shown"));
+        agrees(server, c, QStringLiteral("layer made elsewhere"));
+        check(layersOf(label).size() == 2 && layersOf(label).last().first != layer, QStringLiteral("the new layer on top"));
+        // PJ_REX_SHOT=file.png: the tab with its two layers, to look at.
+        if (const QByteArray shot = qgetenv("PJ_REX_SHOT"); !shot.isEmpty()) {
+            QThread::msleep(300);
+            QCoreApplication::processEvents();
+            second->grab().save(QString::fromLocal8Bit(shot));
+        }
+        second->setActivePane(floater);
+        check(waitFor([&] { return layersOf(label).size() == 2 && layersOf(label).last().first == layer; }),
+              QStringLiteral("using a pane raises its layer"));
+
+        // The other closed from its frame.
+        const QString other = layersOf(label).value(0).first;
+        emit second->floatingCloseRequested(other);
+        check(waitFor([&] { return second->panes().size() == 2 && layersOf(label).size() == 1; }),
+              QStringLiteral("a layer closed"));
+        agrees(server, c, QStringLiteral("layer closed"));
+    }
+
     // ---- Detached and attached again: the same windows, splits, history.
     const int panesBefore = int(c.panes().size());
     c.session->detach();
@@ -396,6 +508,35 @@ int main(int argc, char *argv[])
     check(c.names.value(c.tabs.value(1)) == QLatin1String("renamed elsewhere"), QStringLiteral("names back"));
     check(waitFor([&] { return shows(c.panes().value(0), QStringLiteral("one 1")); }), QStringLiteral("history back"));
     agrees(server, c, QStringLiteral("attached again"));
+    {
+        TerminalTab *again = c.tabs.value(1);
+        TerminalWidget *floater = nullptr;
+        for (TerminalWidget *p : again ? again->panes() : QList<TerminalWidget *>())
+            if (c.session->isFloating(p))
+                floater = p;
+        if (check(floater != nullptr, QStringLiteral("attached again: still floating"))) {
+            c.session->dockPane(floater);
+            check(waitFor([&] { return !c.session->isFloating(floater) && again->panes().size() == 2; }),
+                  QStringLiteral("docked back into the tiled layout"));
+            check(layersOf(QStringLiteral("renamed elsewhere")).isEmpty(), QStringLiteral("no floating layer left"));
+            agrees(server, c, QStringLiteral("docked"));
+        }
+    }
+    // A window whose only pane floats: still a tab, nothing tiled, and not
+    // rebuilt on every change.
+    if (TerminalTab *only = c.tabs.value(0); only && only->panes().size() == 1) {
+        TerminalWidget *pane = only->panes().first();
+        c.session->floatPane(pane);
+        check(waitFor([&] { return c.session->isFloating(pane); }), QStringLiteral("the only pane floated"));
+        check(c.tabs.size() == 2 && only->panes() == QList<TerminalWidget *>{pane},
+              QStringLiteral("its tab stays, the same pane"));
+        agrees(server, c, QStringLiteral("only pane floating"));
+        QPointer<QWidget> holder = pane->parentWidget();
+        c.session->renameWindow(only, QStringLiteral("all floating"));
+        check(waitFor([&] { return c.names.value(only) == QLatin1String("all floating"); }),
+              QStringLiteral("a change to the window"));
+        check(holder && pane->parentWidget() == holder, QStringLiteral("not rebuilt for it"));
+    }
 
     // ---- Closing a window.
     c.session->closeWindow(c.tabs.value(1));
