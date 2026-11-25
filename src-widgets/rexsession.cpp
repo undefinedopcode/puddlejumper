@@ -361,7 +361,9 @@ void RexSession::applyView(const QJsonObject &view)
     m_revision = revision;
 
     const QString label = str(view, "label");
+    const QString oldLabel = m_label;
     m_label = label.isEmpty() ? shortId(m_sessionId) : label;
+    m_activeWindow = str(view, "active_window_id");
 
     // Windows in the server's order, each with the blocks of its tiled layout.
     QList<Window> next;
@@ -432,6 +434,8 @@ void RexSession::applyView(const QJsonObject &view)
     }
     if (m_windows.isEmpty())
         endIfEmpty();
+    else if (!oldLabel.isEmpty() && oldLabel != m_label)
+        emit labelChanged(m_label);
 }
 
 QSize RexSession::windowArea(const Window &w)
@@ -928,6 +932,46 @@ bool RexSession::isZoomed(const TerminalTab *tab) const
 {
     const Window *w = windowOf(tab);
     return w && !w->zoomedBlock.isEmpty();
+}
+
+void RexSession::movePane(TerminalWidget *pane, TerminalTab *to)
+{
+    const QString id = blockId(pane);
+    const Window *w = windowOf(to);
+    if (id.isEmpty() || !w || m_finished || (w->tab && w->tab->contains(pane)))
+        return;
+    QStringList tiled;
+    layoutBlocks(w->layout, tiled);
+    if (tiled.isEmpty())
+        return;
+    const QString anchor = tiled.contains(w->focusedBlock) ? w->focusedBlock : tiled.first();
+    m_control->request(QStringLiteral("session.move_block"),
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId},
+                                   {QStringLiteral("block_id"), id},
+                                   {QStringLiteral("anchor_block_id"), anchor},
+                                   {QStringLiteral("direction"), QStringLiteral("horizontal")}},
+                       [](const QJsonObject &, const QJsonObject &error) {
+                           if (!error.isEmpty())
+                               qCWarning(lcRex) << "move refused:" << error;
+                       });
+}
+
+void RexSession::renameSession(const QString &name)
+{
+    if (m_finished)
+        return;
+    m_control->request(QStringLiteral("session.set_label"),
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId}, {QStringLiteral("label"), name}});
+}
+
+void RexSession::windowShown(TerminalTab *tab)
+{
+    const Window *w = windowOf(tab);
+    if (!w || m_finished || w->id == m_activeWindow)
+        return;
+    m_activeWindow = w->id;  // asked; the view will say
+    m_control->request(QStringLiteral("session.focus_window"),
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId}, {QStringLiteral("window_id"), w->id}});
 }
 
 bool RexSession::isFloating(const TerminalWidget *pane) const

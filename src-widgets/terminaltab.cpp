@@ -13,6 +13,7 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
+#include <QTimer>
 #include <QToolButton>
 #include <QJsonArray>
 #include <QPainter>
@@ -585,8 +586,9 @@ void TerminalTab::setActivePane(TerminalWidget *pane, bool giveFocus)
         pane->focusTerminal();
     if (changed)
         emit activePaneChanged(pane);
-    // A floating layer comes to the top when one of its panes is used.
-    if (changed && pane && !m_applyingLayout) {
+    // A floating layer comes to the top when one of its panes is used
+    // (even if it was the active pane already).
+    if (pane && !m_applyingLayout && !m_floating.isEmpty()) {
         const QString layer = floatingLayerOf(pane);
         if (!layer.isEmpty() && m_floating.last().id != layer) {
             for (const Floating &f : std::as_const(m_floating))
@@ -914,9 +916,16 @@ void TerminalTab::applyLayout(const PaneLayout &layout,
                     watchPane(pane);
             }
         }
+        // Panes no longer here go, unless another tab takes them meanwhile
+        // (a pane moved between windows is laid out there in the same turn).
         for (TerminalWidget *pane : before) {
-            if (!used.contains(pane) && !parked.contains(pane))
-                pane->deleteLater();
+            if (!used.contains(pane) && !parked.contains(pane)) {
+                pane->hide();
+                QTimer::singleShot(0, pane, [pane]() {
+                    if (!pane->parentWidget())
+                        pane->deleteLater();
+                });
+            }
         }
         for (TerminalWidget *pane : used) {
             pane->show();

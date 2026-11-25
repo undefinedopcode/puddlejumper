@@ -94,12 +94,20 @@ public:
     void closePane(TerminalWidget *pane);
     void closeWindow(TerminalTab *tab);
     void renameWindow(TerminalTab *tab, const QString &name);
+    /* Rename the session itself (its label). */
+    void renameSession(const QString &name);
+    /* A window's tab was brought to the front here: the server's active
+     * window follows, so other clients see the same one. */
+    void windowShown(TerminalTab *tab);
     /* Whether a pane is in a floating layer. */
     bool isFloating(const TerminalWidget *pane) const;
     /* Float a tiled pane over the window, or dock a floating one back into
      * the tiled layout (beside the window's focused tiled pane). */
     void floatPane(TerminalWidget *pane);
     void dockPane(TerminalWidget *pane);
+    /* Move a pane into another of the session's windows, beside its focused
+     * tiled pane. A window left empty goes. */
+    void movePane(TerminalWidget *pane, TerminalTab *to);
     /* Zoom a pane to fill its window (the others hidden), or back. */
     void toggleZoom(TerminalWidget *pane);
     bool isZoomed(const TerminalTab *tab) const;
@@ -113,6 +121,8 @@ signals:
     /* A window appeared; the receiver shows `tab`. */
     void tabAdded(TerminalTab *tab, const QString &name);
     void tabRenamed(TerminalTab *tab, const QString &name);
+    /* The session's label changed (here or elsewhere). */
+    void labelChanged(const QString &label);
     /* A window went; the receiver takes the tab away and deletes it. */
     void tabRemoved(TerminalTab *tab);
     /* Gone: detached, destroyed, emptied, or the connection lost for good.
@@ -182,6 +192,7 @@ private:
     QUrl m_server;
     QString m_sessionId;
     QString m_label;
+    QString m_activeWindow;  // the server's active window
     const Settings &m_settings;
     TerminalProfile m_profile;
     RexControl *m_control = nullptr;

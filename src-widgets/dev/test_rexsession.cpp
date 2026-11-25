@@ -348,6 +348,36 @@ int main(int argc, char *argv[])
         agrees(server, c, QStringLiteral("split elsewhere"));
     }
 
+    // ---- The session renamed, here and elsewhere; the active window.
+    {
+        QString told;
+        QObject::connect(c.session, &RexSession::labelChanged, [&](const QString &l) { told = l; });
+        c.session->renameSession(QStringLiteral("named here"));
+        check(waitFor([&] { return server.view(sid).value(QLatin1String("label")).toString() == QLatin1String("named here"); }),
+              QStringLiteral("renamed here: the server has it"));
+        check(waitFor([&] { return told == QLatin1String("named here") && c.session->label() == told; }),
+              QStringLiteral("and labelChanged told"));
+        server.call(QStringLiteral("session.set_label"),
+                    QJsonObject{{QStringLiteral("session_id"), sid}, {QStringLiteral("label"), QStringLiteral("named elsewhere")}});
+        check(waitFor([&] { return told == QLatin1String("named elsewhere") && c.session->label() == told; }),
+              QStringLiteral("renamed elsewhere: followed"));
+
+        const auto activeLabel = [&] {
+            const QJsonObject v = server.view(sid);
+            const QString active = v.value(QLatin1String("active_window_id")).toString();
+            for (const QJsonValue &wv : v.value(QLatin1String("windows")).toArray())
+                if (wv.toObject().value(QLatin1String("window_id")).toString() == active)
+                    return wv.toObject().value(QLatin1String("label")).toString();
+            return QString();
+        };
+        c.session->windowShown(c.tabs.value(0));
+        check(waitFor([&] { return activeLabel() == c.names.value(c.tabs.value(0)); }),
+              QStringLiteral("the first tab shown: the server's active window"));
+        c.session->windowShown(second);
+        check(waitFor([&] { return activeLabel() == QLatin1String("renamed elsewhere"); }),
+              QStringLiteral("the second tab shown: active again"));
+    }
+
     // ---- Closing a pane, and a shell exiting in a split.
     if (second) {
         TerminalWidget *victim = second->panes().last();
@@ -424,6 +454,23 @@ int main(int argc, char *argv[])
                                 {QStringLiteral("block_id"), hiddenBlock}, {QStringLiteral("zoom"), false}});
         check(waitFor([&] { return second->panes() == two; }), QStringLiteral("and unzoomed elsewhere"));
         agrees(server, c, QStringLiteral("unzoomed elsewhere"));
+    }
+
+    // ---- A pane moved to another window, and back.
+    if (second && second->panes().size() == 2 && c.tabs.value(0)) {
+        TerminalTab *firstTab = c.tabs.value(0);
+        TerminalWidget *mover = second->panes().last();
+        const QString moverBlock = c.session->blockId(mover);
+        c.session->movePane(mover, firstTab);
+        check(waitFor([&] { return firstTab->panes().size() == 2 && second->panes().size() == 1; }),
+              QStringLiteral("moved to the first window"));
+        TerminalWidget *there = c.session->paneForBlock(moverBlock);
+        check(there && firstTab->contains(there), QStringLiteral("its block in the first tab"));
+        agrees(server, c, QStringLiteral("moved between windows"));
+        c.session->movePane(there, second);
+        check(waitFor([&] { return firstTab->panes().size() == 1 && second->panes().size() == 2; }),
+              QStringLiteral("and back"));
+        agrees(server, c, QStringLiteral("moved back"));
     }
 
     // ---- Floating layers: floated out, typed into, moved and resized here

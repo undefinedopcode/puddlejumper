@@ -434,6 +434,10 @@ void MainWindow::onCurrentTabChanged(int index)
         // sees the same one.
         if (auto *session = tmuxSessionFor(tab))
             session->selectWindow(qobject_cast<TerminalTab *>(tab));
+#ifdef PUDDLEJUMPER_REX
+        if (auto *rex = rexSessionFor(tab))
+            rex->windowShown(qobject_cast<TerminalTab *>(tab));
+#endif
         // Selecting a tab counts as having seen its output, and what a
         // notification said about it.
         m_notifier->withdraw(notificationKey(tab));
@@ -748,6 +752,28 @@ void MainWindow::buildMenus()
             rex->toggleZoom(t);
         else
             statusBar()->showMessage(tr("Only Rex panes can zoom"), 3000);
+    });
+    // Into another of the session's windows: filled as the menu opens.
+    auto *movePaneMenu = view->addMenu(tr("&Move Pane to Window"));
+    connect(view, &QMenu::aboutToShow, movePaneMenu, [this, movePaneMenu]() {
+        movePaneMenu->clear();
+        TerminalWidget *t = currentTerminal();
+        RexSession *rex = t ? rexSessionFor(t) : nullptr;
+        movePaneMenu->menuAction()->setVisible(rex != nullptr);
+        if (!rex)
+            return;
+        QPointer<RexSession> session(rex);
+        QPointer<TerminalWidget> pane(t);
+        for (TerminalTab *tab : rex->tabs()) {
+            if (tab->contains(t))
+                continue;
+            QPointer<TerminalTab> to(tab);
+            movePaneMenu->addAction(rex->windowName(tab), this, [session, pane, to]() {
+                if (session && pane && to)
+                    session->movePane(pane, to);
+            });
+        }
+        movePaneMenu->setEnabled(!movePaneMenu->isEmpty());
     });
     connect(view, &QMenu::aboutToShow, zoomPaneAct, [this, zoomPaneAct]() {
         TerminalWidget *t = currentTerminal();
@@ -1690,6 +1716,15 @@ void MainWindow::rebuildServersMenu()
             if (session)
                 session->detach();
         });
+        m_serversMenu->addAction(tr("Re&name Rex Session “%1”…").arg(rex->label()), this, [this, session]() {
+            if (!session)
+                return;
+            bool ok = false;
+            const QString name = QInputDialog::getText(this, tr("Rename Rex Session"), tr("Session name:"),
+                                                       QLineEdit::Normal, session->label(), &ok).trimmed();
+            if (ok && !name.isEmpty() && session)
+                session->renameSession(name);
+        });
         m_serversMenu->addAction(tr("&End Rex Session “%1”…").arg(rex->label()), this, [this, session]() {
             if (!session)
                 return;
@@ -1989,6 +2024,15 @@ void MainWindow::openRex(const QUrl &server, const QString &sessionId, const QSt
     });
     connect(session, &RexSession::tabRenamed, this, [this](TerminalTab *tab, const QString &) {
         syncTabText(tab);
+    });
+    // The session's name is in every one of its tabs' text and pill.
+    connect(session, &RexSession::labelChanged, this, [this, session]() {
+        for (TerminalTab *tab : session->tabs()) {
+            syncTabText(tab);
+            const int index = m_tabs->indexOf(tab);
+            if (index >= 0)
+                updateCardDetails(index);
+        }
     });
     connect(session, &RexSession::tabRemoved, this, &MainWindow::removeTab);
     connect(session, &RexSession::ended, this, [this, session, shownAny, quiet](const QString &reason) {
