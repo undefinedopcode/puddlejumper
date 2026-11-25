@@ -92,7 +92,8 @@ public:
     void applyLayout(const PaneLayout &layout,
                      const std::function<TerminalWidget *(int paneId)> &paneFor,
                      const QSize &cell, const QSize &chrome,
-                     const QList<FloatingLayout> &floating = {});
+                     const QList<FloatingLayout> &floating = {},
+                     const QList<int> &hidden = {});
 
     /* A floating frame's pixels round its layout: border and title strip. */
     static QSize floatingChrome();
@@ -211,5 +212,8 @@ private:
         QPointer<QWidget> root;     // its pane or splitter
     };
     QList<Floating> m_floating;     // bottom to top
+    // applyLayout()'s hidden panes: kept (output still arrives) but not laid
+    // out, nor among panes(); a zoomed window's others.
+    QList<QPointer<TerminalWidget>> m_parked;
     bool m_applyingLayout = false;
 };

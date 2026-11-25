@@ -738,6 +738,23 @@ void MainWindow::buildMenus()
         else
             rex->floatPane(t);
     });
+    auto *zoomPaneAct = view->addAction(tr("&Zoom Pane"));
+    zoomPaneAct->setCheckable(true);
+    zoomPaneAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+Z")));
+    zoomPaneAct->setStatusTip(tr("Let a Rex pane fill its window, or put the others back"));
+    connect(zoomPaneAct, &QAction::triggered, this, [this]() {
+        TerminalWidget *t = currentTerminal();
+        if (RexSession *rex = t ? rexSessionFor(t) : nullptr)
+            rex->toggleZoom(t);
+        else
+            statusBar()->showMessage(tr("Only Rex panes can zoom"), 3000);
+    });
+    connect(view, &QMenu::aboutToShow, zoomPaneAct, [this, zoomPaneAct]() {
+        TerminalWidget *t = currentTerminal();
+        RexSession *rex = t ? rexSessionFor(t) : nullptr;
+        zoomPaneAct->setVisible(rex != nullptr);
+        zoomPaneAct->setChecked(rex && rex->isZoomed(currentTab()));
+    });
     connect(view, &QMenu::aboutToShow, floatPaneAct, [this, floatPaneAct]() {
         TerminalWidget *t = currentTerminal();
         RexSession *rex = t ? rexSessionFor(t) : nullptr;

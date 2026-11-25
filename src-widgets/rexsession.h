@@ -100,6 +100,9 @@ public:
      * the tiled layout (beside the window's focused tiled pane). */
     void floatPane(TerminalWidget *pane);
     void dockPane(TerminalWidget *pane);
+    /* Zoom a pane to fill its window (the others hidden), or back. */
+    void toggleZoom(TerminalWidget *pane);
+    bool isZoomed(const TerminalTab *tab) const;
 
     /* The sessions on a server, for a menu: calls back with (id, label)
      * pairs, or an error. */
@@ -144,6 +147,7 @@ private:
         };
         QList<Layer> floating;   // bottom to top
         QString focusedBlock;
+        QString zoomedBlock;     // filling the window, the rest hidden
     };
 
     void attach();
@@ -192,4 +196,5 @@ private:
     QSize m_area;  // the last tab area seen, for windows not yet shown
     bool m_attached = false;
     bool m_finished = false;
+    bool m_followingFocus = false;  // taking the server's focus: not sent back
 };

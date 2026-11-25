@@ -848,7 +848,8 @@ void TerminalTab::sizeLayout(QWidget *node, const PaneLayout &layout,
 void TerminalTab::applyLayout(const PaneLayout &layout,
                               const std::function<TerminalWidget *(int)> &paneFor,
                               const QSize &cell, const QSize &chrome,
-                              const QList<FloatingLayout> &floating)
+                              const QList<FloatingLayout> &floating,
+                              const QList<int> &hidden)
 {
     m_applyingLayout = true;
 
@@ -856,13 +857,19 @@ void TerminalTab::applyLayout(const PaneLayout &layout,
     QString floatingShape;
     for (const FloatingLayout &f : floating)
         floatingShape += f.id + QLatin1Char(':') + layoutShape(f.layout) + QLatin1Char(';');
+    for (int id : hidden)
+        floatingShape += QStringLiteral("h%1;").arg(id);
     // (No tiled root is right when every pane floats: paneId -1.)
     const bool rootMissing = !m_root && !(layout.isLeaf() && layout.paneId < 0);
     if (shape != m_layoutShape || floatingShape != m_floatingShape || rootMissing) {
         // A different arrangement: rebuild the splitters and floating layers
         // together (a pane can move between them). Panes that stay are lifted
         // out first so deleting the old splitters doesn't take them.
-        const QList<TerminalWidget *> before = panes();
+        QList<TerminalWidget *> before = panes();
+        for (const QPointer<TerminalWidget> &p : std::as_const(m_parked))
+            if (p && !before.contains(p.data()))
+                before << p.data();
+        m_parked.clear();
         TerminalWidget *focused = paneContaining(QApplication::focusWidget());
         for (TerminalWidget *pane : before)
             pane->setParent(nullptr);
@@ -896,8 +903,19 @@ void TerminalTab::applyLayout(const PaneLayout &layout,
         }
         for (FloatingFrame *frame : std::as_const(frames))
             frame->deleteLater();
+        QList<TerminalWidget *> parked;
+        for (int id : hidden) {
+            if (TerminalWidget *pane = paneFor(id); pane && !used.contains(pane)) {
+                pane->setParent(this);
+                pane->hide();
+                parked << pane;
+                m_parked << pane;
+                if (!before.contains(pane))
+                    watchPane(pane);
+            }
+        }
         for (TerminalWidget *pane : before) {
-            if (!used.contains(pane))
+            if (!used.contains(pane) && !parked.contains(pane))
                 pane->deleteLater();
         }
         for (TerminalWidget *pane : used) {

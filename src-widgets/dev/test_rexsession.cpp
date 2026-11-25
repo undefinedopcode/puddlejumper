@@ -383,6 +383,49 @@ int main(int argc, char *argv[])
         }
     }
 
+    // ---- Zoom: one pane fills the window, the others kept hidden (still
+    // fed), then back; and zoomed from another client.
+    if (second && second->panes().size() == 2) {
+        const QList<TerminalWidget *> two = second->panes();
+        const QSize unzoomed = screenSize(two.last());
+        c.session->toggleZoom(two.last());
+        check(waitFor([&] { return c.session->isZoomed(second) && second->panes().size() == 1; }),
+              QStringLiteral("zoomed: one pane shown (zoomed %1, %2 panes, server %3)")
+                  .arg(c.session->isZoomed(second)).arg(second->panes().size())
+                  .arg(QString::fromUtf8(QJsonDocument(server.view(sid)).toJson(QJsonDocument::Compact)).contains(QLatin1String("zoomed_block_id"))));
+        const QSize zoomed = screenSize(two.last());
+        check(second->panes().value(0) == two.last()
+                  && zoomed.width() * zoomed.height() > unzoomed.width() * unzoomed.height()
+                  && zoomed.width() >= unzoomed.width() && zoomed.height() >= unzoomed.height(),
+              QStringLiteral("the zoomed pane fills the window (%1x%2, was %3x%4)")
+                  .arg(zoomed.width()).arg(zoomed.height()).arg(unzoomed.width()).arg(unzoomed.height()));
+        agrees(server, c, QStringLiteral("zoomed"));
+        type(two.last(), QStringLiteral("echo ZOOMED_IN\r"));
+        check(waitFor([&] { return shows(two.last(), QStringLiteral("ZOOMED_IN")); }), QStringLiteral("typed into, zoomed"));
+        // The hidden pane is kept, and still gets its output.
+        const QString hiddenBlock = c.session->blockId(two.first());
+        check(c.session->paneForBlock(hiddenBlock) == two.first(), QStringLiteral("the hidden pane kept"));
+        server.blockCall(sid, hiddenBlock, QStringLiteral("com.superlogical.terminal.write"),
+                         QJsonObject{{QStringLiteral("data"), QStringLiteral("echo WHILE_HIDDEN\r")}});
+        check(waitFor([&] { return shows(two.first(), QStringLiteral("WHILE_HIDDEN")); }),
+              QStringLiteral("a hidden pane still fed"));
+        c.session->toggleZoom(two.last());
+        check(waitFor([&] { return !c.session->isZoomed(second) && second->panes() == two; }),
+              QStringLiteral("unzoomed: both back, the same panes"));
+        agrees(server, c, QStringLiteral("unzoomed"));
+
+        server.call(QStringLiteral("session.zoom_block"),
+                    QJsonObject{{QStringLiteral("session_id"), sid},
+                                {QStringLiteral("block_id"), hiddenBlock}, {QStringLiteral("zoom"), true}});
+        check(waitFor([&] { return second->panes() == QList<TerminalWidget *>{two.first()}; }),
+              QStringLiteral("zoomed elsewhere is followed"));
+        server.call(QStringLiteral("session.zoom_block"),
+                    QJsonObject{{QStringLiteral("session_id"), sid},
+                                {QStringLiteral("block_id"), hiddenBlock}, {QStringLiteral("zoom"), false}});
+        check(waitFor([&] { return second->panes() == two; }), QStringLiteral("and unzoomed elsewhere"));
+        agrees(server, c, QStringLiteral("unzoomed elsewhere"));
+    }
+
     // ---- Floating layers: floated out, typed into, moved and resized here
     // and elsewhere, another made elsewhere, raised, closed.
     const auto layersOf = [&](const QString &windowLabel) {

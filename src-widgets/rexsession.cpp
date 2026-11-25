@@ -6,6 +6,8 @@
 
 #include "rexsession.h"
 
+#include <QApplication>
+
 #include "ghosttyreplay.h"
 #include "rexclient.h"
 #include "settings.h"
@@ -371,6 +373,7 @@ void RexSession::applyView(const QJsonObject &view)
         w.label = str(wo, "label");
         w.layout = tiledLayout(wo);
         w.focusedBlock = str(wo, "focused_block_id");
+        w.zoomedBlock = str(wo, "zoomed_block_id");
         for (const Window &old : std::as_const(m_windows))
             if (old.id == w.id)
                 w.tab = old.tab;
@@ -475,6 +478,25 @@ void RexSession::layoutWindow(Window &w)
         const QRect frame = floatingFrame(l.bounds, area, &cells);
         floating.append({l.id, frame.topLeft(), toPaneLayout(l.layout, cells.width(), cells.height(), paneId)});
     }
+    // Zoomed: that block fills the window; the others are kept, hidden, at
+    // the sizes they had.
+    QList<int> hidden;
+    if (!w.zoomedBlock.isEmpty() && m_blocks.count(w.zoomedBlock)) {
+        QStringList all;
+        layoutBlocks(w.layout, all);
+        for (const Window::Layer &l : std::as_const(w.floating))
+            layoutBlocks(l.layout, all);
+        if (all.contains(w.zoomedBlock)) {
+            for (const QString &id : std::as_const(all))
+                if (id != w.zoomedBlock)
+                    hidden << block(id)->paneId;
+            layout = PaneLayout();
+            layout.paneId = block(w.zoomedBlock)->paneId;
+            layout.columns = columns;
+            layout.lines = lines;
+            floating.clear();
+        }
+    }
 
     const bool fresh = !w.tab;
     if (fresh) {
@@ -483,8 +505,11 @@ void RexSession::layoutWindow(Window &w)
         w.tab->setPadding(m_settings.appearance().terminalMargin);
         TerminalTab *tab = w.tab;
         // The pane with the focus here is the focused block on the server.
-        connect(tab, &TerminalTab::activePaneChanged, this, [this](TerminalWidget *pane) {
+        connect(tab, &TerminalTab::activePaneChanged, this, [this, tab](TerminalWidget *pane) {
             const QString id = blockId(pane);
+            const Window *win = windowOf(tab);
+            if (m_followingFocus || (win && win->focusedBlock == id))
+                return;  // the server's already
             if (!id.isEmpty() && !m_finished)
                 m_control->request(QStringLiteral("session.focus_block"),
                                    QJsonObject{{QStringLiteral("session_id"), m_sessionId},
@@ -526,7 +551,18 @@ void RexSession::layoutWindow(Window &w)
             return nullptr;
         Block *b = block(m_paneBlocks.value(paneId));
         return b->pane ? b->pane.data() : makePane(b);
-    }, cell, chrome, floating);
+    }, cell, chrome, floating, hidden);
+
+    // The server's focused block is the active pane here too (it decides
+    // which pane a zoom shows, and focusing another ends a zoom). Keyboard
+    // focus moves with it only if it was in this tab already.
+    if (Block *fb = w.focusedBlock.isEmpty() || !m_blocks.count(w.focusedBlock) ? nullptr : block(w.focusedBlock);
+        fb && fb->pane && w.tab->panes().contains(fb->pane.data()) && w.tab->activePane() != fb->pane) {
+        const bool hadFocus = w.tab->isAncestorOf(QApplication::focusWidget());
+        m_followingFocus = true;
+        w.tab->setActivePane(fb->pane, hadFocus);
+        m_followingFocus = false;
+    }
 
     // Each block the size its pane has; a block's stream opens once it has
     // been sized, so its snapshot comes at that size.
@@ -874,6 +910,25 @@ void RexSession::floatingMoved(Window &w, const QString &layerId, const QRect &f
 }
 
 // ---- Actions. ---------------------------------------------------------------
+
+void RexSession::toggleZoom(TerminalWidget *pane)
+{
+    const QString id = blockId(pane);
+    if (id.isEmpty() || m_finished)
+        return;
+    m_control->request(QStringLiteral("session.zoom_block"),
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId}, {QStringLiteral("block_id"), id}},
+                       [](const QJsonObject &, const QJsonObject &error) {
+                           if (!error.isEmpty())
+                               qCWarning(lcRex) << "zoom refused:" << error;
+                       });
+}
+
+bool RexSession::isZoomed(const TerminalTab *tab) const
+{
+    const Window *w = windowOf(tab);
+    return w && !w->zoomedBlock.isEmpty();
+}
 
 bool RexSession::isFloating(const TerminalWidget *pane) const
 {
