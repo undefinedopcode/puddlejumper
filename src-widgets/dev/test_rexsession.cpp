@@ -25,7 +25,8 @@
  *   ./build/test-rexsession http://127.0.0.1:51499
  * The actions tests want a configuration with test actions (and skip
  * them without), and reload it, so it should be a copy somewhere temporary:
- *   atlantis --config /tmp/x/keys.lua ...   (keys.lua: see keymapTests)
+ *   cp src-widgets/dev/rex-test-keys.lua /tmp/x/keys.lua
+ *   atlantis --config /tmp/x/keys.lua ...
  * atlantis reloads only for its local socket, or SIGHUP: give its PID in
  * PUDDLEJUMPER_TEST_REX_PID to test that.
  */
@@ -287,20 +288,8 @@ void type(TerminalWidget *pane, const QString &text)
 } // namespace
 
 /*
- * Keymaps and actions. With a configuration like this (the server's
- * --config), all of it; without, the keymap only:
- *
- *   rex.action{name = 'hello', run = function(ctx) return 'hi ' .. ctx.client_id end}
- *   rex.action{name = 'ask', run = function(ctx)
- *     local t, err = rex.ui.input{title = 'Your name?'}; return t or err end}
- *   rex.action{name = 'choose', run = function(ctx)
- *     local r, err = rex.ui.pick{title = 'Which?', items = {{id = 'a'}, {id = 'b'}}}
- *     return r or err end}
- *   rex.action{name = 'via_client', run = function(ctx)
- *     return rex.perform('client.tab.new', {why = 'test'}) end}
- *   rex.bind('ctrl+shift+h', 'hello')
- *   rex.bind('ctrl+a>c', 'hello')
- *   rex.unbind('ctrl+shift+t')
+ * Keymaps and actions. With dev/rex-test-keys.lua as the server's
+ * configuration, all of it; without, the keymap only.
  */
 void keymapTests(Server &server, Client &c)
 {
