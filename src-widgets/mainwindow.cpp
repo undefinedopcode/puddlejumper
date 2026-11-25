@@ -30,6 +30,9 @@
 #include "webtab.h"
 #endif
 #include "wsl.h"
+#ifdef PUDDLEJUMPER_REX
+#include "rexsession.h"
+#endif
 
 #include <QAction>
 #include <QActionGroup>
@@ -510,6 +513,11 @@ void MainWindow::buildMenus()
         settings.setValue(QStringLiteral("vnc/lastAddress"), text.trimmed());
         openVnc(text);
     });
+#ifdef PUDDLEJUMPER_REX
+    // A session on a Rex server.
+    auto *rexAct = file->addAction(tr("New Re&x Tab…"));
+    connect(rexAct, &QAction::triggered, this, &MainWindow::newRexTab);
+#endif
 #ifdef PUDDLEJUMPER_RDP
     auto *rdpAct = file->addAction(tr("New R&DP Tab…"));
     connect(rdpAct, &QAction::triggered, this, [this]() {
@@ -674,6 +682,12 @@ void MainWindow::buildMenus()
     connect(m_tmuxMenu, &QMenu::aboutToShow, this, &MainWindow::rebuildTmuxMenu);
     // (Not left empty until then: macOS keeps an empty menu off the menu bar.)
     m_tmuxMenu->addAction(tr("No sessions running"))->setEnabled(false);
+    // Saved servers of every kind, and Rex sessions' own actions; filled each
+    // time it opens, as the tmux menu is.
+    m_serversMenu = menuBar()->addMenu(tr("Ser&vers"));
+    connect(m_serversMenu, &QMenu::aboutToShow, this, &MainWindow::rebuildServersMenu);
+    connect(&m_servers, &ServerStore::changed, this, &MainWindow::rebuildServersMenu);
+    rebuildServersMenu();
 
     auto *zoomIn = view->addAction(tr("Zoom &In"));
     zoomIn->setShortcut(QKeySequence(QStringLiteral("Ctrl+=")));
@@ -1069,7 +1083,7 @@ void MainWindow::wireTab(TerminalTab *tab)
     connect(tab, &TerminalTab::empty, this, [this, tab]() { removeTab(tab); });
 }
 
-void MainWindow::openVnc(const QString &address)
+void MainWindow::openVnc(const QString &address, const QString &user, bool reducedColour, bool adaptive)
 {
     QString host;
     quint16 port;
@@ -1077,14 +1091,17 @@ void MainWindow::openVnc(const QString &address)
         QMessageBox::warning(this, tr("New VNC Tab"), tr("“%1” isn't an address.").arg(address));
         return;
     }
-    auto *tab = new VncTab(host, port);
+    auto *tab = new VncTab(host, port, reducedColour);
+    tab->setAdaptiveQuality(adaptive);
+    if (!user.isEmpty())
+        tab->setUsername(user);
     const int index = addTab(tab, tab->title(), QString());
     m_tabs->setCurrentIndex(index);
     syncTabText(tab);
     tab->focusContent();
 }
 
-void MainWindow::openRdp(const QString &address)
+void MainWindow::openRdp(const QString &address, const QString &user)
 {
 #ifdef PUDDLEJUMPER_RDP
     QString host;
@@ -1094,6 +1111,8 @@ void MainWindow::openRdp(const QString &address)
         return;
     }
     auto *tab = new VncTab(host, port, false, nullptr, new RdpClient);
+    if (!user.isEmpty())
+        tab->setUsername(user);
     const int index = addTab(tab, tab->title(), QString());
     m_tabs->setCurrentIndex(index);
     syncTabText(tab);
@@ -1253,6 +1272,20 @@ void MainWindow::syncTabText(Tab *page)
         return;
     const QString title = pane->sessionTitle();
 
+#ifdef PUDDLEJUMPER_REX
+    // A Rex tab likewise, after its window.
+    if (auto *rex = rexSessionFor(tab)) {
+        const QString name = rex->windowName(tab);
+        m_tabs->setTabText(i, name);
+        m_sidebar->setTitle(i, name);
+        m_tabStrip->setTitle(i, name);
+        m_tabs->setTabToolTip(i, title.isEmpty()
+                                     ? tr("Rex %1 — %2").arg(rex->label(), name)
+                                     : tr("Rex %1 — %2\n%3").arg(rex->label(), name, title));
+        m_tabStrip->setTabToolTip(i, m_tabs->tabToolTip(i));
+        return;
+    }
+#endif
     // A tmux tab is named after its window, as in tmux itself; the active
     // pane's title goes in the tooltip and window title.
     if (auto *session = tmuxSessionFor(tab)) {
@@ -1354,6 +1387,12 @@ void MainWindow::wirePane(TerminalWidget *term)
 
 void MainWindow::splitPane(TerminalWidget *pane, Qt::Orientation orientation)
 {
+#ifdef PUDDLEJUMPER_REX
+    if (auto *rex = rexSessionFor(pane)) {
+        rex->splitPane(pane, orientation);
+        return;
+    }
+#endif
     if (auto *session = tmuxSessionFor(pane)) {
         session->splitPane(pane, orientation);
         return;
@@ -1369,6 +1408,13 @@ void MainWindow::splitPane(TerminalWidget *pane, Qt::Orientation orientation)
 
 void MainWindow::closePane(TerminalWidget *pane)
 {
+#ifdef PUDDLEJUMPER_REX
+    if (auto *rex = rexSessionFor(pane)) {
+        if (confirmRexClose(rex, tabOf(pane), true))
+            rex->closePane(pane);   // the view change removes it
+        return;
+    }
+#endif
     if (auto *session = tmuxSessionFor(pane)) {
         if (!confirmTmuxClose(session, tabOf(pane)))
             return;
@@ -1412,6 +1458,12 @@ void MainWindow::newTab()
         session->newWindow();
         return;
     }
+#ifdef PUDDLEJUMPER_REX
+    if (auto *rex = rexSessionFor(currentTab())) {
+        rex->newWindow();
+        return;
+    }
+#endif
     newTabWithProfile(QString());
 }
 
@@ -1556,15 +1608,103 @@ void MainWindow::connectTmuxHost()
         return;
 
     const QString h = host->text().trimmed();
-    const QString name = session->text().trimmed().isEmpty() ? QStringLiteral("main")
-                                                              : session->text().trimmed();
     if (h.isEmpty())
         return;
+    attachTmuxHost(h, session->text().trimmed());
+}
+
+void MainWindow::rebuildServersMenu()
+{
+    m_serversMenu->clear();
+    const QList<SavedServer> servers = m_servers.servers();
+    if (servers.isEmpty())
+        m_serversMenu->addAction(tr("No saved servers"))->setEnabled(false);
+    for (const SavedServer &s : servers) {
+        const char *icon = s.kind == SavedServer::Rex    ? "server"
+                           : s.kind == SavedServer::Tmux ? "square-terminal"
+                           : s.kind == SavedServer::Web  ? "code-xml"
+                                                         : "app-window";
+        QAction *act = m_serversMenu->addAction(appIcon(icon), s.title());
+        act->setToolTip(SavedServer::kindName(s.kind) + QStringLiteral(" · ") + s.address);
+        act->setStatusTip(act->toolTip());
+        bool available = true;
+#ifndef PUDDLEJUMPER_REX
+        available = available && s.kind != SavedServer::Rex;
+#endif
+#ifndef PUDDLEJUMPER_RDP
+        available = available && s.kind != SavedServer::Rdp;
+#endif
+#ifndef PUDDLEJUMPER_WEB
+        available = available && s.kind != SavedServer::Web;
+#endif
+        act->setEnabled(available);
+        const QString id = s.id;
+        connect(act, &QAction::triggered, this, [this, id]() { openSavedServer(m_servers.server(id)); });
+    }
+    m_serversMenu->addSeparator();
+#ifdef PUDDLEJUMPER_REX
+    m_serversMenu->addAction(appIcon("plus"), tr("Connect to &Rex Server…"), this, &MainWindow::newRexTab);
+    if (RexSession *rex = rexSessionFor(currentTab())) {
+        QPointer<RexSession> session(rex);
+        m_serversMenu->addAction(tr("&Detach Rex Session “%1”").arg(rex->label()), this, [session]() {
+            if (session)
+                session->detach();
+        });
+        m_serversMenu->addAction(tr("&End Rex Session “%1”…").arg(rex->label()), this, [this, session]() {
+            if (!session)
+                return;
+            if (QMessageBox::question(this, tr("End Rex Session?"),
+                                      tr("End Rex session “%1”? Its programs are stopped on %2.")
+                                          .arg(session->label(), session->server().authority()))
+                    == QMessageBox::Yes
+                && session)
+                session->destroySession();
+        });
+    }
+    m_serversMenu->addSeparator();
+#endif
+    m_serversMenu->addAction(appIcon("settings"), tr("&Edit Servers…"), this,
+                             [this]() { openSettings(SettingsDialog::Servers); });
+}
+
+void MainWindow::openSavedServer(const SavedServer &s)
+{
+    if (s.id.isEmpty() || s.address.isEmpty())
+        return;
+    QString text = s.address;
+    if ((s.kind == SavedServer::Rex || s.kind == SavedServer::Web) && !text.contains(QLatin1String("://")))
+        text.prepend(QLatin1String("http://"));
+    switch (s.kind) {
+    case SavedServer::Rex:
+#ifdef PUDDLEJUMPER_REX
+        chooseRexSession(QUrl(text));
+#endif
+        break;
+    case SavedServer::Tmux:
+        attachTmuxHost(s.address, s.session);
+        break;
+    case SavedServer::Vnc:
+        openVnc(s.address, s.user, s.reducedColour, s.adaptive);
+        break;
+    case SavedServer::Rdp:
+        openRdp(s.address, s.user);
+        break;
+    case SavedServer::Web:
+#ifdef PUDDLEJUMPER_WEB
+        openWeb(QUrl(text));
+#endif
+        break;
+    }
+}
+
+void MainWindow::attachTmuxHost(const QString &host, const QString &session)
+{
+    const QString name = session.isEmpty() ? QStringLiteral("main") : session;
     // -T: no remote terminal; control mode speaks over plain pipes. BatchMode
     // makes ssh fail rather than wait for a password nobody can type.
-    attachTmux(QStringLiteral("%1: %2").arg(h, name), {
+    attachTmux(QStringLiteral("%1: %2").arg(host, name), {
         QStringLiteral("ssh"), QStringLiteral("-T"), QStringLiteral("-o"),
-        QStringLiteral("BatchMode=yes"), h,
+        QStringLiteral("BatchMode=yes"), host,
         QStringLiteral("tmux -u -C new-session -A -s ") + shellQuote(name)});
 }
 
@@ -1698,6 +1838,13 @@ void MainWindow::closeTab(int index)
         return;
     }
     auto *tab = tabAt(index);
+#ifdef PUDDLEJUMPER_REX
+    if (auto *rex = rexSessionFor(tab)) {
+        if (confirmRexClose(rex, tab, false))
+            rex->closeWindow(tab);   // the tab goes when the window has
+        return;
+    }
+#endif
     if (auto *session = tmuxSessionFor(tab)) {
         if (!confirmTmuxClose(session, tab))
             return;
@@ -1707,6 +1854,150 @@ void MainWindow::closeTab(int index)
     if (tab)
         removeTab(tab);
 }
+
+#ifdef PUDDLEJUMPER_REX
+RexSession *MainWindow::rexSessionFor(const Tab *tab) const
+{
+    for (RexSession *s : m_rexSessions)
+        if (s->ownsTab(tab))
+            return s;
+    return nullptr;
+}
+
+RexSession *MainWindow::rexSessionFor(const TerminalWidget *pane) const
+{
+    for (RexSession *s : m_rexSessions)
+        if (s->ownsPane(pane))
+            return s;
+    return nullptr;
+}
+
+void MainWindow::newRexTab()
+{
+    QSettings settings;
+    const QString last = settings.value(QStringLiteral("rex/lastServer"),
+                                        QStringLiteral("http://127.0.0.1:51433")).toString();
+    bool ok = false;
+    QString text = QInputDialog::getText(this, tr("New Rex Tab"), tr("Rex server (http://host:port):"),
+                                         QLineEdit::Normal, last, &ok).trimmed();
+    if (!ok || text.isEmpty())
+        return;
+    if (!text.contains(QLatin1String("://")))
+        text.prepend(QLatin1String("http://"));
+    const QUrl server(text);
+    if (!server.isValid() || server.host().isEmpty()) {
+        QMessageBox::warning(this, tr("Rex"), tr("“%1” is not a server address.").arg(text));
+        return;
+    }
+    settings.setValue(QStringLiteral("rex/lastServer"), text);
+    chooseRexSession(server);
+}
+
+void MainWindow::chooseRexSession(const QUrl &server)
+{
+    statusBar()->showMessage(tr("Connecting to %1…").arg(server.authority()));
+    QPointer<MainWindow> self(this);
+    RexSession::listSessions(server, this,
+                             [self, server](const QList<QPair<QString, QString>> &sessions, const QString &error) {
+        if (!self)
+            return;
+        self->statusBar()->clearMessage();
+        if (!error.isEmpty()) {
+            QMessageBox::warning(self, tr("Rex"),
+                                 tr("Could not connect to %1.").arg(server.authority())
+                                     + QStringLiteral("\n\n") + error);
+            return;
+        }
+        QStringList items{tr("New session")};
+        for (const auto &s : sessions)
+            items << tr("%1 (%2)").arg(s.second, s.first.section(QLatin1Char(':'), -1).left(8));
+        bool chosen = false;
+        const QString named = self->m_servers.rexServer(server.toString()).name;
+        const QString item = QInputDialog::getItem(self, tr("New Rex Tab"),
+                                                   tr("Session on %1:").arg(named.isEmpty() ? server.authority()
+                                                                                            : named),
+                                                   items, sessions.isEmpty() ? 0 : 1, false, &chosen);
+        if (!chosen)
+            return;
+        const int i = int(items.indexOf(item));
+        self->openRex(server, i > 0 ? sessions.at(i - 1).first : QString());
+    });
+}
+
+void MainWindow::openRex(const QUrl &server, const QString &sessionId, const QString &workspaceId,
+                         bool quiet)
+{
+    for (RexSession *s : std::as_const(m_rexSessions)) {
+        if (!sessionId.isEmpty() && s->sessionId() == sessionId && s->server() == server) {
+            if (!s->tabs().isEmpty())
+                showTab(s->tabs().first());
+            return;   // open already (or still opening)
+        }
+    }
+    auto *session = new RexSession(server, sessionId, m_settings, m_profiles.defaultProfile(), this);
+    m_rexSessions << session;
+    m_rexWorkspace.insert(session, workspaceId.isEmpty() ? m_workspaces.value(m_currentWorkspace).id
+                                                         : workspaceId);
+    auto shownAny = std::make_shared<bool>(false);
+    connect(session, &RexSession::tabAdded, this,
+            [this, session, shownAny, quiet](TerminalTab *tab, const QString &name) {
+        // Into the session's workspace, which may not be the one on screen.
+        const int index = addTab(tab, name, tr("Rex %1 — %2").arg(session->label(), name),
+                                 workspaceIndex(m_rexWorkspace.value(session)));
+        if (!std::exchange(*shownAny, true) && index >= 0 && !quiet)
+            m_tabs->setCurrentIndex(index);
+    });
+    connect(session, &RexSession::tabRenamed, this, [this](TerminalTab *tab, const QString &) {
+        syncTabText(tab);
+    });
+    connect(session, &RexSession::tabRemoved, this, &MainWindow::removeTab);
+    connect(session, &RexSession::ended, this, [this, session, shownAny, quiet](const QString &reason) {
+        m_rexSessions.removeOne(session);
+        m_rexWorkspace.remove(session);
+        session->deleteLater();
+        if (!*shownAny) {
+            if (quiet) {
+                qCInfo(lcTmux) << "Rex session" << session->sessionId() << "not restored:" << reason;
+                return;
+            }
+            QMessageBox::warning(this, tr("Rex"),
+                                 tr("Could not open a Rex session on %1.").arg(session->server().authority())
+                                     + (reason.isEmpty() ? QString() : QStringLiteral("\n\n") + reason));
+            return;
+        }
+        statusBar()->showMessage(reason.isEmpty() ? tr("Rex session %1 closed").arg(session->label())
+                                                  : tr("Rex session %1: %2").arg(session->label(), reason),
+                                 6000);
+    });
+    session->start();
+}
+
+bool MainWindow::confirmRexClose(RexSession *session, TerminalTab *tab, bool pane)
+{
+    // As for tmux: closing the last of a session ends it, which is rarely
+    // what closing a tab here means, so detaching is offered instead. A pane
+    // whose program has exited (kept to be read) just closes.
+    if (session->tabs().size() != 1 || !tab || (pane && tab->panes().size() != 1))
+        return true;
+    if (pane && session->hasExited(tab->activePane()))
+        return true;
+    QMessageBox box(QMessageBox::Question, tr("Close Rex Session?"),
+                    tr("“%1” is the last window of Rex session “%2”. Closing it ends the session.")
+                        .arg(session->windowName(tab), session->label()),
+                    QMessageBox::NoButton, this);
+    box.setInformativeText(tr("Detach to keep the session running on %1, so you can attach to it "
+                              "again from here or any Rex client.")
+                               .arg(session->server().authority()));
+    QPushButton *detach = box.addButton(tr("&Detach"), QMessageBox::AcceptRole);
+    QPushButton *end = box.addButton(tr("&End Session"), QMessageBox::DestructiveRole);
+    box.addButton(QMessageBox::Cancel);
+    box.setDefaultButton(detach);
+    box.exec();
+    if (box.clickedButton() == detach)
+        session->detach();
+    return box.clickedButton() == end;
+}
+#endif
 
 bool MainWindow::confirmTmuxClose(TmuxSession *session, TerminalTab *tab)
 {
@@ -1802,7 +2093,7 @@ void MainWindow::refreshPreviews(bool all)
 void MainWindow::updateCardDetails(int index)
 {
     if (auto *vnc = qobject_cast<VncTab *>(pageAt(index))) {
-        m_sidebar->setBadge(index, tr("VNC"));
+        m_sidebar->setBadge(index, vnc->view()->client()->scheme().toUpper());
         m_sidebar->setSubtitle(index, vnc->details());
         return;
     }
@@ -1820,6 +2111,14 @@ void MainWindow::updateCardDetails(int index)
 
     // tmux cards say which session they belong to; the second line is the
     // active pane's title when that says more than the window's name.
+#ifdef PUDDLEJUMPER_REX
+    if (auto *rex = rexSessionFor(tab)) {
+        m_sidebar->setBadge(index, tr("rex %1").arg(rex->label()));
+        const QString title = pane->sessionTitle();
+        m_sidebar->setSubtitle(index, title == rex->windowName(tab) ? QString() : title);
+        return;
+    }
+#endif
     if (auto *session = tmuxSessionFor(tab)) {
         m_sidebar->setBadge(index, tr("tmux %1").arg(session->label()));
         const QString title = pane->sessionTitle();
@@ -1909,8 +2208,12 @@ void MainWindow::showTabMenu(int index, const QPoint &globalPos)
 #endif
 
         // A tmux session lives in one workspace, so its tabs move together.
-        QMenu *move = menu.addMenu(tmuxSessionFor(pageAt(index)) ? tr("&Move Session to Workspace")
-                                                                 : tr("&Move to Workspace"));
+        bool wholeSession = tmuxSessionFor(pageAt(index)) != nullptr;
+#ifdef PUDDLEJUMPER_REX
+        wholeSession = wholeSession || rexSessionFor(pageAt(index));
+#endif
+        QMenu *move = menu.addMenu(wholeSession ? tr("&Move Session to Workspace")
+                                                : tr("&Move to Workspace"));
         QPointer<Tab> tab = pageAt(index);
         for (int w = 0; w < m_workspaces.size(); ++w) {
             if (w == m_currentWorkspace)
@@ -1946,6 +2249,9 @@ void MainWindow::renameTab(int index)
     const QString name = QInputDialog::getText(
         this, tr("Rename Tab"),
         session    ? tr("tmux window name:")
+#ifdef PUDDLEJUMPER_REX
+        : rexSessionFor(tab) ? tr("Rex window name:")
+#endif
         : terminal ? tr("Tab name (leave empty to follow the terminal's title):")
                    : tr("Tab name (leave empty to follow the remote desktop's name):"),
         QLineEdit::Normal,
@@ -1960,6 +2266,13 @@ void MainWindow::renameTab(int index)
             session->renameWindow(terminal, name);
         return;
     }
+#ifdef PUDDLEJUMPER_REX
+    if (auto *rex = rexSessionFor(tab)) {
+        if (!name.isEmpty())
+            rex->renameWindow(terminal, name);   // the view change renames the tab
+        return;
+    }
+#endif
     tab->setCustomTitle(name);
     syncTabText(tab);
 }
@@ -1990,6 +2303,10 @@ void MainWindow::updateStatus()
     if (auto *session = tmuxSessionFor(term))
         title = tr("tmux %1  ·  %2").arg(session->label(),
                                          title.isEmpty() ? session->windowName(tabOf(term)) : title);
+#ifdef PUDDLEJUMPER_REX
+    if (auto *rex = rexSessionFor(term))
+        title = tr("Rex %1  ·  %2").arg(rex->label(), title.isEmpty() ? rex->windowName(tabOf(term)) : title);
+#endif
     // What the program here says it's doing, and why.
     const ProgramStatusRecord status = term->programStatus()->mostPressing();
     if (ProgramStatus::rank(status) > 0) {
@@ -2289,6 +2606,10 @@ QString MainWindow::describeTab(TerminalTab *tab) const
     if (name.isEmpty()) {
         if (TmuxSession *session = tmuxSessionFor(tab))
             name = tr("tmux %1 — %2").arg(session->label(), session->windowName(tab));
+#ifdef PUDDLEJUMPER_REX
+        else if (RexSession *rex = rexSessionFor(tab))
+            name = tr("Rex %1 — %2").arg(rex->label(), rex->windowName(tab));
+#endif
         else if (TerminalWidget *pane = tab->activePane())
             name = pane->sessionTitle();
     }
@@ -2475,7 +2796,7 @@ void MainWindow::refreshProfiles()
 void MainWindow::openSettings(int section)
 {
     if (!m_settingsDialog)
-        m_settingsDialog = new SettingsDialog(m_settings, m_profiles, this);
+        m_settingsDialog = new SettingsDialog(m_settings, m_profiles, this, &m_servers);
     m_settingsDialog->showSection(static_cast<SettingsDialog::Section>(section));
 }
 
@@ -2488,10 +2809,15 @@ void MainWindow::closeEvent(QCloseEvent *event)
     }
     // Drop any in-place-edit stand-in and put the real scheme name back, so the
     // stored config never points at a throwaway file.
+    saveForQuit();
+    QMainWindow::closeEvent(event);
+}
+
+void MainWindow::saveForQuit()
+{
     m_settings.finaliseLiveSchemes();
     m_settings.saveWindowGeometry(saveGeometry(), saveState());
     saveSession();
-    QMainWindow::closeEvent(event);
 }
 
 // ---- workspaces ---------------------------------------------------------------
@@ -2612,12 +2938,23 @@ void MainWindow::closeWorkspace(int index)
     }
     QStringList running;
     QList<TmuxSession *> sessions;
+#ifdef PUDDLEJUMPER_REX
+    QList<RexSession *> rexSessions;
+#endif
     for (Tab *tab : std::as_const(tabs)) {
         if (TmuxSession *session = tmuxSessionFor(tab)) {
             if (!sessions.contains(session))
                 sessions << session;
             continue;
         }
+#ifdef PUDDLEJUMPER_REX
+        // Rex sessions are detached: they go on running on their server.
+        if (RexSession *rex = rexSessionFor(tab)) {
+            if (!rexSessions.contains(rex))
+                rexSessions << rex;
+            continue;
+        }
+#endif
         auto *terminal = qobject_cast<TerminalTab *>(tab);
         for (TerminalWidget *pane : terminal ? terminal->panes() : QList<TerminalWidget *>()) {
             if (pane->hasRunningProcess()) {
@@ -2690,8 +3027,16 @@ void MainWindow::closeWorkspace(int index)
         else
             session->detach();
     }
+#ifdef PUDDLEJUMPER_REX
+    for (RexSession *rex : std::as_const(rexSessions))
+        rex->detach();
+#endif
     for (Tab *tab : std::as_const(tabs)) {
-        if (!tmuxSessionFor(tab))
+        bool sessionTab = tmuxSessionFor(tab) != nullptr;
+#ifdef PUDDLEJUMPER_REX
+        sessionTab = sessionTab || rexSessionFor(tab);
+#endif
+        if (!sessionTab)
             tab->deleteLater();
     }
     const QString id = m_workspaces.at(index).id;
@@ -2717,6 +3062,14 @@ void MainWindow::moveTabToWorkspace(Tab *tab, int index)
             tabs << t;
         m_sessionWorkspace.insert(session, m_workspaces.at(index).id);
     }
+#ifdef PUDDLEJUMPER_REX
+    if (RexSession *rex = rexSessionFor(tab)) {
+        tabs.clear();
+        for (TerminalTab *t : rex->tabs())
+            tabs << t;
+        m_rexWorkspace.insert(rex, m_workspaces.at(index).id);
+    }
+#endif
     for (Tab *t : std::as_const(tabs)) {
         const int i = m_tabs->indexOf(t);
         if (i >= 0)
@@ -2908,6 +3261,10 @@ void MainWindow::saveSession()
             Tab *page = tabs.at(t);
             if (!page || tmuxSessionFor(page))
                 continue;
+#ifdef PUDDLEJUMPER_REX
+            if (rexSessionFor(page))
+                continue;   // saved by session below
+#endif
             if (t == currentTab)
                 savedCurrent = savedTabs.size();
 #ifdef PUDDLEJUMPER_WEB
@@ -2956,6 +3313,19 @@ void MainWindow::saveSession()
                 {QStringLiteral("command"), QJsonArray::fromStringList(command)},
             });
         }
+        // Rex sessions by server and id, to attach to again if they're
+        // still there.
+        QJsonArray rex;
+#ifdef PUDDLEJUMPER_REX
+        for (RexSession *session : std::as_const(m_rexSessions)) {
+            if (m_rexWorkspace.value(session) != w.id || !session->isAttached())
+                continue;
+            rex.append(QJsonObject{
+                {QStringLiteral("server"), session->server().toString()},
+                {QStringLiteral("session"), session->sessionId()},
+            });
+        }
+#endif
         QJsonObject variables;
         for (auto it = w.variables.cbegin(); it != w.variables.cend(); ++it)
             variables.insert(it.key(), it.value());
@@ -2969,6 +3339,7 @@ void MainWindow::saveSession()
             {QStringLiteral("currentTab"), savedCurrent},
             {QStringLiteral("tabs"), savedTabs},
             {QStringLiteral("tmux"), tmux},
+            {QStringLiteral("rex"), rex},
         });
     }
     const QJsonObject state{
@@ -3097,6 +3468,15 @@ bool MainWindow::restoreSession()
             if (!label.isEmpty() && !command.isEmpty() && running.contains(label))
                 attachTmux(label, command, m_workspaces.at(i).id);
         }
+#ifdef PUDDLEJUMPER_REX
+        for (const QJsonValue &t : o.value(QStringLiteral("rex")).toArray()) {
+            const QJsonObject session = t.toObject();
+            const QUrl server(session.value(QStringLiteral("server")).toString());
+            const QString id = session.value(QStringLiteral("session")).toString();
+            if (server.isValid() && !id.isEmpty())
+                openRex(server, id, m_workspaces.at(i).id, true);
+        }
+#endif
     }
 
     if (m_tabs->count() == 0) {

@@ -26,6 +26,50 @@
 
 #include <qtermwidget.h>
 
+#ifdef Q_OS_UNIX
+#include <QSocketNotifier>
+#include <csignal>
+#include <sys/socket.h>
+#include <unistd.h>
+
+namespace {
+int quitPipe[2] = {-1, -1};
+
+// Only a write: all that's safe in a signal handler. The rest is done when
+// the event loop reads it.
+void onQuitSignal(int)
+{
+    const char c = 1;
+    [[maybe_unused]] const auto n = ::write(quitPipe[0], &c, 1);
+}
+
+/*
+ * SIGTERM and SIGHUP (a logout, a kill, the terminal going) save what's open,
+ * as closing the window does, then quit: what was open is there next time,
+ * Rex and tmux sessions included. No asking: nobody is there to answer.
+ */
+void quitOnSignals(MainWindow *window)
+{
+    if (::socketpair(AF_UNIX, SOCK_STREAM, 0, quitPipe) != 0)
+        return;
+    auto *notifier = new QSocketNotifier(quitPipe[1], QSocketNotifier::Read, window);
+    QObject::connect(notifier, &QSocketNotifier::activated, window, [window, notifier]() {
+        char c;
+        [[maybe_unused]] const auto n = ::read(quitPipe[1], &c, 1);
+        notifier->setEnabled(false);
+        window->saveForQuit();
+        QApplication::quit();
+    });
+    struct sigaction sa = {};
+    sa.sa_handler = onQuitSignal;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    ::sigaction(SIGTERM, &sa, nullptr);
+    ::sigaction(SIGHUP, &sa, nullptr);
+}
+} // namespace
+#endif
+
 int main(int argc, char *argv[])
 {
     runDisclaimedIfAsked(argc, argv);   // macOS: started to become a command (see disclaim.h)
@@ -175,6 +219,9 @@ int main(int argc, char *argv[])
     }
     MainWindow window;
     window.show();
+#ifdef Q_OS_UNIX
+    quitOnSignals(&window);
+#endif
     if (parser.isSet(vncOpt))
         window.openVnc(parser.value(vncOpt));
     if (parser.isSet(rdpOpt))

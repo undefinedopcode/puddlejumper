@@ -198,7 +198,10 @@ QPoint ScreenWindow::cursorPosition() const
 
 int ScreenWindow::currentLine() const
 {
-    return qBound(0,_currentLine,lineCount()-windowLines());
+    // Not qBound: while a resize is under way the window can have more lines
+    // than the screen (max < min), which qBound asserts against. The top it
+    // is, then, as qBound gives in a release build.
+    return qMax(0, qMin(_currentLine, lineCount() - windowLines()));
 }
 
 QList<GraphicsPlacement> ScreenWindow::graphicsPlacements() const
@@ -280,7 +283,7 @@ bool ScreenWindow::atEndOfOutput() const
 void ScreenWindow::scrollTo( int line )
 {
     int maxCurrentLineNumber = lineCount() - windowLines();
-    line = qBound(0,line,maxCurrentLineNumber);
+    line = qMax(0, qMin(line, maxCurrentLineNumber));  // not qBound: see currentLine()
 
     const int delta = line - _currentLine;
     _currentLine = line;

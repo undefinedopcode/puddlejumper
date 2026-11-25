@@ -9,6 +9,9 @@
 #include "../profiles.h"
 #include "../settingsdialog.h"
 #include "../settings.h"
+#include "../serverstore.h"
+
+#include <QStandardPaths>
 
 #include <QApplication>
 #include <QCheckBox>
@@ -21,7 +24,53 @@
 
 int main(int argc, char *argv[])
 {
+    // probe-settingsdialog servers OUT.png: the Servers page with a few
+    // entries, to look at (test-mode settings, the real ones left alone).
+    if (argc > 2 && QByteArray(argv[1]) == "servers")
+        QStandardPaths::setTestModeEnabled(true);
     QApplication app(argc, argv);
+
+    if (argc > 2 && QByteArray(argv[1]) == "servers") {
+        Settings settings;
+        ProfileStore profiles;
+        ServerStore servers;
+        for (const SavedServer &s : servers.servers())
+            servers.remove(s.id);
+        SavedServer a;
+        a.kind = SavedServer::Rex;
+        a.name = QStringLiteral("Home Rex");
+        a.address = QStringLiteral("http://127.0.0.1:51433");
+        servers.save(a);
+        SavedServer b;
+        b.kind = SavedServer::Tmux;
+        b.address = QStringLiteral("me@buildbox");
+        b.session = QStringLiteral("work");
+        servers.save(b);
+        SavedServer c;
+        c.kind = SavedServer::Vnc;
+        c.name = QStringLiteral("Mac VM");
+        c.address = QStringLiteral("localhost:5911");
+        c.adaptive = true;
+        servers.save(c);
+        SavedServer d;
+        d.kind = SavedServer::Web;
+        d.name = QStringLiteral("Dev server");
+        d.address = QStringLiteral("localhost:3000");
+        servers.save(d);
+        SettingsDialog dlg(settings, profiles, nullptr, &servers);
+        dlg.resize(860, 560);
+        dlg.showSection(SettingsDialog::Servers);
+        if (argc > 3) {
+            auto *list = dlg.findChildren<QListWidget *>().last();
+            list->setCurrentRow(QByteArray(argv[3]).toInt());
+        }
+        for (int i = 0; i < 5; ++i)
+            app.processEvents();
+        dlg.grab().save(QString::fromLocal8Bit(argv[2]));
+        for (const SavedServer &s : servers.servers())
+            servers.remove(s.id);
+        return 0;
+    }
 
     Settings settings;
     ProfileStore profiles;

@@ -10,6 +10,7 @@
 #include "colorscheme.h"
 #include "colorschemeeditor.h"
 #include "profiles.h"
+#include "serverstore.h"
 #include "settings.h"
 
 #include <QCheckBox>
@@ -110,10 +111,11 @@ void syncShellArgs(QLineEdit *args, bool hasShell)
 } // namespace
 
 SettingsDialog::SettingsDialog(Settings &settings, ProfileStore &profiles,
-                               QWidget *parent)
+                               QWidget *parent, ServerStore *servers)
     : QDialog(parent)
     , m_settings(settings)
     , m_profiles(profiles)
+    , m_servers(servers)
 {
     setWindowTitle(tr("Settings"));
     setModal(true);
@@ -135,6 +137,8 @@ SettingsDialog::SettingsDialog(Settings &settings, ProfileStore &profiles,
     addSection(tr("Terminal"), appIcon("square-terminal"));
     addSection(tr("Tabs & Window"), appIcon("app-window"));
     addSection(tr("Profiles"), appIcon("users"));
+    if (m_servers)
+        addSection(tr("Servers"), appIcon("server"));
     outer->addWidget(m_sections);
 
     auto *right = new QVBoxLayout;
@@ -153,6 +157,8 @@ SettingsDialog::SettingsDialog(Settings &settings, ProfileStore &profiles,
     m_pages->addWidget(buildTerminalPage());
     m_pages->addWidget(buildWindowPage());
     m_pages->addWidget(buildProfilesPage());
+    if (m_servers)
+        m_pages->addWidget(buildServersPage());
     right->addWidget(m_pages, 1);
     alignFormLabels();
 
@@ -189,6 +195,8 @@ SettingsDialog::SettingsDialog(Settings &settings, ProfileStore &profiles,
 
 void SettingsDialog::showSection(Section section)
 {
+    if (section == Servers && !m_servers)
+        section = Appearance;
     m_sections->setCurrentRow(int(section));
     show();
     raise();
@@ -1067,4 +1075,245 @@ void SettingsDialog::syncFromSettings()
     m_silenceTimeoutBox->setEnabled(s.monitorSilence);
     m_confirmCloseBox->setChecked(s.confirmCloseWithRunningProcesses);
     m_restoreSessionBox->setChecked(s.restoreSession);
+}
+
+// ---- Servers ------------------------------------------------------------------
+
+namespace {
+QIcon serverIcon(SavedServer::Kind kind)
+{
+    switch (kind) {
+    case SavedServer::Rex: return appIcon("server");
+    case SavedServer::Tmux: return appIcon("square-terminal");
+    case SavedServer::Vnc:
+    case SavedServer::Rdp: return appIcon("app-window");
+    case SavedServer::Web: return appIcon("code-xml");
+    }
+    return {};
+}
+} // namespace
+
+QWidget *SettingsDialog::buildServersPage()
+{
+    auto *page = new QWidget(this);
+    auto *outer = new QHBoxLayout(page);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setSpacing(12);
+
+    // ---- left: the list + add/remove/reorder -------------------------------
+    auto *left = new QVBoxLayout;
+    left->setSpacing(4);
+    m_serverList = new QListWidget(page);
+    m_serverList->setFixedWidth(190);
+    m_serverList->setIconSize(QSize(16, 16));
+    m_serverList->setFrameShape(QFrame::StyledPanel);
+    left->addWidget(m_serverList, 1);
+
+    auto *buttons = new QHBoxLayout;
+    buttons->setSpacing(2);
+    auto makeBtn = [page](const QIcon &icon, const QString &fallback, const QString &tip) {
+        auto *b = new QToolButton(page);
+        b->setIcon(icon);
+        b->setText(fallback);
+        b->setToolTip(tip);
+        b->setAutoRaise(true);
+        return b;
+    };
+    auto *add = makeBtn(appIcon("plus"), QStringLiteral("+"), tr("New server"));
+    m_serverRemove = makeBtn(appIcon("minus"), QStringLiteral("\u2212"), tr("Delete the selected server"));
+    m_serverUp = makeBtn(QIcon(), QStringLiteral("\u2191"), tr("Move up the list"));
+    m_serverDown = makeBtn(QIcon(), QStringLiteral("\u2193"), tr("Move down the list"));
+    buttons->addWidget(add);
+    buttons->addWidget(m_serverRemove);
+    buttons->addStretch(1);
+    buttons->addWidget(m_serverUp);
+    buttons->addWidget(m_serverDown);
+    left->addLayout(buttons);
+    outer->addLayout(left);
+
+    // ---- right: the form ------------------------------------------------------
+    auto *right = new QVBoxLayout;
+    m_serverFormBox = new QGroupBox(tr("Server"), page);
+    m_serverForm = new QFormLayout(m_serverFormBox);
+    m_serverForm->setLabelAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    m_serverForm->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+    m_serverForm->setHorizontalSpacing(12);
+    m_serverForm->setVerticalSpacing(8);
+
+    m_serverKind = new QComboBox(m_serverFormBox);
+    for (SavedServer::Kind k : {SavedServer::Rex, SavedServer::Tmux, SavedServer::Vnc, SavedServer::Rdp,
+                                SavedServer::Web})
+        m_serverKind->addItem(serverIcon(k), SavedServer::kindName(k), int(k));
+    m_serverForm->addRow(tr("Kind"), m_serverKind);
+
+    m_serverName = new QLineEdit(m_serverFormBox);
+    m_serverName->setPlaceholderText(tr("As the menu shows it (the address if empty)"));
+    m_serverForm->addRow(tr("Name"), m_serverName);
+
+    m_serverAddress = new QLineEdit(m_serverFormBox);
+    m_serverForm->addRow(tr("Address"), m_serverAddress);
+    m_serverHint = makeHint(QString(), m_serverFormBox);
+    m_serverForm->addRow(QString(), m_serverHint);
+
+    m_serverSession = new QLineEdit(m_serverFormBox);
+    m_serverSession->setPlaceholderText(QStringLiteral("main"));
+    m_serverForm->addRow(tr("Session"), m_serverSession);
+
+    m_serverUser = new QLineEdit(m_serverFormBox);
+    m_serverUser->setPlaceholderText(tr("Asked for when needed"));
+    m_serverForm->addRow(tr("User"), m_serverUser);
+
+    m_serverReducedColour = new QCheckBox(tr("Fewer colours (faster on slow links)"), m_serverFormBox);
+    m_serverForm->addRow(tr("Colour"), m_serverReducedColour);
+    m_serverAdaptive = new QCheckBox(tr("Lower quality while the screen is busy"), m_serverFormBox);
+    m_serverForm->addRow(tr("Quality"), m_serverAdaptive);
+
+    right->addWidget(m_serverFormBox);
+    right->addWidget(makeHint(tr("Saved servers are in the Servers menu. Passwords are never "
+                                 "saved: remote desktops ask when they connect."), page));
+    right->addStretch(1);
+    outer->addLayout(right, 1);
+
+    // ---- wiring ---------------------------------------------------------------
+    connect(m_serverList, &QListWidget::currentRowChanged, this, [this](int) {
+        auto *item = m_serverList->currentItem();
+        loadServerIntoForm(item ? item->data(Qt::UserRole).toString() : QString());
+    });
+    connect(add, &QToolButton::clicked, this, [this]() {
+        SavedServer s;
+        s.kind = SavedServer::Rex;
+        s.name = tr("New server");
+        s.address = QStringLiteral("http://127.0.0.1:51433");
+        rebuildServerList(m_servers->save(s));
+        m_serverName->setFocus();
+        m_serverName->selectAll();
+    });
+    connect(m_serverRemove, &QToolButton::clicked, this, [this]() {
+        auto *item = m_serverList->currentItem();
+        if (!item)
+            return;
+        const int row = m_serverList->currentRow();
+        m_servers->remove(item->data(Qt::UserRole).toString());
+        rebuildServerList();
+        m_serverList->setCurrentRow(qMin(row, m_serverList->count() - 1));
+    });
+    auto mover = [this](int step) {
+        auto *item = m_serverList->currentItem();
+        if (!item)
+            return;
+        const QString id = item->data(Qt::UserRole).toString();
+        m_servers->move(id, step);
+        rebuildServerList(id);
+    };
+    connect(m_serverUp, &QToolButton::clicked, this, [mover]() { mover(-1); });
+    connect(m_serverDown, &QToolButton::clicked, this, [mover]() { mover(+1); });
+    connect(m_serverKind, &QComboBox::activated, this, [this]() {
+        updateServerFields();
+        commitServerForm();
+    });
+    for (QLineEdit *e : {m_serverName, m_serverAddress, m_serverSession, m_serverUser})
+        connect(e, &QLineEdit::editingFinished, this, &SettingsDialog::commitServerForm);
+    for (QCheckBox *c : {m_serverReducedColour, m_serverAdaptive})
+        connect(c, &QCheckBox::toggled, this, &SettingsDialog::commitServerForm);
+
+    rebuildServerList();
+    if (m_serverList->count())
+        m_serverList->setCurrentRow(0);
+    else
+        loadServerIntoForm(QString());
+    return page;
+}
+
+void SettingsDialog::rebuildServerList(const QString &selectId)
+{
+    const QSignalBlocker block(m_serverList);
+    m_serverList->clear();
+    int select = -1;
+    for (const SavedServer &s : m_servers->servers()) {
+        auto *item = new QListWidgetItem(serverIcon(s.kind), s.title(), m_serverList);
+        item->setData(Qt::UserRole, s.id);
+        item->setToolTip(SavedServer::kindName(s.kind) + QStringLiteral(" \u00b7 ") + s.address);
+        if (s.id == selectId)
+            select = m_serverList->count() - 1;
+    }
+    if (select >= 0) {
+        m_serverList->setCurrentRow(select);
+        loadServerIntoForm(selectId);
+    }
+}
+
+void SettingsDialog::loadServerIntoForm(const QString &id)
+{
+    m_loadingServer = true;
+    const SavedServer s = m_servers->server(id);
+    const bool have = !id.isEmpty() && s.id == id;
+    m_serverFormBox->setEnabled(have);
+    m_serverRemove->setEnabled(have);
+    m_serverUp->setEnabled(have && m_serverList->currentRow() > 0);
+    m_serverDown->setEnabled(have && m_serverList->currentRow() < m_serverList->count() - 1);
+    m_serverKind->setCurrentIndex(m_serverKind->findData(int(s.kind)));
+    m_serverName->setText(have ? s.name : QString());
+    m_serverAddress->setText(have ? s.address : QString());
+    m_serverSession->setText(s.session);
+    m_serverUser->setText(s.user);
+    m_serverReducedColour->setChecked(s.reducedColour);
+    m_serverAdaptive->setChecked(s.adaptive);
+    updateServerFields();
+    m_loadingServer = false;
+}
+
+void SettingsDialog::updateServerFields()
+{
+    // Only the fields this kind has.
+    const auto kind = SavedServer::Kind(m_serverKind->currentData().toInt());
+    m_serverForm->setRowVisible(m_serverSession, kind == SavedServer::Tmux);
+    m_serverForm->setRowVisible(m_serverUser, kind == SavedServer::Vnc || kind == SavedServer::Rdp);
+    m_serverForm->setRowVisible(m_serverReducedColour, kind == SavedServer::Vnc);
+    m_serverForm->setRowVisible(m_serverAdaptive, kind == SavedServer::Vnc);
+    switch (kind) {
+    case SavedServer::Rex:
+        m_serverAddress->setPlaceholderText(QStringLiteral("http://127.0.0.1:51433"));
+        m_serverHint->setText(tr("A Rex server. Connecting lists its sessions, or starts a new one."));
+        break;
+    case SavedServer::Tmux:
+        m_serverAddress->setPlaceholderText(tr("user@host"));
+        m_serverHint->setText(tr("Connects with ssh, which must log in without a password prompt "
+                                 "(a key or an agent). The session is created if it doesn't exist."));
+        break;
+    case SavedServer::Vnc:
+        m_serverAddress->setPlaceholderText(QStringLiteral("host:5900"));
+        m_serverHint->setText(tr("host, host:port or host:display."));
+        break;
+    case SavedServer::Rdp:
+        m_serverAddress->setPlaceholderText(QStringLiteral("host:3389"));
+        m_serverHint->setText(tr("host or host:port."));
+        break;
+    case SavedServer::Web:
+        m_serverAddress->setPlaceholderText(QStringLiteral("localhost:3000"));
+        m_serverHint->setText(tr("A page to open in a web tab."));
+        break;
+    }
+}
+
+void SettingsDialog::commitServerForm()
+{
+    if (m_loadingServer)
+        return;
+    auto *item = m_serverList->currentItem();
+    if (!item)
+        return;
+    SavedServer s = m_servers->server(item->data(Qt::UserRole).toString());
+    if (s.id.isEmpty())
+        return;
+    s.kind = SavedServer::Kind(m_serverKind->currentData().toInt());
+    s.name = m_serverName->text().trimmed();
+    s.address = m_serverAddress->text().trimmed();
+    s.session = s.kind == SavedServer::Tmux ? m_serverSession->text().trimmed() : QString();
+    s.user = (s.kind == SavedServer::Vnc || s.kind == SavedServer::Rdp) ? m_serverUser->text().trimmed() : QString();
+    s.reducedColour = s.kind == SavedServer::Vnc && m_serverReducedColour->isChecked();
+    s.adaptive = s.kind == SavedServer::Vnc && m_serverAdaptive->isChecked();
+    m_servers->save(s);
+    item->setText(s.title());
+    item->setIcon(serverIcon(s.kind));
+    item->setToolTip(SavedServer::kindName(s.kind) + QStringLiteral(" \u00b7 ") + s.address);
 }

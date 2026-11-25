@@ -3995,11 +3995,13 @@ bool AutoScrollHandler::eventFilter(QObject* watched,QEvent* event)
     Q_ASSERT( watched == parent() );
     Q_UNUSED( watched )
 
-    QMouseEvent* mouseEvent = (QMouseEvent*)event;
+    // Only mouse events are mouse events: casting any other (every event the
+    // widget gets passes through here) is undefined behaviour.
     switch (event->type())
     {
         case QEvent::MouseMove:
         {
+            auto* mouseEvent = static_cast<QMouseEvent*>(event);
             bool mouseInWidget = widget()->rect().contains(mouseEvent->pos());
 
             if (mouseInWidget)
@@ -4016,7 +4018,7 @@ bool AutoScrollHandler::eventFilter(QObject* watched,QEvent* event)
                 break;
         }
         case QEvent::MouseButtonRelease:
-            if (_timerId && (mouseEvent->buttons() & ~Qt::LeftButton))
+            if (_timerId && (static_cast<QMouseEvent*>(event)->buttons() & ~Qt::LeftButton))
             {
                 killTimer(_timerId);
                 _timerId = 0;

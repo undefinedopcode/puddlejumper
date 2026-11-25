@@ -12,6 +12,7 @@
 #include <QVector>
 
 #include "profiles.h"
+#include "serverstore.h"
 #include "programstatus.h"
 #include "settings.h"
 #include "workspace.h"
@@ -30,6 +31,7 @@ class TerminalTab;
 class QAction;
 class TerminalWidget;
 class TmuxSession;
+class RexSession;
 class SettingsDialog;
 class TabStrip;
 class ThumbnailSidebar;
@@ -58,9 +60,14 @@ public:
      */
     void openWorkspaceTarget(const QString &target);
     /* A tab showing the screen at `address` (host[:port|:display]) over VNC. */
-    void openVnc(const QString &address);
+    /* `user`, `reducedColour`, `adaptive`: as a saved server has them. */
+    void openVnc(const QString &address, const QString &user = QString(),
+                 bool reducedColour = false, bool adaptive = false);
     /* The same over RDP: host or host:port. */
-    void openRdp(const QString &address);
+    void openRdp(const QString &address, const QString &user = QString());
+    /* Save what's open (and the window's geometry) for next time, as closing
+     * does, without asking: for quitting on a signal (logout, kill). */
+    void saveForQuit();
     /* A tab showing a web page. */
     void openWeb(const QUrl &url);
 
@@ -198,6 +205,24 @@ private:
                     const QString &workspaceId = QString(), bool show = false);
     void newTmuxSession();
     void connectTmuxHost();
+#ifdef PUDDLEJUMPER_REX
+    /* Rex: a session on a Rex server, its terminal in a tab. Closing the tab
+     * detaches; the session goes on running on the server. */
+    RexSession *rexSessionFor(const Tab *tab) const;
+    RexSession *rexSessionFor(const TerminalWidget *pane) const;
+    /* Ask for a server, then a session on it (or a new one). */
+    void newRexTab();
+    /* List a Rex server's sessions and attach to the one chosen (or a new one). */
+    void chooseRexSession(const QUrl &server);
+    /* Attach to a session (or make one, sessionId empty). Its tabs go to the
+     * workspace with id `workspaceId` (the shown one if empty). `quiet`: a
+     * restore, where a session that has gone is skipped without a word. */
+    void openRex(const QUrl &server, const QString &sessionId,
+                 const QString &workspaceId = QString(), bool quiet = false);
+    /* Before closing a Rex tab or pane: false to leave it open (cancelled,
+     * or detached instead because it would end the session). */
+    bool confirmRexClose(RexSession *session, TerminalTab *tab, bool pane);
+#endif
 
     void splitPane(TerminalWidget *pane, Qt::Orientation orientation);
     void closePane(TerminalWidget *pane);
@@ -281,6 +306,14 @@ private:
 
     Settings m_settings;
     ProfileStore m_profiles;
+    ServerStore m_servers;
+    QMenu *m_serversMenu = nullptr;
+    /* Fill the Servers menu: the saved servers, then the other actions. */
+    void rebuildServersMenu();
+    /* Connect to a saved server the way its kind does. */
+    void openSavedServer(const SavedServer &server);
+    /* tmux on `host` over ssh, session `name` (made if it doesn't exist). */
+    void attachTmuxHost(const QString &host, const QString &name);
     SettingsDialog *m_settingsDialog = nullptr;
 
     QSplitter *m_splitter = nullptr;
@@ -301,6 +334,10 @@ private:
     QMenu *m_tmuxMenu = nullptr;
     Notifier *m_notifier = nullptr;
     QList<TmuxSession *> m_tmuxSessions;
+#ifdef PUDDLEJUMPER_REX
+    QList<RexSession *> m_rexSessions;
+    QHash<RexSession *, QString> m_rexWorkspace;   // workspace id
+#endif
     // The workspace (id) each session's tabs belong to.
     QHash<TmuxSession *, QString> m_sessionWorkspace;
 

@@ -1,0 +1,917 @@
+/*
+ * puddlejumper — Qt Widgets port.
+ *
+ * Distributed under the terms of the GNU General Public License v2 or later.
+ */
+
+#include "rexsession.h"
+
+#include "ghosttyreplay.h"
+#include "rexclient.h"
+#include "settings.h"
+
+#include "TerminalDisplay.h"
+
+#include <QJsonArray>
+#include <QLoggingCategory>
+#include <QSet>
+#include <QTimer>
+
+#include <cmath>
+
+Q_LOGGING_CATEGORY(lcRex, "puddlejumper.rex")
+
+namespace {
+
+// Pane ids apart from local panes' and tmux's.
+constexpr int kPaneIdBase = 200000;
+int nextPaneId = 0;
+
+// A write request's data is a JSON string; keystrokes are a few bytes, a
+// paste may be large.
+constexpr qsizetype kWriteChunk = 32 * 1024;
+
+const QString kShellFlavor = QStringLiteral("com.superlogical.terminal.shell");
+
+QString shortId(const QString &id)
+{
+    return id.section(QLatin1Char(':'), -1).left(8);
+}
+
+QJsonObject shellLayout()
+{
+    return QJsonObject{{QStringLiteral("block"), QJsonObject{{QStringLiteral("flavor"), kShellFlavor}}}};
+}
+
+QString str(const QJsonObject &o, const char *key)
+{
+    return o.value(QLatin1String(key)).toString();
+}
+
+// Whether any block_id appears anywhere in a view.
+bool hasBlocks(const QJsonValue &v)
+{
+    if (v.isObject()) {
+        const QJsonObject o = v.toObject();
+        if (!str(o, "block_id").isEmpty())
+            return true;
+        for (auto it = o.begin(); it != o.end(); ++it)
+            if (hasBlocks(it.value()))
+                return true;
+    } else if (v.isArray()) {
+        for (const QJsonValue &e : v.toArray())
+            if (hasBlocks(e))
+                return true;
+    }
+    return false;
+}
+
+// The blocks of a layout tree, in order.
+void layoutBlocks(const QJsonObject &node, QStringList &out)
+{
+    if (const QString id = str(node, "block_id"); !id.isEmpty()) {
+        out << id;
+        return;
+    }
+    const QJsonObject split = node.value(QLatin1String("split")).toObject();
+    if (split.isEmpty())
+        return;
+    layoutBlocks(split.value(QLatin1String("before")).toObject(), out);
+    layoutBlocks(split.value(QLatin1String("after")).toObject(), out);
+}
+
+QString firstBlock(const QJsonObject &node)
+{
+    QStringList ids;
+    layoutBlocks(node, ids);
+    return ids.value(0);
+}
+
+// A window's tiled layer: the one layout panes are shown for.
+QJsonObject tiledLayout(const QJsonObject &window)
+{
+    for (const QJsonValue &l : window.value(QLatin1String("layers")).toArray()) {
+        const QJsonObject layer = l.toObject();
+        if (str(layer, "kind") == QLatin1String("tiled"))
+            return layer.value(QLatin1String("layout")).toObject();
+    }
+    return {};
+}
+
+// A split's two parts, in cells: one cell between them for the handle.
+QPair<int, int> divide(int total, double ratio)
+{
+    const int avail = total - 1;
+    if (avail < 2)
+        return {qMax(1, avail), 1};
+    const int before = qBound(1, int(std::lround(avail * ratio)), avail - 1);
+    return {before, avail - before};
+}
+
+// Rex's proportional layout as cells, for TerminalTab::applyLayout().
+PaneLayout toPaneLayout(const QJsonObject &node, int columns, int lines,
+                        const std::function<int(const QString &)> &paneId)
+{
+    PaneLayout out;
+    out.columns = columns;
+    out.lines = lines;
+    if (const QString id = str(node, "block_id"); !id.isEmpty()) {
+        out.paneId = paneId(id);
+        return out;
+    }
+    const QJsonObject split = node.value(QLatin1String("split")).toObject();
+    const bool across = str(split, "direction") != QLatin1String("vertical");
+    const double ratio = split.value(QLatin1String("ratio")).toDouble(0.5);
+    out.orientation = across ? Qt::Horizontal : Qt::Vertical;
+    const auto [a, b] = divide(across ? columns : lines, ratio);
+    out.children << toPaneLayout(split.value(QLatin1String("before")).toObject(),
+                                 across ? a : columns, across ? lines : a, paneId);
+    out.children << toPaneLayout(split.value(QLatin1String("after")).toObject(),
+                                 across ? b : columns, across ? lines : b, paneId);
+    return out;
+}
+
+void collectLeaves(const PaneLayout &l, QHash<int, QSize> &out)
+{
+    if (l.isLeaf()) {
+        out.insert(l.paneId, QSize(l.columns, l.lines));
+        return;
+    }
+    for (const PaneLayout &c : l.children)
+        collectLeaves(c, out);
+}
+
+// The splits of a layout in one direction: the first block on each side,
+// the before part's extent in cells, and the split's whole extent.
+struct SplitInfo
+{
+    QString beforeBlock, afterBlock;
+    int beforeCells = 0, totalCells = 0;
+};
+
+void collectSplits(const QJsonObject &node, int columns, int lines, bool across, QList<SplitInfo> &out)
+{
+    if (!str(node, "block_id").isEmpty())
+        return;
+    const QJsonObject split = node.value(QLatin1String("split")).toObject();
+    if (split.isEmpty())
+        return;
+    const bool here = str(split, "direction") != QLatin1String("vertical");
+    const auto [a, b] = divide(here ? columns : lines, split.value(QLatin1String("ratio")).toDouble(0.5));
+    const QJsonObject before = split.value(QLatin1String("before")).toObject();
+    const QJsonObject after = split.value(QLatin1String("after")).toObject();
+    if (here == across)
+        out.append({firstBlock(before), firstBlock(after), a, here ? columns : lines});
+    collectSplits(before, here ? a : columns, here ? lines : a, across, out);
+    collectSplits(after, here ? b : columns, here ? lines : b, across, out);
+}
+
+QString colourName(const QColor &c)
+{
+    return c.name(QColor::HexRgb);
+}
+
+} // namespace
+
+RexSession::RexSession(const QUrl &server, const QString &sessionId, const Settings &settings,
+                       const TerminalProfile &profile, QObject *parent)
+    : QObject(parent)
+    , m_server(server)
+    , m_sessionId(sessionId)
+    , m_settings(settings)
+    , m_profile(profile)
+{
+    m_control = new RexControl(this);
+    connect(m_control, &RexControl::event, this, &RexSession::onEvent);
+    connect(m_control, &RexControl::closed, this, [this](const QString &reason) {
+        finish(reason.isEmpty() ? tr("the connection to the server closed") : reason);
+    });
+    m_viewTimer = new QTimer(this);
+    m_viewTimer->setSingleShot(true);
+    m_viewTimer->setInterval(20);
+    connect(m_viewTimer, &QTimer::timeout, this, &RexSession::fetchView);
+}
+
+RexSession::~RexSession()
+{
+    // Tabs belong to the window by now (or are gone); panes not in a tab are
+    // this session's.
+    for (auto &[id, b] : m_blocks)
+        if (b->pane && !b->pane->parent())
+            delete b->pane;
+    delete m_metrics;
+}
+
+// ---- Lookups. ---------------------------------------------------------------
+
+QList<TerminalTab *> RexSession::tabs() const
+{
+    QList<TerminalTab *> out;
+    for (const Window &w : m_windows)
+        if (w.tab)
+            out << w.tab;
+    return out;
+}
+
+bool RexSession::ownsTab(const Tab *tab) const
+{
+    for (const Window &w : m_windows)
+        if (tab && w.tab && static_cast<const Tab *>(w.tab.data()) == tab)
+            return true;
+    return false;
+}
+
+bool RexSession::ownsPane(const TerminalWidget *pane) const
+{
+    return pane && paneForBlock(m_paneBlocks.value(pane->id())) == pane;
+}
+
+RexSession::Window *RexSession::windowOf(const TerminalTab *tab)
+{
+    for (Window &w : m_windows)
+        if (tab && w.tab == tab)
+            return &w;
+    return nullptr;
+}
+
+const RexSession::Window *RexSession::windowOf(const TerminalTab *tab) const
+{
+    return const_cast<RexSession *>(this)->windowOf(tab);
+}
+
+QString RexSession::windowName(const TerminalTab *tab) const
+{
+    const Window *w = windowOf(tab);
+    return w ? w->label : QString();
+}
+
+QString RexSession::blockId(const TerminalWidget *pane) const
+{
+    return pane ? m_paneBlocks.value(pane->id()) : QString();
+}
+
+TerminalWidget *RexSession::paneForBlock(const QString &blockId) const
+{
+    const auto it = m_blocks.find(blockId);
+    return it == m_blocks.end() ? nullptr : it->second->pane.data();
+}
+
+bool RexSession::hasExited(const TerminalWidget *pane) const
+{
+    const auto it = m_blocks.find(blockId(pane));
+    return it != m_blocks.end() && it->second->exited;
+}
+
+QJsonObject RexSession::target(const Block *b) const
+{
+    return QJsonObject{{QStringLiteral("session_id"), m_sessionId}, {QStringLiteral("block_id"), b->id}};
+}
+
+QSize RexSession::cellSize()
+{
+    // Any pane would do, but there may not be one yet, so a hidden one
+    // measures (as for tmux).
+    if (!m_metrics) {
+        m_metrics = new TerminalWidget(kPaneIdBase - 1, m_settings, m_profile, nullptr,
+                                       TerminalWidget::Backend::External);
+        m_metrics->applyAppearance();
+    }
+    return m_metrics->cellSize();
+}
+
+QSize RexSession::paneChrome() const
+{
+    // Rex tabs are always framed, like tmux's, so a pane's chrome is the
+    // same split or not.
+    const int frame = 2 * TerminalWidget::paneBorder();
+    return {frame, frame};
+}
+
+// ---- Attaching and following the view. -------------------------------------
+
+void RexSession::start()
+{
+    m_control->open(m_server);
+    if (!m_sessionId.isEmpty()) {
+        attach();
+        return;
+    }
+    m_control->request(
+        QStringLiteral("session.create"),
+        QJsonObject{{QStringLiteral("initial_windows"),
+                     QJsonArray{QJsonObject{{QStringLiteral("layout"), shellLayout()}}}}},
+        [this](const QJsonObject &payload, const QJsonObject &error) {
+            m_sessionId = str(payload, "session_id");
+            if (!error.isEmpty() || m_sessionId.isEmpty()) {
+                finish(tr("could not create a session: %1").arg(str(error, "message")));
+                return;
+            }
+            attach();
+        });
+}
+
+void RexSession::attach()
+{
+    m_control->request(QStringLiteral("session.attach"), QJsonObject{{QStringLiteral("session_id"), m_sessionId}},
+                       [this](const QJsonObject &payload, const QJsonObject &error) {
+                           if (!error.isEmpty()) {
+                               finish(tr("could not attach: %1").arg(str(error, "message")));
+                               return;
+                           }
+                           m_attached = true;
+                           qCInfo(lcRex) << "attached" << m_sessionId << "on" << m_server;
+                           applyView(payload.value(QLatin1String("view")).toObject());
+                       });
+}
+
+void RexSession::fetchView()
+{
+    if (m_finished || !m_attached)
+        return;
+    if (m_viewPending) {
+        m_viewAgain = true;
+        return;
+    }
+    m_viewPending = true;
+    m_control->request(QStringLiteral("session.view"), QJsonObject{{QStringLiteral("session_id"), m_sessionId}},
+                       [this](const QJsonObject &view, const QJsonObject &error) {
+                           m_viewPending = false;
+                           if (m_finished)
+                               return;
+                           if (!error.isEmpty()) {
+                               if (str(error, "code") == QLatin1String("not_found"))
+                                   finish(tr("the session was ended"));
+                               return;
+                           }
+                           applyView(view);
+                           if (std::exchange(m_viewAgain, false))
+                               fetchView();
+                       });
+}
+
+void RexSession::applyView(const QJsonObject &view)
+{
+    if (m_finished)
+        return;
+    const qint64 revision = view.value(QLatin1String("revision")).toInteger(-1);
+    if (revision >= 0 && revision < m_revision)
+        return;  // older than one applied already
+    m_revision = revision;
+
+    const QString label = str(view, "label");
+    m_label = label.isEmpty() ? shortId(m_sessionId) : label;
+
+    // Windows in the server's order, each with the blocks of its tiled layout.
+    QList<Window> next;
+    QSet<QString> live;
+    for (const QJsonValue &v : view.value(QLatin1String("windows")).toArray()) {
+        const QJsonObject wo = v.toObject();
+        Window w;
+        w.id = str(wo, "window_id");
+        w.label = str(wo, "label");
+        w.layout = tiledLayout(wo);
+        for (const Window &old : std::as_const(m_windows))
+            if (old.id == w.id)
+                w.tab = old.tab;
+        QStringList ids;
+        layoutBlocks(w.layout, ids);
+        if (ids.isEmpty())
+            continue;  // nothing tiled to show
+        for (const QString &id : std::as_const(ids))
+            live.insert(id);
+        next << w;
+    }
+
+    // Windows gone: their tabs go, and their panes with them.
+    for (const Window &old : std::as_const(m_windows)) {
+        bool kept = false;
+        for (const Window &w : std::as_const(next))
+            kept |= w.id == old.id;
+        if (!kept && old.tab)
+            emit tabRemoved(old.tab);
+    }
+    // Blocks gone: their streams close.
+    QStringList gone;
+    for (const auto &[id, b] : m_blocks)
+        if (!live.contains(id))
+            gone << id;
+    for (const QString &id : std::as_const(gone))
+        dropBlock(id);
+
+    const QList<Window> previous = std::exchange(m_windows, next);
+    for (Window &w : m_windows) {
+        QString oldLabel;
+        bool existed = false;
+        for (const Window &old : previous)
+            if (old.id == w.id) {
+                existed = true;
+                oldLabel = old.label;
+            }
+        layoutWindow(w);
+        if (existed && w.tab && oldLabel != w.label)
+            emit tabRenamed(w.tab, w.label);
+    }
+    if (m_windows.isEmpty())
+        endIfEmpty();
+}
+
+void RexSession::layoutWindow(Window &w)
+{
+    const QSize cell = cellSize();
+    const QSize chrome = paneChrome();
+    QSize area = w.tab && w.tab->isVisible() ? w.tab->layoutArea() : m_area;
+    if (area.isEmpty())
+        area = QSize(80 * cell.width() + chrome.width(), 24 * cell.height() + chrome.height());
+    const int columns = qMax(10, (area.width() - chrome.width()) / qMax(1, cell.width()));
+    const int lines = qMax(3, (area.height() - chrome.height()) / qMax(1, cell.height()));
+
+    const PaneLayout layout = toPaneLayout(w.layout, columns, lines, [this](const QString &id) {
+        return block(id)->paneId;
+    });
+
+    const bool fresh = !w.tab;
+    if (fresh) {
+        w.tab = new TerminalTab(nullptr);
+        w.tab->setAlwaysFramed(true);
+        w.tab->setPadding(m_settings.appearance().terminalMargin);
+        TerminalTab *tab = w.tab;
+        // The pane with the focus here is the focused block on the server.
+        connect(tab, &TerminalTab::activePaneChanged, this, [this](TerminalWidget *pane) {
+            const QString id = blockId(pane);
+            if (!id.isEmpty() && !m_finished)
+                m_control->request(QStringLiteral("session.focus_block"),
+                                   QJsonObject{{QStringLiteral("session_id"), m_sessionId},
+                                               {QStringLiteral("block_id"), id}});
+        });
+        connect(tab, &TerminalTab::splitterDragged, this,
+                [this, tab](TerminalWidget *before, Qt::Orientation orientation, int pixels) {
+            if (Window *win = windowOf(tab))
+                splitterDragged(*win, before, orientation, pixels);
+        });
+        connect(tab, &TerminalTab::layoutAreaResized, this, [this, tab]() {
+            if (!tab->isVisible())
+                return;
+            m_area = tab->layoutArea();
+            if (Window *win = windowOf(tab))
+                layoutWindow(*win);
+        });
+    }
+
+    w.tab->applyLayout(layout, [this](int paneId) {
+        Block *b = block(m_paneBlocks.value(paneId));
+        return b->pane ? b->pane.data() : makePane(b);
+    }, cell, chrome);
+
+    // Each block the size its pane has; a block's stream opens once it has
+    // been sized, so its snapshot comes at that size.
+    QHash<int, QSize> sizes;
+    collectLeaves(layout, sizes);
+    for (auto it = sizes.cbegin(); it != sizes.cend(); ++it)
+        sendSize(block(m_paneBlocks.value(it.key())), it.value());
+
+    if (fresh)
+        emit tabAdded(w.tab, w.label);
+}
+
+RexSession::Block *RexSession::block(const QString &id)
+{
+    auto it = m_blocks.find(id);
+    if (it != m_blocks.end())
+        return it->second.get();
+    auto b = std::make_unique<Block>();
+    b->id = id;
+    b->paneId = kPaneIdBase + nextPaneId++;
+    m_paneBlocks.insert(b->paneId, id);
+    Block *raw = b.get();
+    m_blocks.emplace(id, std::move(b));
+    return raw;
+}
+
+TerminalWidget *RexSession::makePane(Block *b)
+{
+    auto *pane = new TerminalWidget(b->paneId, m_settings, m_profile, nullptr, TerminalWidget::Backend::External);
+    pane->applyAppearance();
+    pane->applyScrolling();
+    const QString id = b->id;
+    connect(pane, &TerminalWidget::externalInput, this, [this, id](const QByteArray &bytes) {
+        auto it = m_blocks.find(id);
+        if (it != m_blocks.end())
+            sendInput(it->second.get(), bytes);
+    });
+    b->pane = pane;
+    sendTheme(b);
+    return pane;
+}
+
+void RexSession::openStream(Block *b)
+{
+    if (b->stream || m_finished)
+        return;
+    b->stream = new RexTerminalConnection(m_control, m_sessionId, b->id, this);
+    const QString id = b->id;
+    auto find = [this, id]() -> Block * {
+        auto it = m_blocks.find(id);
+        return it == m_blocks.end() ? nullptr : it->second.get();
+    };
+    connect(b->stream, &RexTerminalConnection::snapshot, this, [this, find](const GhosttySnapshot::Snapshot &s) {
+        if (Block *blk = find())
+            onSnapshot(blk, s);
+    });
+    connect(b->stream, &RexTerminalConnection::output, this, [find](const QByteArray &bytes) {
+        if (Block *blk = find(); blk && blk->pane)
+            blk->pane->feed(bytes);
+    });
+    connect(b->stream, &RexTerminalConnection::marker, this, [this, find](const QJsonObject &m) {
+        if (Block *blk = find())
+            onMarker(blk, m);
+    });
+    connect(b->stream, &RexTerminalConnection::interrupted, this, [id]() {
+        qCInfo(lcRex) << id << "stream interrupted; resuming";
+    });
+    connect(b->stream, &RexTerminalConnection::failed, this, [this, id](const QString &reason) {
+        // A block that has gone takes its stream with it, and the view
+        // change says so.
+        qCInfo(lcRex) << id << "stream ended:" << reason;
+        m_viewTimer->start();
+    });
+    b->stream->open();
+}
+
+void RexSession::dropBlock(const QString &id)
+{
+    auto it = m_blocks.find(id);
+    if (it == m_blocks.end())
+        return;
+    Block *b = it->second.get();
+    if (b->stream) {
+        b->stream->close();
+        b->stream->deleteLater();
+    }
+    // A pane in a tab goes when the tab's layout drops it, or with the tab;
+    // one never put in a tab is ours.
+    if (b->pane && !b->pane->parent())
+        b->pane->deleteLater();
+    m_paneBlocks.remove(b->paneId);
+    m_blocks.erase(it);
+}
+
+void RexSession::onSnapshot(Block *b, const GhosttySnapshot::Snapshot &snapshot)
+{
+    b->screen = QSize(snapshot.terminal.columns, snapshot.terminal.rows);
+    qCDebug(lcRex) << "snapshot" << b->id.right(8) << b->screen;
+    if (!b->pane)
+        return;
+    // The replay resets the screen, history included, so a later snapshot
+    // (a resync, or after the stream couldn't be resumed) rebuilds the pane.
+    b->pane->setScreenSize(b->screen.width(), b->screen.height());
+    b->pane->feed(GhosttySnapshot::replay(snapshot));
+    checkSize(b);
+}
+
+void RexSession::onMarker(Block *b, const QJsonObject &marker)
+{
+    const QString type = str(marker, "type");
+    if (type == QLatin1String("resize")) {
+        const QSize size(marker.value(QLatin1String("cols")).toInt(), marker.value(QLatin1String("rows")).toInt());
+        qCDebug(lcRex) << "marker" << b->id.right(8) << size << "screen" << b->screen;
+        if (size.isEmpty() || size == b->screen) {
+            checkSize(b);
+            return;
+        }
+        const bool widthChanged = size.width() != b->screen.width();
+        b->screen = size;
+        if (b->pane)
+            b->pane->setScreenSize(size.width(), size.height());
+        // Ghostty rewraps lines to a new width and qtermwidget doesn't: only
+        // a fresh snapshot shows what the server has.
+        if (widthChanged && b->stream)
+            b->stream->resync();
+        checkSize(b);
+    } else if (type == QLatin1String("child_exited")) {
+        b->exited = true;
+        b->exitCode = marker.value(QLatin1String("exit_code")).toInt();
+    }
+    // theme: what another client asked for. Panes keep the profile's colours.
+}
+
+void RexSession::onEvent(const QJsonObject &message)
+{
+    // {"type":"event", "payload":{"type":..., "payload":{...}}}; a session's
+    // events are session_event, with {"session_id", "event":{type, payload}}.
+    const QJsonObject outer = message.value(QLatin1String("payload")).toObject();
+    const QString kind = str(outer, "type");
+    const QJsonObject body = outer.value(QLatin1String("payload")).toObject();
+    if (kind == QLatin1String("session_destroyed")) {
+        if (str(body, "session_id") == m_sessionId)
+            finish(tr("the session was ended"));
+        return;
+    }
+    if (kind != QLatin1String("session_event") || str(body, "session_id") != m_sessionId)
+        return;
+    const QJsonObject event = body.value(QLatin1String("event")).toObject();
+    const QString type = str(event, "type");
+    const QJsonObject payload = event.value(QLatin1String("payload")).toObject();
+    if (type == QLatin1String("session_view_changed") || type == QLatin1String("block_closed")) {
+        m_viewTimer->start();
+    } else if (type == QLatin1String("block_event")
+               && str(payload, "name") == QLatin1String("child_exited")) {
+        auto it = m_blocks.find(str(payload, "block_id"));
+        if (it != m_blocks.end()) {
+            it->second->exited = true;
+            it->second->exitCode = payload.value(QLatin1String("payload")).toObject()
+                                       .value(QLatin1String("exit_code")).toInt();
+        }
+    }
+}
+
+// ---- Input, sizes, colours. -------------------------------------------------
+
+void RexSession::sendInput(Block *b, const QByteArray &bytes)
+{
+    // Raw bytes to the block's pty, as the emulator encoded them (the
+    // snapshot gave it the modes: bracketed paste, mouse, keypad).
+    if (b->exited || m_finished)
+        return;
+    for (qsizetype i = 0; i < bytes.size(); i += kWriteChunk) {
+        QJsonObject p = target(b);
+        p.insert(QStringLiteral("args"),
+                 QJsonObject{{QStringLiteral("data"), QString::fromUtf8(bytes.mid(i, kWriteChunk))}});
+        m_control->request(QStringLiteral("com.superlogical.terminal.write"), p);
+    }
+}
+
+void RexSession::sendSize(Block *b, const QSize &cells, bool again)
+{
+    if (m_finished)
+        return;
+    if (cells == b->sent && !again) {
+        openStream(b);
+        return;
+    }
+    qCDebug(lcRex) << "size" << b->id.right(8) << cells << "was" << b->sent << (again ? "again" : "");
+    if (cells != b->sent)
+        b->retries = 0;
+    b->sent = cells;
+    ++b->resizing;
+    const QSize cell = cellSize();
+    QJsonObject p = target(b);
+    p.insert(QStringLiteral("args"), QJsonObject{{QStringLiteral("columns"), cells.width()},
+                                                 {QStringLiteral("rows"), cells.height()},
+                                                 {QStringLiteral("cell_width_px"), cell.width()},
+                                                 {QStringLiteral("cell_height_px"), cell.height()}});
+    const QString id = b->id;
+    m_control->request(QStringLiteral("com.superlogical.terminal.resize"), p,
+                       [this, id](const QJsonObject &, const QJsonObject &error) {
+                           if (!error.isEmpty())
+                               qCWarning(lcRex) << "resize refused:" << error;
+                           auto it = m_blocks.find(id);
+                           if (it == m_blocks.end())
+                               return;
+                           --it->second->resizing;
+                           openStream(it->second.get());
+                           checkSize(it->second.get());
+                       });
+}
+
+void RexSession::checkSize(Block *b)
+{
+    // A server may not end up at the size last asked for (a resize can be
+    // lost while it is busy, or another client may own the size): once the
+    // stream has said what the block is and nothing is on its way, ask
+    // again, a few times. The pane keeps the layout's size meanwhile.
+    if (b->resizing > 0 || b->screen.isEmpty() || b->sent.isEmpty() || b->screen == b->sent)
+        return;
+    if (b->retries >= 3) {
+        qCWarning(lcRex) << "block" << b->id << "stays" << b->screen << "not" << b->sent;
+        return;
+    }
+    ++b->retries;
+    const QString id = b->id;
+    QTimer::singleShot(100 * b->retries, this, [this, id]() {
+        auto it = m_blocks.find(id);
+        if (it != m_blocks.end() && it->second->screen != it->second->sent && it->second->resizing == 0)
+            sendSize(it->second.get(), it->second->sent, true);
+    });
+}
+
+void RexSession::sendTheme(Block *b)
+{
+    // The server answers programs' colour queries (OSC 10/11/4) itself, so
+    // it should know the colours this pane shows.
+    if (!b->pane)
+        return;
+    auto *display = b->pane->findChild<Konsole::TerminalDisplay *>();
+    if (!display)
+        return;
+    const Konsole::ColorEntry *table = display->colorTable();
+    QJsonArray palette;
+    for (int i = 0; i < 8; ++i) {
+        palette.append(QStringLiteral("%1=%2").arg(i).arg(colourName(table[2 + i].color).mid(1)));
+        palette.append(QStringLiteral("%1=%2").arg(8 + i).arg(colourName(table[12 + i].color).mid(1)));
+    }
+    QJsonObject p = target(b);
+    p.insert(QStringLiteral("args"),
+             QJsonObject{{QStringLiteral("foreground"), colourName(table[0].color)},
+                         {QStringLiteral("background"), colourName(table[1].color)},
+                         {QStringLiteral("palette"), palette}});
+    m_control->request(QStringLiteral("com.superlogical.terminal.set_theme"), p,
+                       [](const QJsonObject &, const QJsonObject &error) {
+                           if (!error.isEmpty())
+                               qCInfo(lcRex) << "set_theme refused:" << error;
+                       });
+}
+
+void RexSession::splitterDragged(Window &w, TerminalWidget *before, Qt::Orientation orientation, int pixels)
+{
+    // The handle dragged follows `before`'s part. Where several splits start
+    // with the same pane, it is the one whose part is nearest the size
+    // dragged to. The server finds the split from a block on each side.
+    const QSize cell = cellSize();
+    const QSize chrome = paneChrome();
+    const bool across = orientation == Qt::Horizontal;
+    const QSize area = w.tab ? w.tab->layoutArea() : m_area;
+    const int columns = qMax(10, (area.width() - chrome.width()) / qMax(1, cell.width()));
+    const int lines = qMax(3, (area.height() - chrome.height()) / qMax(1, cell.height()));
+    QList<SplitInfo> splits;
+    collectSplits(w.layout, columns, lines, across, splits);
+    const QString beforeId = blockId(before);
+    const int unit = qMax(1, across ? cell.width() : cell.height());
+    const int cells = qMax(1, qRound(double(pixels - (across ? chrome.width() : chrome.height())) / unit));
+    const SplitInfo *best = nullptr;
+    for (const SplitInfo &s : std::as_const(splits)) {
+        if (s.beforeBlock != beforeId)
+            continue;
+        if (!best || qAbs(s.beforeCells - cells) < qAbs(best->beforeCells - cells))
+            best = &s;
+    }
+    if (!best || best->totalCells < 3)
+        return;
+    const double ratio = qBound(0.05, double(cells) / double(best->totalCells - 1), 0.95);
+    m_control->request(QStringLiteral("session.resize_pane"),
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId},
+                                   {QStringLiteral("before_block_id"), best->beforeBlock},
+                                   {QStringLiteral("after_block_id"), best->afterBlock},
+                                   {QStringLiteral("direction"), across ? QStringLiteral("horizontal")
+                                                                        : QStringLiteral("vertical")},
+                                   {QStringLiteral("ratio"), ratio}});
+}
+
+// ---- Actions. ---------------------------------------------------------------
+
+void RexSession::newWindow()
+{
+    m_control->request(QStringLiteral("session.new_window"),
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId},
+                                   {QStringLiteral("layout"), shellLayout()},
+                                   {QStringLiteral("focus"), true}});
+}
+
+void RexSession::splitPane(TerminalWidget *pane, Qt::Orientation orientation)
+{
+    const QString id = blockId(pane);
+    QString windowId;
+    for (const Window &w : std::as_const(m_windows))
+        if (w.tab && w.tab->contains(pane))
+            windowId = w.id;
+    if (id.isEmpty() || windowId.isEmpty())
+        return;
+    m_control->request(QStringLiteral("session.new_split"),
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId},
+                                   {QStringLiteral("window_id"), windowId},
+                                   {QStringLiteral("anchor_block_id"), id},
+                                   {QStringLiteral("direction"), orientation == Qt::Horizontal
+                                                                     ? QStringLiteral("horizontal")
+                                                                     : QStringLiteral("vertical")},
+                                   {QStringLiteral("layout"), shellLayout()},
+                                   {QStringLiteral("focus"), true}});
+}
+
+void RexSession::closePane(TerminalWidget *pane)
+{
+    const QString id = blockId(pane);
+    if (id.isEmpty())
+        return;
+    m_control->request(QStringLiteral("block.close"),
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId}, {QStringLiteral("block_id"), id}});
+}
+
+void RexSession::closeWindow(TerminalTab *tab)
+{
+    const Window *w = windowOf(tab);
+    if (!w)
+        return;
+    m_control->request(QStringLiteral("session.close_window"),
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId}, {QStringLiteral("window_id"), w->id}});
+}
+
+void RexSession::renameWindow(TerminalTab *tab, const QString &name)
+{
+    const Window *w = windowOf(tab);
+    if (!w)
+        return;
+    m_control->request(QStringLiteral("session.set_window_label"),
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId},
+                                   {QStringLiteral("window_id"), w->id},
+                                   {QStringLiteral("label"), name}});
+}
+
+void RexSession::detach()
+{
+    if (m_finished)
+        return;
+    if (m_sessionId.isEmpty() || !m_control->isReady()) {
+        finish(QString());
+        return;
+    }
+    m_control->request(QStringLiteral("session.detach"), QJsonObject{{QStringLiteral("session_id"), m_sessionId}},
+                       [this](const QJsonObject &, const QJsonObject &) { finish(tr("detached")); });
+}
+
+void RexSession::destroySession()
+{
+    if (m_finished)
+        return;
+    if (m_sessionId.isEmpty() || !m_control->isReady()) {
+        finish(QString());
+        return;
+    }
+    m_control->request(QStringLiteral("session.destroy"), QJsonObject{{QStringLiteral("session_id"), m_sessionId}},
+                       [this](const QJsonObject &, const QJsonObject &error) {
+                           finish(error.isEmpty() ? tr("the session was ended") : str(error, "message"));
+                       });
+}
+
+void RexSession::endIfEmpty()
+{
+    // Nothing left to show. A session with no blocks at all (a server may
+    // keep one) is ended rather than left behind; one with floating blocks
+    // is left be.
+    m_control->request(QStringLiteral("session.view"), QJsonObject{{QStringLiteral("session_id"), m_sessionId}},
+                       [this](const QJsonObject &view, const QJsonObject &error) {
+                           if (!error.isEmpty() || hasBlocks(view)) {
+                               finish(error.isEmpty() ? tr("nothing left to show") : tr("the session ended"));
+                               return;
+                           }
+                           m_control->request(QStringLiteral("session.destroy"),
+                                              QJsonObject{{QStringLiteral("session_id"), m_sessionId}},
+                                              [this](const QJsonObject &, const QJsonObject &) {
+                                                  finish(tr("the session ended"));
+                                              });
+                       });
+}
+
+void RexSession::finish(const QString &reason)
+{
+    if (m_finished)
+        return;
+    m_finished = true;
+    qCInfo(lcRex) << "session" << m_sessionId << "ended:" << reason;
+    for (auto &[id, b] : m_blocks)
+        if (b->stream)
+            b->stream->close();
+    // Close the control connection once this has returned (we may be inside
+    // one of its callbacks).
+    QTimer::singleShot(0, m_control, &RexControl::close);
+    for (const Window &w : std::exchange(m_windows, {}))
+        if (w.tab)
+            emit tabRemoved(w.tab);
+    emit ended(reason);
+}
+
+void RexSession::listSessions(const QUrl &server, QObject *context,
+                              std::function<void(const QList<QPair<QString, QString>> &, const QString &)> done)
+{
+    auto *control = new RexControl(context);
+    auto finished = std::make_shared<bool>(false);
+    auto reply = [control, finished, done](const QList<QPair<QString, QString>> &list, const QString &error) {
+        if (std::exchange(*finished, true))
+            return;
+        done(list, error);
+        control->disconnect();
+        QTimer::singleShot(0, control, [control]() {
+            control->close();
+            control->deleteLater();
+        });
+    };
+    QObject::connect(control, &RexControl::closed, control, [reply](const QString &reason) {
+        reply({}, reason.isEmpty() ? QObject::tr("could not connect") : reason);
+    });
+    control->open(server);
+    control->request(QStringLiteral("session.list"), {},
+                     [reply](const QJsonObject &payload, const QJsonObject &error) {
+                         if (!error.isEmpty()) {
+                             reply({}, str(error, "message"));
+                             return;
+                         }
+                         QList<QPair<QString, QString>> list;
+                         for (const QJsonValue &v : payload.value(QLatin1String("sessions")).toArray()) {
+                             const QJsonObject s = v.toObject();
+                             const QString id = str(s, "session_id");
+                             QString label = str(s, "label");
+                             if (label.isEmpty())
+                                 label = shortId(id);
+                             list.append({id, label});
+                         }
+                         reply(list, QString());
+                     });
+}

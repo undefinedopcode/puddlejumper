@@ -23,6 +23,7 @@ class QLabel;
 class QLineEdit;
 class QToolButton;
 class QGroupBox;
+class ServerStore;
 class QVBoxLayout;
 
 /*
@@ -44,10 +45,11 @@ class SettingsDialog : public QDialog
     Q_OBJECT
 
 public:
+    /* `servers`: the saved servers, for a Servers page (none without). */
     SettingsDialog(Settings &settings, ProfileStore &profiles,
-                   QWidget *parent = nullptr);
+                   QWidget *parent = nullptr, ServerStore *servers = nullptr);
 
-    enum Section { Appearance = 0, Terminal, Window, Profiles };
+    enum Section { Appearance = 0, Terminal, Window, Profiles, Servers };
 
     /* Open on a specific page. */
     void showSection(Section section);
@@ -57,7 +59,15 @@ private:
     QWidget *buildTerminalPage();
     QWidget *buildWindowPage();
     QWidget *buildProfilesPage();
+    QWidget *buildServersPage();
     void syncFromSettings();
+
+    /* Servers page plumbing, as for profiles: the form edits the selected
+     * entry and commits on field change. */
+    void rebuildServerList(const QString &selectId = QString());
+    void loadServerIntoForm(const QString &id);
+    void commitServerForm();
+    void updateServerFields();
 
     /*
      * Add a titled group to a page and return its form. Forms made here get
@@ -100,6 +110,24 @@ private:
 
     Settings &m_settings;
     ProfileStore &m_profiles;
+    ServerStore *m_servers = nullptr;
+
+    // Servers page.
+    QListWidget *m_serverList = nullptr;
+    QGroupBox *m_serverFormBox = nullptr;
+    QFormLayout *m_serverForm = nullptr;
+    QComboBox *m_serverKind = nullptr;
+    QLineEdit *m_serverName = nullptr;
+    QLineEdit *m_serverAddress = nullptr;
+    QLabel *m_serverHint = nullptr;
+    QLineEdit *m_serverSession = nullptr;
+    QLineEdit *m_serverUser = nullptr;
+    QCheckBox *m_serverReducedColour = nullptr;
+    QCheckBox *m_serverAdaptive = nullptr;
+    QToolButton *m_serverRemove = nullptr;
+    QToolButton *m_serverUp = nullptr;
+    QToolButton *m_serverDown = nullptr;
+    bool m_loadingServer = false;
     QListWidget *m_sections = nullptr;
     QLabel *m_pageTitle = nullptr;
     QStackedWidget *m_pages = nullptr;

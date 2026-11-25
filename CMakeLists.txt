@@ -88,6 +88,8 @@ qt_add_executable(puddlejumper
     src-widgets/tmuxworkspace.h
     src-widgets/vncclient.cpp
     src-widgets/vncclient.h
+    src-widgets/serverstore.cpp
+    src-widgets/serverstore.h
     src-widgets/remoteclient.h
     src-widgets/vnccrypto.cpp
     src-widgets/vnccrypto.h
@@ -151,6 +153,22 @@ if(UNIX AND NOT APPLE)
         target_compile_definitions(puddlejumper PRIVATE PUDDLEJUMPER_DBUS)
         target_link_libraries(puddlejumper PRIVATE Qt6::DBus)
     endif()
+endif()
+
+# Rex tabs: sessions on a Rex server, over Qt WebSockets.
+find_package(Qt6 6.5 QUIET OPTIONAL_COMPONENTS WebSockets)
+if(TARGET Qt6::WebSockets)
+    message(STATUS "Rex tabs: on")
+    target_sources(puddlejumper PRIVATE
+        src-widgets/rexsession.cpp src-widgets/rexsession.h
+        src-widgets/rexclient.cpp src-widgets/rexclient.h
+        src-widgets/rexterminalstream.cpp src-widgets/rexterminalstream.h
+        src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
+        src-widgets/ghosttyreplay.cpp src-widgets/ghosttyreplay.h)
+    target_compile_definitions(puddlejumper PRIVATE PUDDLEJUMPER_REX)
+    target_link_libraries(puddlejumper PRIVATE Qt6::WebSockets)
+else()
+    message(STATUS "Rex tabs: off (no Qt WebSockets)")
 endif()
 
 # Windows: a GUI program (no console window of its own), PuddleJumper.exe.
@@ -247,6 +265,7 @@ qt_add_executable(probe-settingsdialog
     src-widgets/appicon.cpp src-widgets/appicon.h
     src-widgets/settingsdialog.cpp src-widgets/settingsdialog.h
     src-widgets/settings.cpp src-widgets/settings.h
+    src-widgets/serverstore.cpp src-widgets/serverstore.h
     src-widgets/profiles.cpp src-widgets/profiles.h
     src-widgets/colorscheme.cpp src-widgets/colorscheme.h
     src-widgets/colorschemeeditor.cpp src-widgets/colorschemeeditor.h
@@ -279,6 +298,18 @@ qt_add_executable(test-programstatus
 target_link_libraries(test-programstatus PRIVATE Qt6::Core)
 set_target_properties(test-programstatus PROPERTIES AUTOMOC ON)
 target_include_directories(test-programstatus PRIVATE src-widgets)
+
+# ---------------------------------------------------------------------------
+# test-serverstore — saved servers through QSettings and back. Dev tool only;
+# never installed. Run: ./build/test-serverstore
+# ---------------------------------------------------------------------------
+find_package(Qt6 6.5 QUIET OPTIONAL_COMPONENTS Test)
+qt_add_executable(test-serverstore
+    src-widgets/dev/test_serverstore.cpp
+    src-widgets/serverstore.cpp src-widgets/serverstore.h
+)
+target_link_libraries(test-serverstore PRIVATE Qt6::Core Qt6::Test)
+target_include_directories(test-serverstore PRIVATE src-widgets)
 
 # ---------------------------------------------------------------------------
 # test-ghosttysnapshot — the Ghostty snapshot decoder against Ghostty's golden
@@ -337,6 +368,29 @@ if(TARGET Qt6::WebSockets)
     )
     target_link_libraries(test-rexclient PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets qtermwidget)
     target_include_directories(test-rexclient PRIVATE src-widgets)
+
+    # test-rexsession — RexSession (a Rex tab) with real TerminalWidget panes
+    # against a running server. Run: ./build/test-rexsession http://127.0.0.1:51433
+    qt_add_executable(test-rexsession
+        src-widgets/dev/test_rexsession.cpp
+        src-widgets/rexsession.cpp src-widgets/rexsession.h
+        src-widgets/rexclient.cpp src-widgets/rexclient.h
+        src-widgets/rexterminalstream.cpp src-widgets/rexterminalstream.h
+        src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
+        src-widgets/ghosttyreplay.cpp src-widgets/ghosttyreplay.h
+        src-widgets/terminalwidget.cpp src-widgets/terminalwidget.h
+        src-widgets/terminaltab.cpp src-widgets/terminaltab.h
+        src-widgets/tab.h
+        src-widgets/settings.cpp src-widgets/settings.h
+        src-widgets/profiles.cpp src-widgets/profiles.h
+        src-widgets/colorscheme.cpp src-widgets/colorscheme.h
+        src-widgets/formername.cpp src-widgets/formername.h
+        src-widgets/procinfo.cpp src-widgets/procinfo.h
+        src-widgets/programstatus.cpp src-widgets/programstatus.h
+        src-widgets/screenshotoverlay.cpp src-widgets/screenshotoverlay.h
+    )
+    target_link_libraries(test-rexsession PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets qtermwidget)
+    target_include_directories(test-rexsession PRIVATE src-widgets)
 endif()
 
 # With a libghostty-vt build (in a Ghostty checkout: zig build -Demit-lib-vt,
