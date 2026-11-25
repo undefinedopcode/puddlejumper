@@ -28,6 +28,7 @@ add_library(qtermwidget STATIC
     lib/Session.cpp
     lib/ShellCommand.cpp
     lib/TerminalCharacterDecoder.cpp
+    lib/TerminalGraphics.cpp
     lib/TerminalDisplay.cpp
     lib/tools.cpp
     lib/Vt102Emulation.cpp

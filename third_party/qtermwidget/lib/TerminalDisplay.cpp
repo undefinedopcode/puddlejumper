@@ -22,6 +22,7 @@
 
 // Own
 #include "TerminalDisplay.h"
+#include "PlaceholderDiacritics.h"
 
 // Qt
 #include <QAbstractButton>
@@ -1487,6 +1488,16 @@ void TerminalDisplay::updateImage()
   // update the parts of the display which have changed
   update(dirtyRegion);
 
+  // puddlejumper: images aren't in the characters compared above. While any
+  // show, or when they change, all is drawn again: they move with the text,
+  // and over unchanged cells.
+  const quint64 graphicsGeneration = _screenWindow->graphicsGeneration();
+  const bool graphicsShown = !_screenWindow->graphicsPlacements().isEmpty();
+  if (graphicsShown || _graphicsShown || graphicsGeneration != _graphicsGeneration)
+    update();
+  _graphicsShown = graphicsShown;
+  _graphicsGeneration = graphicsGeneration;
+
   if ( _hasBlinker && !_blinkTimer->isActive()) _blinkTimer->start( TEXT_BLINK_DELAY );
   if (!_hasBlinker && _blinkTimer->isActive()) { _blinkTimer->stop(); _blinking = false; }
   delete[] dirtyMask;
@@ -1716,7 +1727,6 @@ void TerminalDisplay::paintEvent( QPaintEvent* pe )
   {
     drawBackground(paint,*rect,palette().window().color(),
                    true /* use opacity setting */);
-    drawContents(paint, *rect, true);
     // Text is redrawn one cell further out on each side, so the overhang of a
     // glyph just outside the repainted area comes back too. The painter is
     // clipped to the paint region, so nothing outside it changes. Building a
@@ -1724,10 +1734,228 @@ void TerminalDisplay::paintEvent( QPaintEvent* pe )
     // rects from drawing the same antialiased text twice.
     textRegion |= rect->adjusted(-_fontWidth, 0, _fontWidth, 0);
   }
+  // puddlejumper: images in their layers (kitty's z-index): under cells with
+  // a background colour of their own, under text, and over it.
+  // Animations on to the frame due, and back when the next is.
+  if (_screenWindow)
+  {
+    const qint64 due = _screenWindow->graphicsAnimate();
+    if (due >= 0)
+    {
+      if (!_graphicsAnimationTimer)
+      {
+        _graphicsAnimationTimer = new QTimer(this);
+        _graphicsAnimationTimer->setSingleShot(true);
+        connect(_graphicsAnimationTimer, &QTimer::timeout, this, qOverload<>(&QWidget::update));
+      }
+      _graphicsAnimationTimer->start(int(qBound(qint64(10), due, qint64(60000))));
+    }
+  }
+  const QList<GraphicsPlacement> graphics =
+      _screenWindow ? _screenWindow->graphicsPlacements() : QList<GraphicsPlacement>();
+  constexpr qint32 kUnderBackgrounds = -1073741824;   // INT32_MIN / 2
+  drawGraphics(paint, graphics, INT32_MIN, kUnderBackgrounds);
+  for (auto rect = regToDraw.begin(); rect != regToDraw.end(); rect++)
+    drawContents(paint, *rect, true);
+  drawGraphics(paint, graphics, kUnderBackgrounds, 0);
+  drawPlaceholders(paint);
   for (auto rect = textRegion.begin(); rect != textRegion.end(); rect++)
     drawContents(paint, *rect, false);
+  drawGraphics(paint, graphics, 0, INT32_MAX);
   drawInputMethodPreeditString(paint,preeditRect());
   paintFilters(paint);
+}
+
+void TerminalDisplay::drawGraphics(QPainter &painter, const QList<GraphicsPlacement> &placements,
+                                   qint32 fromZ, qint32 toZ)
+{
+  const QPointF origin = contentsRect().topLeft() + QPoint(_leftMargin, _topMargin);
+  const qreal dpr = devicePixelRatioF();
+  for (const GraphicsPlacement &p : placements)
+  {
+    // [fromZ, toZ), the top layer taking the highest z too
+    if (p.z < fromZ || (p.z >= toZ && toZ != INT32_MAX))
+      continue;
+    const QRectF target(origin.x() + (p.column + p.offsetX) * _fontWidth,
+                        origin.y() + (p.row + p.offsetY) * _fontHeight,
+                        p.width * _fontWidth, p.height * _fontHeight);
+    const QSize pixels = (target.size() * dpr).toSize();
+    if (pixels.isEmpty())
+      continue;
+    const QPixmap pixmap = graphicsPixmap(p, pixels);
+    if (!pixmap.isNull())
+      painter.drawPixmap(target.topLeft(), pixmap);
+  }
+}
+
+QPixmap TerminalDisplay::graphicsPixmap(const GraphicsPlacement &p, const QSize &pixels)
+{
+  QImage image = _screenWindow->graphicsImage(p.imageId);
+  if (image.isNull())
+    return {};
+  // Scaled once, not at every paint: the screen is drawn again whenever
+  // anything changes while images show. Each frame of an animation is an
+  // image of its own; an indexed one is drawn again in new colours.
+  QRgb palette[256];
+  size_t colours = 0;
+  const bool indexed = TerminalGraphics::isIndexed(image);
+  if (indexed)
+  {
+    graphicsPalette(palette);
+    colours = qHashBits(palette, sizeof palette);
+  }
+  const QString key = QStringLiteral("%1/%2/%3,%4,%5,%6/%7x%8/%9")
+                          .arg(p.imageId).arg(image.cacheKey())
+                          .arg(p.source.x()).arg(p.source.y())
+                          .arg(p.source.width()).arg(p.source.height())
+                          .arg(pixels.width()).arg(pixels.height()).arg(colours);
+  QPixmap pixmap = _graphicsPixmaps.value(key);
+  if (!pixmap.isNull())
+    return pixmap;
+  if (_graphicsPixmaps.size() > 128)
+    _graphicsPixmaps.clear();
+  if (indexed)
+    image = TerminalGraphics::colourize(image.copy(p.source), palette);
+  else
+    image = image.copy(p.source);
+  pixmap = QPixmap::fromImage(image.scaled(pixels, Qt::IgnoreAspectRatio,
+                                           indexed ? Qt::FastTransformation : Qt::SmoothTransformation));
+  pixmap.setDevicePixelRatio(devicePixelRatioF());
+  _graphicsPixmaps.insert(key, pixmap);
+  return pixmap;
+}
+
+void TerminalDisplay::graphicsPalette(QRgb *palette256) const
+{
+  for (int i = 0; i < 248; i++)
+    palette256[i] = CharacterColor(COLOR_SPACE_256, i).color(_colorTable).rgb();
+  const QRgb foreground = _colorTable[DEFAULT_FORE_COLOR].color.rgb();
+  const QRgb background = _colorTable[DEFAULT_BACK_COLOR].color.rgb();
+  palette256[248] = background;
+  palette256[249] = foreground;
+  // Selection and cursor text colours come from the cell here: kitty's
+  // stand-ins for that case.
+  palette256[250] = foreground;   // selection background
+  palette256[251] = background;   // selection foreground
+  palette256[252] = _cursorColor.isValid() ? _cursorColor.rgb() : foreground;
+  palette256[253] = background;   // cursor text
+  palette256[254] = foreground;   // a link under the mouse
+  palette256[255] = foreground;
+}
+
+// The base character of a cell, and its combining characters (if any).
+static char32_t cellCharacters(const Character &ch, const uint **marks, int *markCount)
+{
+  *marks = nullptr;
+  *markCount = 0;
+  if (!(ch.rendition & RE_EXTENDED_CHAR))
+    return ch.character;
+  ushort length = 0;
+  const uint *chars = ExtendedCharTable::instance.lookupExtendedChar(ch.character, length);
+  if (!chars || length == 0)
+    return 0;
+  *marks = chars + 1;
+  *markCount = length - 1;
+  return chars[0];
+}
+
+static bool isImagePlaceholder(const Character &ch)
+{
+  const uint *marks;
+  int count;
+  return cellCharacters(ch, &marks, &count) == kImagePlaceholder;
+}
+
+static int placeholderNumber(uint mark)
+{
+  const auto begin = std::begin(kPlaceholderDiacritics);
+  const auto end = std::end(kPlaceholderDiacritics);
+  const auto it = std::lower_bound(begin, end, char32_t(mark));
+  return it != end && *it == mark ? int(it - begin) : -1;
+}
+
+void TerminalDisplay::drawPlaceholders(QPainter &painter)
+{
+  if (!_screenWindow || !_image)
+    return;
+  const QList<GraphicsPlacement> virtuals = _screenWindow->graphicsVirtualPlacements();
+  if (virtuals.isEmpty())
+    return;
+  const QPointF origin = contentsRect().topLeft() + QPoint(_leftMargin, _topMargin);
+  const qreal dpr = devicePixelRatioF();
+
+  for (int y = 0; y < _usedLines; y++)
+  {
+    // The placeholder to the left, whose row, column and top byte of the
+    // image id a cell without them carries on.
+    bool left = false;
+    int leftRow = 0, leftColumn = 0, leftHigh = 0;
+    quint32 leftColour = 0;
+    for (int x = 0; x < _usedColumns; x++)
+    {
+      const Character &ch = _image[loc(x, y)];
+      const uint *marks;
+      int count;
+      if (cellCharacters(ch, &marks, &count) != kImagePlaceholder)
+      {
+        left = false;
+        continue;
+      }
+      int given[3] = { -1, -1, -1 };
+      for (int i = 0; i < qMin(count, 3); i++)
+        given[i] = placeholderNumber(marks[i]);
+      const quint32 colour = ch.foregroundColor.value();
+      int row, column, high;
+      const bool same = left && leftColour == colour;
+      if (count == 0 && same)
+      {
+        row = leftRow; column = leftColumn + 1; high = leftHigh;
+      }
+      else if (count == 1 && same && leftRow == given[0])
+      {
+        row = given[0]; column = leftColumn + 1; high = leftHigh;
+      }
+      else if (count == 2 && same && leftRow == given[0] && leftColumn == given[1] - 1)
+      {
+        row = given[0]; column = given[1]; high = leftHigh;
+      }
+      else
+      {
+        row = qMax(0, given[0]); column = qMax(0, given[1]); high = qMax(0, given[2]);
+      }
+      left = true;
+      leftRow = row; leftColumn = column; leftHigh = high; leftColour = colour;
+
+      // The image's newest virtual placement (placement ids would come in
+      // the underline colour, which this doesn't keep).
+      const quint32 id = (quint32(high & 0xff) << 24) | (colour & 0xffffff);
+      const GraphicsPlacement *p = nullptr;
+      for (const GraphicsPlacement &v : virtuals)
+      {
+        if (v.imageId == id && (!p || v.serial > p->serial))
+          p = &v;
+      }
+      if (!p || column >= p->columns || row >= p->rows)
+        continue;
+
+      // This cell's part of the placement's box, in which the image is fitted.
+      const QRectF imageInBox(p->offsetX * _fontWidth, p->offsetY * _fontHeight,
+                              p->width * _fontWidth, p->height * _fontHeight);
+      const QRectF cellInBox(column * _fontWidth, row * _fontHeight, _fontWidth, _fontHeight);
+      const QRectF part = imageInBox & cellInBox;
+      if (part.isEmpty())
+        continue;
+      const QPixmap pixmap = graphicsPixmap(*p, (imageInBox.size() * dpr).toSize());
+      if (pixmap.isNull())
+        continue;
+      const QRectF target(origin.x() + x * _fontWidth + (part.left() - cellInBox.left()),
+                          origin.y() + y * _fontHeight + (part.top() - cellInBox.top()),
+                          part.width(), part.height());
+      const QRectF source((part.left() - imageInBox.left()) * dpr, (part.top() - imageInBox.top()) * dpr,
+                          part.width() * dpr, part.height() * dpr);
+      painter.drawPixmap(target, pixmap, source);
+    }
+  }
 }
 
 QPoint TerminalDisplay::cursorPosition() const
@@ -1991,6 +2219,9 @@ void TerminalDisplay::drawContents(QPainter &paint, const QRect &rect, bool back
       }
 
       bool lineDraw = isLineChar(_image[loc(x,y)]);
+      // puddlejumper: kitty's image placeholders show part of an image (see
+      // drawPlaceholders()), not a glyph; runs of them are kept apart.
+      const bool placeholder = isImagePlaceholder(_image[loc(x,y)]);
       bool doubleWidth = (_image[ qMin(loc(x,y)+1,_imageSize) ].character == 0);
       int charWidth = charAdvance(fm, static_cast<uint>(c));
       bool bigWidth = _fixedFont && !doubleWidth && charWidth > _fontWidth;
@@ -2012,7 +2243,8 @@ void TerminalDisplay::drawContents(QPainter &paint, const QRect &rect, bool back
              !(_fixedFont && (nxtC = _image[loc(x+len,y)].character) && (nxtCharWidth = charAdvance(fm, nxtC)) < _fontWidth) &&
              !bigWidth &&
              !(_fixedFont && !nxtDoubleWidth && nxtC && nxtCharWidth > _fontWidth) &&
-             isLineChar(_image[loc(x+len,y)]) == lineDraw) // Assignment!
+             isLineChar(_image[loc(x+len,y)]) == lineDraw && // Assignment!
+             isImagePlaceholder(_image[loc(x+len,y)]) == placeholder)
       {
         c = _image[loc(x+len,y)].character;
         if (_image[loc(x+len,y)].rendition & RE_EXTENDED_CHAR)
@@ -2048,6 +2280,12 @@ void TerminalDisplay::drawContents(QPainter &paint, const QRect &rect, bool back
       }
       if ((x+len < _usedColumns) && (!_image[loc(x+len,y)].character))
         len++; // Adjust for trailing part of multi-column character
+
+      if (placeholder && !backgroundPass)
+      {
+        x += len - 1;
+        continue;
+      }
 
             bool save__fixedFont = _fixedFont;
          if (lineDraw)

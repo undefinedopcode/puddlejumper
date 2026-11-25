@@ -39,6 +39,7 @@
 
 // Konsole
 #include "konsole_wcwidth.h"
+#include "PlaceholderDiacritics.h"
 #include "TerminalCharacterDecoder.h"
 
 using namespace Konsole;
@@ -680,14 +681,18 @@ void Screen::displayCharacter(char32_t c)
     // We indicate the fact that a newline has to be triggered by
     // putting the cursor one right to the last column of the screen.
 
-    int w = konsole_wcwidth(c);
+    // puddlejumper: kitty's image placeholder takes a cell, whatever the
+    // platform's width for a private-use character.
+    int w = c == kImagePlaceholder ? 1 : konsole_wcwidth(c);
     if (w < 0)
         return; // Non-printable character
     if (w == 0
         // Also, make an extended character with a pair of flag codes
         || (w == 1 && isRegionalIndicator(c)))
     {
-        if (w == 0 && QChar(c).category() != QChar::Mark_NonSpacing)
+        // puddlejumper: QChar::category(char32_t), not QChar(c), which cuts
+        // characters past U+FFFF (combining ones among them) to 16 bits.
+        if (w == 0 && QChar::category(c) != QChar::Mark_NonSpacing)
             return;
         // Find previous "real character" to try to combine with
         int charToCombineWithX = qMin(cuX, screenLines[cuY].length());
@@ -935,6 +940,20 @@ void Screen::scrollDown(int from, int n)
     clearImage(loc(0,from),loc(columns-1,from+n-1),' ');
 }
 
+void Screen::moveCursorPastImage(int columns, int rows)
+{
+    for (int i = 1; i < rows; i++)
+        index();
+    const int x = cuX + columns;
+    if (x >= this->columns)
+    {
+        cuX = 0;
+        index();
+    }
+    else
+        cuX = x;
+}
+
 void Screen::setCursorYX(int y, int x)
 {
     setCursorY(y); setCursorX(x);
@@ -1048,6 +1067,9 @@ void Screen::moveImage(int dest, int sourceBegin, int sourceEnd)
         }
     }
 
+    // puddlejumper: images anchored on these lines move with them.
+    _graphics.linesMoved(sourceBegin/columns, sourceEnd/columns, dest/columns - sourceBegin/columns);
+
     if (lastPos != -1)
     {
         int diff = dest - sourceBegin; // Scroll by this amount
@@ -1113,6 +1135,8 @@ void Screen::clearEntireScreen()
     }
 
     clearImage(loc(0,0),loc(columns-1,lines-1),' ');
+    // puddlejumper: and the images on it, as kitty clears them.
+    _graphics.screenCleared(lines);
 }
 
 /*! fill screen with 'E'
@@ -1447,6 +1471,7 @@ void Screen::addHistLine()
         history->addLine( lineProperties[0] & LINE_WRAPPED );
 
         int newHistLines = history->getLines();
+        _graphics.historyLineAdded(newHistLines); // puddlejumper
 
         bool beginIsTL = (selBegin == selTopLeft);
 
@@ -1503,12 +1528,16 @@ void Screen::setScroll(const HistoryType& t , bool copyPreviousScroll)
     clearSelection();
 
     if ( copyPreviousScroll )
+    {
         history = t.scroll(history);
+        _graphics.historyResized(history->getLines()); // puddlejumper
+    }
     else
     {
         HistoryScroll* oldScroll = history;
         history = t.scroll(nullptr);
         delete oldScroll;
+        _graphics.historyCleared(); // puddlejumper
     }
 }
 

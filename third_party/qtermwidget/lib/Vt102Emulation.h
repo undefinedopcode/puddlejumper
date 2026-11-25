@@ -145,6 +145,18 @@ private:
   bool tmuxEscPending = false;
   bool inTmuxPassthrough() const;
   void unwrapTmuxPassthrough();
+  // puddlejumper: strings that can run to megabytes, gathered here rather
+  // than in tokenBuffer: kitty graphics commands (ESC _ G ... ESC \), and
+  // tmux's passthrough, which may carry them.
+  enum class LongString { None, Graphics, Passthrough };
+  LongString longString = LongString::None;
+  QByteArray graphicsData;          // after "ESC _ G"
+  std::u32string passthroughData;   // after "ESC P tmux;"
+  bool longStringOverflow = false;
+  bool longStringEscPending = false;
+  // Takes a character of a long string; true if it was one.
+  bool receiveLongString(char32_t cc);
+  void processGraphicsCommand(const QByteArray &body);
 #define MAXARGS 15
   void addDigit(int dig);
   void addArgument();
@@ -170,6 +182,7 @@ private:
   void reportAnswerBack();
   void reportCursorPosition();
   void reportTerminalParms(int p);
+  void reportPixelSize(bool cell);
   // DECRPM responses to DECRQM queries
   void reportAnsiMode(int mode, int status);
   void reportDecMode(int mode, int status);

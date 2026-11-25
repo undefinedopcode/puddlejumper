@@ -287,6 +287,13 @@ public:
    */
   void setAnswerProgramStatusQuery(bool answer) { _answerProgramStatusQuery = answer; }
   bool answerProgramStatusQuery() const { return _answerProgramStatusQuery; }
+  /**
+   * puddlejumper: a cell's size in device pixels, the unit images are
+   * measured in (kitty's graphics protocol, and the CSI 14 t and 16 t size
+   * reports). Set by the session from its view.
+   */
+  void setCellPixelSize(const QSize &size) { _cellPixelSize = size; }
+  QSize cellPixelSize() const { return _cellPixelSize; }
 
 public slots:
 
@@ -528,6 +535,7 @@ private:
   bool _bracketedPasteMode;
   bool _answerQueries = true;   // puddlejumper
   bool _answerProgramStatusQuery = true;   // puddlejumper
+  QSize _cellPixelSize;   // puddlejumper
   QTimer _bulkTimer1{this};
   QTimer _bulkTimer2{this};
   QStringDecoder _toUtf16;

@@ -594,6 +594,18 @@ void Session::updateTerminalSize()
         }
     }
 
+    // puddlejumper: a cell's size in device pixels, for images (kitty's
+    // graphics protocol) and the size in pixels programs are told.
+    for (TerminalDisplay *view : std::as_const(_views)) {
+        if (!view->isHidden() && view->fontWidth() > 0 && view->fontHeight() > 0) {
+            const qreal dpr = view->devicePixelRatioF();
+            const QSize cell(qRound(view->fontWidth() * dpr), qRound(view->fontHeight() * dpr));
+            _emulation->setCellPixelSize(cell);
+            _shellProcess->setCellPixelSize(cell);
+            break;
+        }
+    }
+
     // backend emulation must have a _terminal of at least 1 column x 1 line in size
     if ( minLines > 0 && minColumns > 0 ) {
         _emulation->setImageSize( minLines , minColumns );

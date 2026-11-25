@@ -23,6 +23,8 @@
 
 // Qt
 #include <QColor>
+#include <QHash>
+#include <QPixmap>
 #include <QPointer>
 #include <QScrollBar>
 #include <QString>
@@ -30,6 +32,7 @@
 // Konsole
 #include "Filter.h"
 #include "Character.h"
+#include "TerminalGraphics.h"
 #include "qtermwidget.h"
 //#include "konsole_export.h"
 #define KONSOLEPRIVATE_EXPORT
@@ -766,6 +769,23 @@ private:
     qreal _boldLetterSpacing = 0; // puddlejumper: letter spacing fitting the bold face to the cell
     int  _drawTextAdditionHeight;   // additional height to prevent font trancation
     bool _drawTextTestFlag;         // indicate it is a testing or not
+
+    // puddlejumper: images (see drawGraphics()), scaled for drawing, by
+    // image, source rectangle and size; the image each came from; and what
+    // the last update saw of them.
+    QHash<QString, QPixmap> _graphicsPixmaps;
+    QTimer *_graphicsAnimationTimer = nullptr;
+    bool _graphicsShown = false;
+    quint64 _graphicsGeneration = 0;
+    void drawGraphics(QPainter &painter, const QList<GraphicsPlacement> &placements,
+                      qint32 fromZ, qint32 toZ);
+    // Cells holding kitty's image placeholder (U+10EEEE) show their part of
+    // the image their colour names.
+    void drawPlaceholders(QPainter &painter);
+    QPixmap graphicsPixmap(const GraphicsPlacement &p, const QSize &pixels);
+    // The colours of an indexed image's palette (kitty's 256: the 256-colour
+    // table's first 248, then the default background, foreground, and so on).
+    void graphicsPalette(QRgb *palette256) const;
 
     int _leftMargin;    // offset
     int _topMargin;    // offset

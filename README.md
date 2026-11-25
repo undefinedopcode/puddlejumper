@@ -786,6 +786,36 @@ It works in tmux tabs too, sent plainly or through tmux's passthrough
 (`ESC P tmux; …`), and ConEmu's progress (OSC 9;4) shows as working until a
 program reports with OSC 7501 itself.
 
+## Images
+
+Programs can show images in the terminal with [kitty's graphics
+protocol](https://sw.kovidgoyal.net/kitty/graphics-protocol/): `kitten icat
+picture.png`, image previews in yazi, ranger or lf, image.nvim, timg, chafa
+and others that speak it. Images scroll with the text, into the scrollback and
+out of it, and can sit under the text as well as over it; `clear` clears them,
+and the alternate screen has its own.
+
+Images can come in the escape code itself, or, from programs on the same
+machine, in a file or shared memory, which is much faster; as PNG, RGB, RGBA
+or palette colours (drawn in the colour scheme's colours, and redrawn when it
+changes), compressed or not. Animations play (`kitten icat` shows animated
+GIFs), but only while in view. Not supported yet: placing images relative to
+others.
+
+A program can name any file to show, so puddlejumper only reads regular
+files, nowhere under `/proc`, `/sys` or `/dev`, and answers every failure the
+same way, so a program learns nothing about files it couldn't read itself.
+
+In tmux, run `tmux set -g allow-passthrough on` first. Programs then use
+**Unicode placeholders**: they send the image through tmux and then print
+special characters where it goes, which tmux moves like any other text. This
+works both in a terminal running tmux and in **tmux** tabs. One catch in tmux
+tabs: tmux doesn't learn the size of a cell in control mode, and assumes 16×32
+pixels, so images come out smaller than they would outside it.
+
+The pty reports the window's size in pixels, and `CSI 14 t` and `CSI 16 t` are
+answered, so programs can work out how big to make an image.
+
 ## Web tabs
 
 A web tab shows a page beside the terminals: the app you are building, in the

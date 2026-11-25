@@ -28,6 +28,7 @@
 // Konsole
 #include "Character.h"
 #include "KeyboardTranslator.h"
+#include "TerminalGraphics.h"
 
 namespace Konsole
 {
@@ -156,6 +157,20 @@ public:
 
     /** Returns the index of the line which is currently at the top of this window */
     int currentLine() const;
+
+    /*
+     * puddlejumper: the images showing in the window (kitty's graphics
+     * protocol), their rows counted from its top, lowest first; the image
+     * each shows; and a number that changes whenever they do.
+     */
+    QList<GraphicsPlacement> graphicsPlacements() const;
+    QImage graphicsImage(quint32 id) const;
+    /* The virtual placements (U=1), shown through placeholder characters. */
+    QList<GraphicsPlacement> graphicsVirtualPlacements() const;
+    quint64 graphicsGeneration() const;
+    /* Moves animations on; the milliseconds until the next frame is due
+     * (-1: none). */
+    qint64 graphicsAnimate();
 
     /**
      * Returns the position of the cursor

@@ -222,6 +222,22 @@ public:
    */
   friend bool operator != (const CharacterColor& a, const CharacterColor& b);
 
+  /**
+   * puddlejumper: the colour as a number, as kitty's image placeholders
+   * carry an image id in it: 24 bits for a true colour, the index for one of
+   * the 256 (or 16), 0 for the default.
+   */
+  quint32 value() const
+  {
+      switch (_colorSpace)
+      {
+          case COLOR_SPACE_RGB: return (quint32(_u) << 16) | (quint32(_v) << 8) | _w;
+          case COLOR_SPACE_256: return _u;
+          case COLOR_SPACE_SYSTEM: return _u + (_v ? 8 : 0);
+          default: return 0;
+      }
+  }
+
 private:
   quint8 _colorSpace;
 

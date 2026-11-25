@@ -144,6 +144,9 @@ public:
      * @return @c true on success, false otherwise
      */
     bool setWinSize(int lines, int columns);
+    /* puddlejumper: with the size in pixels too, which programs that show
+     * images read (ws_xpixel, ws_ypixel). */
+    bool setWinSize(int lines, int columns, int xpixel, int ypixel);
 
     /**
      * Set whether the pty should echo input.

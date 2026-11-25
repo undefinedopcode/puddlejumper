@@ -65,6 +65,8 @@ public:
     char erase() const { return _eraseChar; }
 
     void setWindowSize(int lines, int cols);
+    // puddlejumper: ConPTY has no size in pixels.
+    void setCellPixelSize(const QSize &) {}
     QSize windowSize() const { return {_windowColumns, _windowLines}; }
 
     void setInitialWorkingDirectory(const QString &dir) { _workingDirectory = dir; }

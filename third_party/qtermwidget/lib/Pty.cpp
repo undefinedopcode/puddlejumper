@@ -53,7 +53,17 @@ void Pty::setWindowSize(int lines, int cols)
   _windowLines = lines;
 
   if (pty()->masterFd() >= 0)
-    pty()->setWinSize(lines, cols);
+    pty()->setWinSize(lines, cols, cols * _cellPixelSize.width(), lines * _cellPixelSize.height());
+}
+
+void Pty::setCellPixelSize(const QSize &size)
+{
+  if (size == _cellPixelSize)
+    return;
+  _cellPixelSize = size;
+  if (pty()->masterFd() >= 0)
+    pty()->setWinSize(_windowLines, _windowColumns,
+                      _windowColumns * size.width(), _windowLines * size.height());
 }
 QSize Pty::windowSize() const
 {
@@ -242,7 +252,8 @@ int Pty::start(const QString& program,
   if (!pty()->tcSetAttr(&ttmode))
     qWarning() << "Unable to set terminal attributes.";
 
-  pty()->setWinSize(_windowLines, _windowColumns);
+  pty()->setWinSize(_windowLines, _windowColumns,
+                    _windowColumns * _cellPixelSize.width(), _windowLines * _cellPixelSize.height());
 
   KProcess::start();
 

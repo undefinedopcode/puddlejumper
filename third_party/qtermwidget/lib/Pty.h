@@ -135,6 +135,9 @@ Q_OBJECT
      * used by this teletype.
      */
     void setWindowSize(int lines, int cols);
+    /* puddlejumper: and a cell's size in pixels, for the size in pixels the
+     * terminal reports (0 by 0 if not known). */
+    void setCellPixelSize(const QSize &size);
 
     /** Returns the size of the window used by this teletype.  See setWindowSize() */
     QSize windowSize() const;
@@ -216,6 +219,7 @@ Q_OBJECT
 
     int  _windowColumns;
     int  _windowLines;
+    QSize _cellPixelSize;   // puddlejumper
     char _eraseChar;
     bool _xonXoff;
     bool _utf8;
