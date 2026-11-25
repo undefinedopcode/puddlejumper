@@ -13,9 +13,10 @@ namespace {
 const QByteArray ST = QByteArrayLiteral("\033\\");
 }
 
-RexTerminalStream::RexTerminalStream(quint64 nonce, bool resumed)
+RexTerminalStream::RexTerminalStream(quint64 nonce, bool resumed, quint64 offset)
     : m_prefix("\033_rex1;" + QByteArray::number(nonce) + ';')
     , m_haveSnapshot(resumed)
+    , m_received(offset)
 {
 }
 

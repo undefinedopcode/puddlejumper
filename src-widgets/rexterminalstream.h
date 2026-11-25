@@ -45,8 +45,9 @@ public:
         QString type() const { return marker.value(QLatin1String("type")).toString(); }
     };
 
-    // The nonce from the WELCOME message.
-    explicit RexTerminalStream(quint64 nonce, bool resumed = false);
+    // The nonce from the WELCOME message. A resumed stream has no snapshot
+    // and starts at byte `offset` of the stream.
+    explicit RexTerminalStream(quint64 nonce, bool resumed = false, quint64 offset = 0);
 
     // The nonce in a 32-byte WELCOME (81, token, reserved, grace, nonce); 0
     // and false if it isn't one.
@@ -59,8 +60,13 @@ public:
 
     bool failed() const { return !m_error.isEmpty(); }
     QString error() const { return m_error; }
-    // Payload bytes taken so far: what a RESUME asks to carry on from.
+    // Payload bytes taken so far, snapshot and markers included.
     quint64 received() const { return m_received; }
+    // Those passed on: what a RESUME asks to carry on from, so that a marker
+    // held back unfinished comes again whole. Resuming before the snapshot
+    // has come is no use (there is nothing to carry on from): take a new one.
+    quint64 consumed() const { return m_received - quint64(m_buffer.size()); }
+    bool haveSnapshot() const { return m_haveSnapshot; }
 
     // A marker is held back until its end comes; one this long without
     // ending wasn't a marker after all.

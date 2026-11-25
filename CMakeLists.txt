@@ -322,6 +322,23 @@ target_include_directories(test-rexterminalstream PRIVATE src-widgets)
 target_compile_definitions(test-rexterminalstream PRIVATE
     PJ_REX_CAPTURES="${CMAKE_CURRENT_SOURCE_DIR}/src-widgets/dev/rex-capture")
 
+# test-rexclient — the Rex client classes against a running Rex-compatible
+# server (tuxosaurus on loopback will do): sessions, the terminal stream,
+# resume, resize, exit. Dev tool only; never installed.
+# Run: ./build/test-rexclient http://127.0.0.1:51433
+find_package(Qt6 6.5 QUIET OPTIONAL_COMPONENTS WebSockets)
+if(TARGET Qt6::WebSockets)
+    qt_add_executable(test-rexclient
+        src-widgets/dev/test_rexclient.cpp
+        src-widgets/rexclient.cpp src-widgets/rexclient.h
+        src-widgets/rexterminalstream.cpp src-widgets/rexterminalstream.h
+        src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
+        src-widgets/ghosttyreplay.cpp src-widgets/ghosttyreplay.h
+    )
+    target_link_libraries(test-rexclient PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets qtermwidget)
+    target_include_directories(test-rexclient PRIVATE src-widgets)
+endif()
+
 # With a libghostty-vt build (in a Ghostty checkout: zig build -Demit-lib-vt,
 # then -DPJ_GHOSTTY_VT=<checkout>/zig-out), two more dev tools that use a
 # real Ghostty terminal:
