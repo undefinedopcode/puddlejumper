@@ -281,6 +281,20 @@ set_target_properties(test-programstatus PROPERTIES AUTOMOC ON)
 target_include_directories(test-programstatus PRIVATE src-widgets)
 
 # ---------------------------------------------------------------------------
+# test-ghosttysnapshot — the Ghostty snapshot decoder against Ghostty's golden
+# fixtures (src-widgets/dev/ghostty-snapshot). Dev tool only; never installed.
+# Run: ./build/test-ghosttysnapshot
+# ---------------------------------------------------------------------------
+qt_add_executable(test-ghosttysnapshot
+    src-widgets/dev/test_ghosttysnapshot.cpp
+    src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
+)
+target_link_libraries(test-ghosttysnapshot PRIVATE Qt6::Core)
+target_include_directories(test-ghosttysnapshot PRIVATE src-widgets)
+target_compile_definitions(test-ghosttysnapshot PRIVATE
+    PJ_GHOSTTY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/src-widgets/dev/ghostty-snapshot")
+
+# ---------------------------------------------------------------------------
 # puddlejumper-qml — the original Qt Quick implementation.
 #
 # Kept buildable for comparison and as a fallback, but no longer installed and
