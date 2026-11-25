@@ -293,6 +293,11 @@ void QTermWidget::setAnswerTerminalQueries(bool answer)
     m_impl->m_session->emulation()->setAnswerQueries(answer);
 }
 
+void QTermWidget::setAnswerProgramStatusQuery(bool answer)
+{
+    m_impl->m_session->emulation()->setAnswerProgramStatusQuery(answer);
+}
+
 QSize QTermWidget::screenPixelSize() const
 {
     TerminalDisplay *display = m_impl->m_terminalDisplay;

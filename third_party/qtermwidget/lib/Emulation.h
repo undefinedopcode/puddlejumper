@@ -280,6 +280,13 @@ public:
    */
   void setAnswerQueries(bool answer) { _answerQueries = answer; }
   bool answerQueries() const { return _answerQueries; }
+  /**
+   * puddlejumper: whether the emulation answers the program status query
+   * (OSC 7501 ; ?). Apart from the others: a multiplexer that answers those
+   * may not answer this one (tmux before 3.9), and then it is answered here.
+   */
+  void setAnswerProgramStatusQuery(bool answer) { _answerProgramStatusQuery = answer; }
+  bool answerProgramStatusQuery() const { return _answerProgramStatusQuery; }
 
 public slots:
 
@@ -520,6 +527,7 @@ private:
   bool _usesMouse;
   bool _bracketedPasteMode;
   bool _answerQueries = true;   // puddlejumper
+  bool _answerProgramStatusQuery = true;   // puddlejumper
   QTimer _bulkTimer1{this};
   QTimer _bulkTimer2{this};
   QStringDecoder _toUtf16;

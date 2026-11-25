@@ -79,6 +79,9 @@ public:
     void feedData(const QByteArray &data);
     void setFixedTerminalSize(int columns, int lines);
     void setAnswerTerminalQueries(bool answer);
+    /* Whether to answer the program status query (OSC 7501 ; ?) even so:
+     * tmux answers it itself from 3.9. */
+    void setAnswerProgramStatusQuery(bool answer);
 
     /**
      * puddlejumper: a picture of the screen (its visible lines, not scrollback),

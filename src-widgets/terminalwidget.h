@@ -184,6 +184,9 @@ public:
     /* The program that reported has gone (said by a tmux pane's session,
      * or a shell's prompt): its working, blocked and idle records go. */
     void programEnded();
+    /* External panes: whether their source answers the program status
+     * query itself (tmux 3.9 does), so that it isn't answered twice. */
+    void setSourceAnswersProgramStatus(bool answers);
 
 signals:
     void titleChanged(const QString &title);

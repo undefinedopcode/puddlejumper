@@ -473,6 +473,12 @@ void TerminalWidget::onProgramStatusReport(const QString &body)
         watchProgramStatusOwner();
 }
 
+void TerminalWidget::setSourceAnswersProgramStatus(bool answers)
+{
+    if (isExternal())
+        m_terminal->setAnswerProgramStatusQuery(!answers);
+}
+
 void TerminalWidget::programEnded()
 {
     m_statusWatch->stop();

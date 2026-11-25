@@ -523,9 +523,10 @@ void Vt102Emulation::processWindowAttributeChange()
       return;
     if (newValue.trimmed() == QLatin1String("?"))
     {
-      // Answered even where other queries aren't (behind tmux, which
+      // Answered even where other queries aren't (behind a tmux that
       // answers those itself but not this one).
-      sendString("\033]7501;?\033\\");
+      if (answerProgramStatusQuery())
+        sendString("\033]7501;?\033\\");
       return;
     }
     emit programStatusReport(newValue);

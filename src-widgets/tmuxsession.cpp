@@ -250,6 +250,14 @@ void TmuxSession::onReady()
             return;
         const int major = m.captured(1).toInt();
         const int minor = m.captured(2).toInt();
+        // tmux answers the program status query itself from 3.9 (and its
+        // development versions, "next-3.9"): not again here, which would
+        // reach the program after it had stopped listening.
+        m_answersProgramStatus = major > 3 || (major == 3 && minor >= 9);
+        for (TerminalWidget *pane : std::as_const(m_panes)) {
+            if (pane)
+                pane->setSourceAnswersProgramStatus(m_answersProgramStatus);
+        }
         if (major > 3 || (major == 3 && minor >= 2)) {
             m_control->command(QStringLiteral("refresh-client -f pause-after=5"));
             // Each pane's program, so its status records (OSC 7501) can go
@@ -477,6 +485,7 @@ TerminalWidget *TmuxSession::makePane(int paneId)
                                     TerminalWidget::Backend::External);
     pane->applyAppearance();
     pane->applyScrolling();
+    pane->setSourceAnswersProgramStatus(m_answersProgramStatus);
     connect(pane, &TerminalWidget::externalInput, this, [this, paneId](const QByteArray &bytes) {
         sendInput(paneId, bytes);
     });
