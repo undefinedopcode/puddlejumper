@@ -60,21 +60,24 @@ inline QColor surface(const QColor &background, const QColor &foreground)
 
 /*
  * A card: lifted off the surface, more so under the mouse; the current tab is
- * tinted and outlined in the accent colour. Returns its fill, for colours
- * drawn on top of it.
+ * tinted and outlined in the accent colour. A `tint` (a tab waiting on you)
+ * colours the card and, unless it's current, its outline. Returns its fill,
+ * for colours drawn on top of it.
  */
 inline QColor paintCard(QPainter *p, const QRect &card, const QColor &surface,
                         const QColor &foreground, const QColor &accent,
-                        bool hovered, bool selected)
+                        bool hovered, bool selected, const QColor &tint = QColor())
 {
     QColor fill = mix(surface, foreground, hovered ? 0.12 : 0.07);
+    if (tint.isValid())
+        fill = mix(fill, tint, 0.28);
     if (selected)
         fill = mix(fill, accent, 0.22);
     QPainterPath path;
     path.addRoundedRect(QRectF(card).adjusted(0.5, 0.5, -0.5, -0.5), kRadius, kRadius);
     p->fillPath(path, fill);
-    if (selected) {
-        p->setPen(QPen(accent, 2));
+    if (selected || tint.isValid()) {
+        p->setPen(QPen(selected ? accent : tint, selected ? 2 : 1));
         p->setBrush(Qt::NoBrush);
         p->drawRoundedRect(QRectF(card).adjusted(1, 1, -1, -1), kRadius - 1, kRadius - 1);
     }

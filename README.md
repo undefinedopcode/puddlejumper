@@ -770,6 +770,11 @@ tab, and it goes away once you have. Needing you also flashes the taskbar
 (bounces the Dock). **Settings → Scrolling → Watch a Terminal → Programs**
 turns notifications off.
 
+The same place has two options, off by default, for tabs waiting on you: tint
+them amber, and move them to the front of the tabs until answered, then back
+where they were. The tab you're looking at stays put, and so does one you have
+dragged since it moved.
+
 A program's working and waiting go once it has gone (exited, or the shell is
 back at its prompt); done and failed stay until you press a key in the pane.
 It works in tmux tabs too, sent plainly or through tmux's passthrough

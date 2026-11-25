@@ -61,6 +61,7 @@ public:
     QColor background;
     QColor foreground;
     qreal aspect = 0.6;
+    bool tintBlocked = false;
 
     static QRect cardRect(const QRect &row)
     {
@@ -98,8 +99,10 @@ public:
 
         // Read each time, so a change of system accent shows at once.
         const QColor accent = cardstyle::accent();
-        const QColor fill = cardstyle::paintCard(p, card, background, foreground, accent,
-                                                 hovered, selected);
+        const auto kind = cardstyle::Status::Kind(index.data(kStatusKindRole).toInt());
+        const QColor fill = cardstyle::paintCard(
+            p, card, background, foreground, accent, hovered, selected,
+            tintBlocked && kind == cardstyle::Status::Blocked ? cardstyle::statusColour(kind) : QColor());
 
         // The preview, clipped to rounded corners.
         const QRect preview = previewRect(option.rect);
@@ -135,7 +138,6 @@ public:
 
         // What the program says it's doing, top left; its progress along
         // the bottom.
-        const auto kind = cardstyle::Status::Kind(index.data(kStatusKindRole).toInt());
         if (kind != cardstyle::Status::None) {
             cardstyle::Status status;
             status.kind = kind;
@@ -364,6 +366,15 @@ void ThumbnailSidebar::setStatus(int index, const cardstyle::Status &status)
     item->setData(kStatusProgressRole, status.kind == cardstyle::Status::None ? -1 : status.progress);
     item->setData(kStatusDetailRole, status.detail);
     updateToolTip(item);
+}
+
+void ThumbnailSidebar::setTintBlocked(bool tint)
+{
+    auto *delegate = delegateOf(m_list);
+    if (delegate->tintBlocked == tint)
+        return;
+    delegate->tintBlocked = tint;
+    m_list->viewport()->update();
 }
 
 void ThumbnailSidebar::setBusy(int index, bool busy)

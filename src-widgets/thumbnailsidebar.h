@@ -47,6 +47,8 @@ public:
     void setPreview(int index, const QPixmap &pixmap);
     /* Mark a tab that produced output while it was not being watched. */
     void setBusy(int index, bool busy);
+    /* Tint the cards whose program is waiting on the user. */
+    void setTintBlocked(bool tint);
     /* What a program in the tab says it is doing (OSC 7501). */
     void setStatus(int index, const cardstyle::Status &status);
     /* Move one card, keeping its preview and marks (the tab bar moved a tab). */

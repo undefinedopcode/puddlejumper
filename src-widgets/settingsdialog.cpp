@@ -494,8 +494,19 @@ QWidget *SettingsDialog::buildWindowPage()
         m_settings.setNotifyProgramStatus(v);
     });
     watch->addRow(tr("Programs"), m_notifyProgramStatusBox);
+    m_tintBlockedTabsBox = new QCheckBox(tr("Tint tabs whose program needs you"), page);
+    connect(m_tintBlockedTabsBox, &QCheckBox::toggled, this, [this](bool v) {
+        m_settings.setTintBlockedTabs(v);
+    });
+    watch->addRow(QString(), m_tintBlockedTabsBox);
+    m_floatBlockedTabsBox = new QCheckBox(tr("Move them to the front until answered"), page);
+    connect(m_floatBlockedTabsBox, &QCheckBox::toggled, this, [this](bool v) {
+        m_settings.setFloatBlockedTabs(v);
+    });
+    watch->addRow(QString(), m_floatBlockedTabsBox);
     watch->addRow(QString(), makeHint(tr("For programs that say what they're doing (OSC 7501), "
-                                         "such as Claude Code, in a tab you aren't looking at."), page));
+                                         "such as Claude Code. Notifications are only for tabs "
+                                         "you aren't looking at."), page));
 
     // ---- quitting --------------------------------------------------------------
     QFormLayout *quitting = addGroup(layout, tr("Quitting"));
@@ -1049,6 +1060,8 @@ void SettingsDialog::syncFromSettings()
         m_tabLayoutBox->setCurrentIndex(layoutIndex);
     m_monitorActivityBox->setChecked(s.monitorActivity);
     m_notifyProgramStatusBox->setChecked(s.notifyProgramStatus);
+    m_tintBlockedTabsBox->setChecked(s.tintBlockedTabs);
+    m_floatBlockedTabsBox->setChecked(s.floatBlockedTabs);
     m_monitorSilenceBox->setChecked(s.monitorSilence);
     m_silenceTimeoutBox->setValue(s.silenceTimeout);
     m_silenceTimeoutBox->setEnabled(s.monitorSilence);

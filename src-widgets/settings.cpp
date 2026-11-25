@@ -35,6 +35,8 @@ constexpr auto kConfirmCloseRunning = "scrolling/confirmCloseWithRunningProcesse
 constexpr auto kRestoreSession = "window/restoreSession";
 constexpr auto kMonitorActivity = "scrolling/monitorActivity";
 constexpr auto kNotifyProgramStatus = "scrolling/notifyProgramStatus";
+constexpr auto kTintBlockedTabs = "scrolling/tintBlockedTabs";
+constexpr auto kFloatBlockedTabs = "scrolling/floatBlockedTabs";
 constexpr auto kMonitorSilence  = "scrolling/monitorSilence";
 constexpr auto kSilenceTimeout  = "scrolling/silenceTimeout";
 constexpr auto kConfirmMultilinePaste = "input/confirmMultilinePaste";
@@ -125,6 +127,10 @@ void Settings::load()
         m_settings.value(kMonitorActivity, m_scrolling.monitorActivity).toBool();
     m_scrolling.notifyProgramStatus =
         m_settings.value(kNotifyProgramStatus, m_scrolling.notifyProgramStatus).toBool();
+    m_scrolling.tintBlockedTabs =
+        m_settings.value(kTintBlockedTabs, m_scrolling.tintBlockedTabs).toBool();
+    m_scrolling.floatBlockedTabs =
+        m_settings.value(kFloatBlockedTabs, m_scrolling.floatBlockedTabs).toBool();
     m_scrolling.monitorSilence =
         m_settings.value(kMonitorSilence, m_scrolling.monitorSilence).toBool();
     m_scrolling.silenceTimeout =
@@ -406,6 +412,24 @@ void Settings::setNotifyProgramStatus(bool v)
     if (m_scrolling.notifyProgramStatus == v) return;
     m_scrolling.notifyProgramStatus = v;
     m_settings.setValue(kNotifyProgramStatus, v);
+    m_settings.sync();
+    emit scrollingChanged();
+}
+
+void Settings::setTintBlockedTabs(bool v)
+{
+    if (m_scrolling.tintBlockedTabs == v) return;
+    m_scrolling.tintBlockedTabs = v;
+    m_settings.setValue(kTintBlockedTabs, v);
+    m_settings.sync();
+    emit scrollingChanged();
+}
+
+void Settings::setFloatBlockedTabs(bool v)
+{
+    if (m_scrolling.floatBlockedTabs == v) return;
+    m_scrolling.floatBlockedTabs = v;
+    m_settings.setValue(kFloatBlockedTabs, v);
     m_settings.sync();
     emit scrollingChanged();
 }

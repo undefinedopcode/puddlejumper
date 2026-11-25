@@ -139,6 +139,15 @@ constexpr char kNotifiedAt[] = "puddlejumperNotifiedAt";
 constexpr char kPending[] = "puddlejumperNotifyPending";
 constexpr qint64 kNotifyInterval = 5000;   // at most one a tab in this many ms
 
+// On a tab (see floatBlockedTabs()): a program in it is waiting on you; it
+// was moved to the front for that, and the tab it came after (null: it was
+// first); it is to stay where it is until answered (it was current then, or
+// moved by hand since).
+constexpr char kBlocked[] = "puddlejumperBlocked";
+constexpr char kFloated[] = "puddlejumperFloated";
+constexpr char kFloatHome[] = "puddlejumperFloatHome";
+constexpr char kFloatHeld[] = "puddlejumperFloatHeld";
+
 // On a new tab: until when (ms since the epoch) its output is its shell
 // starting up, not news.
 constexpr char kQuietUntilProperty[] = "puddlejumperQuietUntil";
@@ -283,6 +292,9 @@ MainWindow::MainWindow(QWidget *parent)
     connect(&m_settings, &Settings::scrollingChanged, this, [this]() {
         for (TerminalWidget *t : allPanes())
             t->applyScrolling();
+        m_sidebar->setTintBlocked(m_settings.scrolling().tintBlockedTabs);
+        m_tabStrip->setTintBlocked(m_settings.scrolling().tintBlockedTabs);
+        scheduleFloatBlockedTabs();
     });
 
     // Any profile edit: rebuild the menu and refresh live tabs that are still
@@ -375,6 +387,7 @@ void MainWindow::buildLayout()
         m_moveSource = m_sidebar;
         m_tabs->tabBar()->moveTab(from, to);
         m_moveSource = nullptr;
+        heldByHand(pageAt(to));
     });
     connect(m_sidebar, &ThumbnailSidebar::newTabRequested, this, &MainWindow::newTab);
     connect(m_sidebar, &ThumbnailSidebar::contextMenuRequested,
@@ -391,9 +404,13 @@ void MainWindow::buildLayout()
         m_moveSource = m_tabStrip;
         m_tabs->tabBar()->moveTab(from, to);
         m_moveSource = nullptr;
+        heldByHand(pageAt(to));
     });
     connect(m_tabStrip, &TabStrip::newTabRequested, this, &MainWindow::newTab);
     connect(m_tabStrip, &TabStrip::contextMenuRequested, this, &MainWindow::showTabMenu);
+
+    m_sidebar->setTintBlocked(m_settings.scrolling().tintBlockedTabs);
+    m_tabStrip->setTintBlocked(m_settings.scrolling().tintBlockedTabs);
 }
 
 void MainWindow::onCurrentTabChanged(int index)
@@ -1981,6 +1998,11 @@ void MainWindow::updateProgramStatus(QWidget *page)
                 best = r;
         }
         notifyProgramStatus(tab, best);   // in any workspace
+        const bool blocked = best.state == ProgramStatusRecord::Blocked;
+        if (tab->property(kBlocked).toBool() != blocked) {
+            tab->setProperty(kBlocked, blocked);
+            scheduleFloatBlockedTabs();
+        }
     }
 
     const int index = page ? m_tabs->indexOf(page) : -1;
@@ -2010,6 +2032,96 @@ void MainWindow::updateProgramStatus(QWidget *page)
     m_tabStrip->setStatus(index, status);
     if (page == currentPage())
         updateStatus();
+}
+
+void MainWindow::scheduleFloatBlockedTabs()
+{
+    if (m_floatPending)
+        return;
+    m_floatPending = true;
+    // Later, not here: this comes while the tabs are being gone through.
+    QTimer::singleShot(0, this, [this]() {
+        m_floatPending = false;
+        floatBlockedTabs();
+    });
+}
+
+void MainWindow::moveTabTo(QWidget *page, int to)
+{
+    const int from = m_tabs->indexOf(page);
+    if (from < 0 || from == to)
+        return;
+    // As a drag in neither view: both follow (see the tabBar's tabMoved).
+    m_tabs->tabBar()->moveTab(from, to);
+}
+
+void MainWindow::heldByHand(QWidget *page)
+{
+    // Moved by hand: the user has put it where they want it.
+    if (page && page->property(kFloated).toBool()) {
+        page->setProperty(kFloated, false);
+        page->setProperty(kFloatHome, QVariant());
+        page->setProperty(kFloatHeld, true);
+    }
+}
+
+void MainWindow::floatBlockedTabs()
+{
+    if (m_switchingWorkspace)
+        return;
+    const bool on = m_settings.scrolling().floatBlockedTabs;
+    QList<QWidget *> pages;
+    for (int i = 0; i < m_tabs->count(); ++i)
+        pages << m_tabs->widget(i);
+    auto floatedCount = [this]() {
+        int n = 0;
+        for (int i = 0; i < m_tabs->count(); ++i)
+            n += m_tabs->widget(i)->property(kFloated).toBool();
+        return n;
+    };
+
+    // Answered (or the option turned off): back after the tab it came after,
+    // else to the front of the rest.
+    for (QWidget *page : std::as_const(pages)) {
+        const bool blocked = page->property(kBlocked).toBool();
+        if (!blocked)
+            page->setProperty(kFloatHeld, false);
+        if (!page->property(kFloated).toBool() || (on && blocked))
+            continue;
+        const auto home = page->property(kFloatHome).value<QPointer<QWidget>>();
+        page->setProperty(kFloated, false);
+        page->setProperty(kFloatHome, QVariant());
+        const int from = m_tabs->indexOf(page);
+        // (Not after one that has since floated too: that's no place.)
+        const int after = home && !home->property(kFloated).toBool() ? m_tabs->indexOf(home) : -1;
+        if (after < 0)
+            moveTabTo(page, floatedCount());
+        else
+            moveTabTo(page, after < from ? after + 1 : after);
+    }
+    if (!on)
+        return;
+
+    // Newly waiting on you: to the front, behind those already there; not
+    // the tab being looked at, which stays put until it's answered.
+    for (QWidget *page : std::as_const(pages)) {
+        if (!page->property(kBlocked).toBool() || page->property(kFloated).toBool()
+            || page->property(kFloatHeld).toBool())
+            continue;
+        if (page == currentPage()) {
+            page->setProperty(kFloatHeld, true);
+            continue;
+        }
+        QPointer<QWidget> home;
+        for (int i = m_tabs->indexOf(page) - 1; i >= 0 && !home; --i) {
+            if (!m_tabs->widget(i)->property(kFloated).toBool())
+                home = m_tabs->widget(i);
+        }
+        const int to = floatedCount();
+        page->setProperty(kFloated, true);
+        page->setProperty(kFloatHome, QVariant::fromValue(home));
+        moveTabTo(page, to);
+    }
 }
 
 QString MainWindow::notificationKey(const QWidget *tab)

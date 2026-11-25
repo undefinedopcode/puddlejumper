@@ -214,6 +214,11 @@ private:
     /* What the programs in a tab say they are doing (OSC 7501), on its card,
      * its tab and, for the tab on screen, the status bar. */
     void updateProgramStatus(QWidget *page);
+    // Waiting tabs to the front and back (Settings: floatBlockedTabs).
+    void scheduleFloatBlockedTabs();
+    void floatBlockedTabs();
+    void moveTabTo(QWidget *page, int to);
+    void heldByHand(QWidget *page);
     /* A desktop notification when a tab not being looked at needs you, has
      * finished or has failed; taken away once it's seen, or resolved. */
     void notifyProgramStatus(TerminalTab *tab, const ProgramStatusRecord &record);
@@ -284,6 +289,7 @@ private:
     int m_currentWorkspace = 0;
     QWidget *m_parking = nullptr;       // hidden parent of parked tabs
     bool m_switchingWorkspace = false;
+    bool m_floatPending = false;
     QMenu *m_workspaceMenu = nullptr;
     QToolButton *m_workspaceButton = nullptr;
     QAction *m_newWorkspaceAct = nullptr;

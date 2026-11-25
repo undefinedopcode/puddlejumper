@@ -27,7 +27,7 @@ namespace {
 constexpr int kTitleRole = Qt::UserRole + 1;
 constexpr int kBusyRole = Qt::UserRole + 2;
 constexpr int kStatusKindRole = Qt::UserRole + 3;
-constexpr int kNaturalWidthRole = Qt::UserRole + 3;   // before layoutTabs() narrows it
+constexpr int kNaturalWidthRole = Qt::UserRole + 4;   // before layoutTabs() narrows it
 
 // Tab geometry, in logical pixels.
 constexpr int kSide = 6;        // between the window edge and the first tab
@@ -61,6 +61,7 @@ public:
 
     QColor surface;
     QColor foreground;
+    bool tintBlocked = false;
 
     static QRect cardRect(const QRect &row)
     {
@@ -109,8 +110,10 @@ public:
         const bool hovered = option.state & QStyle::State_MouseOver;
         // Read each time, so a change of system accent shows at once.
         const QColor accent = cardstyle::accent();
-        const QColor fill = cardstyle::paintCard(p, cardRect(option.rect), surface, foreground,
-                                                 accent, hovered, selected);
+        const auto kind = cardstyle::Status::Kind(index.data(kStatusKindRole).toInt());
+        const QColor fill = cardstyle::paintCard(
+            p, cardRect(option.rect), surface, foreground, accent, hovered, selected,
+            tintBlocked && kind == cardstyle::Status::Blocked ? cardstyle::statusColour(kind) : QColor());
 
         const QRect title = titleRect(option.rect);
         const QFont font = titleFont(option.font, selected);
@@ -122,7 +125,6 @@ public:
 
         // A program's status (needing you, failed, done, working) takes the
         // place of the new-output dot, in its colour.
-        const auto kind = cardstyle::Status::Kind(index.data(kStatusKindRole).toInt());
         if (kind != cardstyle::Status::None || index.data(kBusyRole).toBool())
             cardstyle::paintDot(p, QPointF(title.right() + 6 + kDot / 2.0,
                                            title.center().y() + 0.5),
@@ -400,6 +402,15 @@ void TabStrip::setStatus(int index, const cardstyle::Status &status)
 {
     if (QListWidgetItem *tab = item(index); tab && tab->data(kStatusKindRole).toInt() != int(status.kind))
         tab->setData(kStatusKindRole, int(status.kind));
+}
+
+void TabStrip::setTintBlocked(bool tint)
+{
+    auto *delegate = delegateOf(m_list);
+    if (delegate->tintBlocked == tint)
+        return;
+    delegate->tintBlocked = tint;
+    m_list->viewport()->update();
 }
 
 void TabStrip::setBusy(int index, bool busy)

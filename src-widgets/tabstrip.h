@@ -40,6 +40,8 @@ public:
     void setTabToolTip(int index, const QString &toolTip);
     /* Mark a tab that produced output while it was not being watched. */
     void setBusy(int index, bool busy);
+    /* Tint the tabs whose program is waiting on the user. */
+    void setTintBlocked(bool tint);
     /* What a program in the tab says it is doing (OSC 7501): a dot in its
      * colour. */
     void setStatus(int index, const cardstyle::Status &status);

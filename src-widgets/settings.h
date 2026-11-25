@@ -116,6 +116,14 @@ public:
         bool    notifyProgramStatus = true;
 
         /*
+         * A tab whose program is waiting on the user (blocked): tinted in the
+         * status colour, and moved to the front of the tabs until it's
+         * answered, then back where it was.
+         */
+        bool    tintBlockedTabs = false;
+        bool    floatBlockedTabs = false;
+
+        /*
          * Reopen the workspaces and tabs that were open at quit: their
          * layouts, directories and names (programs are not restarted), and
          * tmux sessions on this machine that are still running.
@@ -159,6 +167,8 @@ public:
     void setRestoreSession(bool v);
     void setMonitorActivity(bool v);
     void setNotifyProgramStatus(bool v);
+    void setTintBlockedTabs(bool v);
+    void setFloatBlockedTabs(bool v);
     void setMonitorSilence(bool v);
     void setSilenceTimeout(int v);
     void setConfirmMultilinePaste(bool v);
