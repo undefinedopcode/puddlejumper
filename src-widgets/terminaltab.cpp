@@ -127,8 +127,8 @@ public:
 
     void setContent(QWidget *content)
     {
-        if (content == m_content)
-            return;
+        // Even the same widget: a rebuild lifts panes out of their frames, so
+        // it may not be in this one any more.
         if (m_content)
             layout()->removeWidget(m_content);
         m_content = content;
@@ -630,8 +630,9 @@ void TerminalTab::updateFrames()
         if (auto *frame = static_cast<FloatingFrame *>(f.frame.data())) {
             frame->setActive(f.id == activeLayer);
             frame->setColours(backgroundColour(), foregroundColour());
-            if (TerminalWidget *first = firstPaneIn(f.root))
-                frame->setTitle(first->sessionTitle());
+            TerminalWidget *first = firstPaneIn(f.root);
+            const QString title = first ? first->sessionTitle() : QString();
+            frame->setTitle(!title.isEmpty() ? title : !f.title.isEmpty() ? f.title : tr("Terminal"));
         }
     }
 }
@@ -901,7 +902,7 @@ void TerminalTab::applyLayout(const PaneLayout &layout,
             QWidget *content = buildLayout(f.layout, paneFor, used);
             frame->setContent(content);
             frame->show();
-            m_floating.append({f.id, frame, content});
+            m_floating.append({f.id, frame, content, f.title});
         }
         for (FloatingFrame *frame : std::as_const(frames))
             frame->deleteLater();
@@ -947,7 +948,12 @@ void TerminalTab::applyLayout(const PaneLayout &layout,
     const QRect area = layoutRect();
     const QSize extra = floatingChrome();
     for (int i = 0; i < m_floating.size() && i < floating.size(); ++i) {
+        m_floating[i].title = floating.at(i).title;
         const Floating &f = m_floating.at(i);
+        QList<TerminalWidget *> inLayer;
+        collectPanes(f.root, inLayer);
+        for (TerminalWidget *pane : std::as_const(inLayer))
+            connect(pane, &TerminalWidget::titleChanged, this, &TerminalTab::updateFrames, Qt::UniqueConnection);
         const PaneLayout &l = floating.at(i).layout;
         sizeLayout(f.root, l, cell, chrome);
         if (!f.frame)

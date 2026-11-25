@@ -48,6 +48,7 @@ struct FloatingLayout
     QString id;
     QPoint position;
     PaneLayout layout;
+    QString title;  // shown when its pane's program sets none
 };
 
 /*
@@ -210,6 +211,7 @@ private:
         QString id;
         QPointer<QWidget> frame;    // a FloatingFrame
         QPointer<QWidget> root;     // its pane or splitter
+        QString title;              // FloatingLayout::title
     };
     QList<Floating> m_floating;     // bottom to top
     // applyLayout()'s hidden panes: kept (output still arrives) but not laid

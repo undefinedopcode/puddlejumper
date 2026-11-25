@@ -137,6 +137,9 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings,
         // its keystrokes. The source (tmux) has already answered any terminal
         // queries in the output, so the emulator must not answer again.
         m_terminal->setAnswerTerminalQueries(false);
+        // Its size is the source's layout, changing whenever any pane or
+        // the window does: no "Size: cols x rows" flash over it each time.
+        m_terminal->setTerminalSizeHint(false);
         m_terminal->startTerminalTeletype();
         connect(m_terminal, &QTermWidget::sendData, this, [this](const char *data, int len) {
             emit externalInput(QByteArray(data, len));

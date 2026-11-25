@@ -224,6 +224,12 @@ bool agrees(Server &server, Client &c, const QString &when)
 {
     bool ok = true;
     const QString sid = c.session->sessionId();
+    // Every pane inside its tab and shown there (not lost out of its frame).
+    for (const auto &t : c.tabs) {
+        for (TerminalWidget *pane : t ? t->panes() : QList<TerminalWidget *>())
+            ok &= check(t->isAncestorOf(pane) && pane->isVisibleTo(t) && pane->window() == t->window(),
+                        QStringLiteral("%1: pane %2 shown in its tab").arg(when, c.session->blockId(pane).right(8)));
+    }
     for (TerminalWidget *pane : c.panes()) {
         const QString bid = c.session->blockId(pane);
         QStringList want, got;
@@ -454,6 +460,18 @@ int main(int argc, char *argv[])
                                 {QStringLiteral("block_id"), hiddenBlock}, {QStringLiteral("zoom"), false}});
         check(waitFor([&] { return second->panes() == two; }), QStringLiteral("and unzoomed elsewhere"));
         agrees(server, c, QStringLiteral("unzoomed elsewhere"));
+    }
+
+    // ---- Two panes swapped: each block's pane now where the other's was.
+    if (second && second->panes().size() == 2) {
+        const QList<TerminalWidget *> two = second->panes();
+        c.session->swapWithNext(two.first());
+        check(waitFor([&] { return second->panes() == QList<TerminalWidget *>{two.last(), two.first()}; }),
+              QStringLiteral("swapped: the same panes, the other way round"));
+        agrees(server, c, QStringLiteral("swapped"));
+        c.session->swapWithNext(two.first());
+        check(waitFor([&] { return second->panes() == two; }), QStringLiteral("and back"));
+        agrees(server, c, QStringLiteral("swapped back"));
     }
 
     // ---- A pane moved to another window, and back.

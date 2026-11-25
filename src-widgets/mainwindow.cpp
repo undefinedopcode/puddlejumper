@@ -753,6 +753,19 @@ void MainWindow::buildMenus()
         else
             statusBar()->showMessage(tr("Only Rex panes can zoom"), 3000);
     });
+    auto *swapPaneAct = view->addAction(tr("S&wap with Next Pane"));
+    swapPaneAct->setStatusTip(tr("Swap a Rex pane with the next one in its window"));
+    connect(swapPaneAct, &QAction::triggered, this, [this]() {
+        TerminalWidget *t = currentTerminal();
+        if (RexSession *rex = t ? rexSessionFor(t) : nullptr)
+            rex->swapWithNext(t);
+    });
+    connect(view, &QMenu::aboutToShow, swapPaneAct, [this, swapPaneAct]() {
+        TerminalWidget *t = currentTerminal();
+        RexSession *rex = t ? rexSessionFor(t) : nullptr;
+        swapPaneAct->setVisible(rex != nullptr);
+        swapPaneAct->setEnabled(currentTab() && currentTab()->panes().size() > 1);
+    });
     // Into another of the session's windows: filled as the menu opens.
     auto *movePaneMenu = view->addMenu(tr("&Move Pane to Window"));
     connect(view, &QMenu::aboutToShow, movePaneMenu, [this, movePaneMenu]() {

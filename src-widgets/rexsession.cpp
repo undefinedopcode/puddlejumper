@@ -391,6 +391,11 @@ void RexSession::applyView(const QJsonObject &view)
             layer.bounds = QRectF(b.value(QLatin1String("x")).toDouble(), b.value(QLatin1String("y")).toDouble(),
                                   b.value(QLatin1String("w")).toDouble(), b.value(QLatin1String("h")).toDouble());
             layer.layout = lo.value(QLatin1String("layout")).toObject();
+            for (const QJsonValue &bv : lo.value(QLatin1String("blocks")).toArray()) {
+                const QJsonObject bo = bv.toObject();
+                if (Block *known = m_blocks.count(str(bo, "block_id")) ? block(str(bo, "block_id")) : nullptr)
+                    known->label = str(bo, "label");
+            }
             const qsizetype had = ids.size();
             layoutBlocks(layer.layout, ids);
             if (ids.size() > had && layer.bounds.isValid())
@@ -480,7 +485,9 @@ void RexSession::layoutWindow(Window &w)
     for (const Window::Layer &l : std::as_const(w.floating)) {
         QSize cells;
         const QRect frame = floatingFrame(l.bounds, area, &cells);
-        floating.append({l.id, frame.topLeft(), toPaneLayout(l.layout, cells.width(), cells.height(), paneId)});
+        const QString first = firstBlock(l.layout);
+        floating.append({l.id, frame.topLeft(), toPaneLayout(l.layout, cells.width(), cells.height(), paneId),
+                         first.isEmpty() ? QString() : block(first)->label});
     }
     // Zoomed: that block fills the window; the others are kept, hidden, at
     // the sizes they had.
@@ -932,6 +939,30 @@ bool RexSession::isZoomed(const TerminalTab *tab) const
 {
     const Window *w = windowOf(tab);
     return w && !w->zoomedBlock.isEmpty();
+}
+
+void RexSession::swapWithNext(TerminalWidget *pane)
+{
+    const QString id = blockId(pane);
+    if (id.isEmpty() || m_finished)
+        return;
+    for (const Window &w : std::as_const(m_windows)) {
+        if (!w.tab || !w.tab->contains(pane))
+            continue;
+        const QList<TerminalWidget *> all = w.tab->panes();
+        if (all.size() < 2)
+            return;
+        const QString other = blockId(all.at((all.indexOf(pane) + 1) % all.size()));
+        m_control->request(QStringLiteral("session.swap_blocks"),
+                           QJsonObject{{QStringLiteral("session_id"), m_sessionId},
+                                       {QStringLiteral("block_id"), id},
+                                       {QStringLiteral("other_block_id"), other}},
+                           [](const QJsonObject &, const QJsonObject &error) {
+                               if (!error.isEmpty())
+                                   qCWarning(lcRex) << "swap refused:" << error;
+                           });
+        return;
+    }
 }
 
 void RexSession::movePane(TerminalWidget *pane, TerminalTab *to)

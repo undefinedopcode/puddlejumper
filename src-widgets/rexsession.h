@@ -105,6 +105,8 @@ public:
      * the tiled layout (beside the window's focused tiled pane). */
     void floatPane(TerminalWidget *pane);
     void dockPane(TerminalWidget *pane);
+    /* Swap a pane with the next in its window (wrapping round). */
+    void swapWithNext(TerminalWidget *pane);
     /* Move a pane into another of the session's windows, beside its focused
      * tiled pane. A window left empty goes. */
     void movePane(TerminalWidget *pane, TerminalTab *to);
@@ -142,6 +144,7 @@ private:
         int retries = 0;   // asked again, the server having kept another size
         bool exited = false;
         int exitCode = 0;
+        QString label;  // the server's name for it, if any
     };
     struct Window
     {
