@@ -294,6 +294,45 @@ target_include_directories(test-ghosttysnapshot PRIVATE src-widgets)
 target_compile_definitions(test-ghosttysnapshot PRIVATE
     PJ_GHOSTTY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/src-widgets/dev/ghostty-snapshot")
 
+# test-ghosttyreplay — snapshots replayed into qtermwidget's emulator (no
+# window) and compared with what they hold. Dev tool only; never installed.
+# Run: ./build/test-ghosttyreplay
+qt_add_executable(test-ghosttyreplay
+    src-widgets/dev/test_ghosttyreplay.cpp
+    src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
+    src-widgets/ghosttyreplay.cpp src-widgets/ghosttyreplay.h
+)
+target_link_libraries(test-ghosttyreplay PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets qtermwidget)
+target_include_directories(test-ghosttyreplay PRIVATE src-widgets)
+target_compile_definitions(test-ghosttyreplay PRIVATE
+    PJ_GHOSTTY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/src-widgets/dev/ghostty-snapshot")
+
+# With a libghostty-vt build (in a Ghostty checkout: zig build -Demit-lib-vt,
+# then -DPJ_GHOSTTY_VT=<checkout>/zig-out), two more dev tools that use a
+# real Ghostty terminal:
+#   ghostty-snap COLS ROWS < stream > snapshot
+#   test-ghosttylive [random streams]: Ghostty's snapshots decoded and
+#     replayed into qtermwidget, which must match the stream fed directly.
+set(PJ_GHOSTTY_VT "" CACHE PATH "A libghostty-vt build (zig-out), for the snapshot dev tools")
+if(PJ_GHOSTTY_VT)
+    add_library(pj-ghostty-vt STATIC IMPORTED)
+    set_target_properties(pj-ghostty-vt PROPERTIES
+        IMPORTED_LOCATION "${PJ_GHOSTTY_VT}/lib/libghostty-vt.a"
+        INTERFACE_INCLUDE_DIRECTORIES "${PJ_GHOSTTY_VT}/include"
+        INTERFACE_COMPILE_DEFINITIONS GHOSTTY_STATIC)
+
+    qt_add_executable(ghostty-snap src-widgets/dev/ghostty_snap.cpp src-widgets/dev/ghosttyvt.h)
+    target_link_libraries(ghostty-snap PRIVATE Qt6::Core pj-ghostty-vt)
+
+    qt_add_executable(test-ghosttylive
+        src-widgets/dev/test_ghosttylive.cpp
+        src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
+        src-widgets/ghosttyreplay.cpp src-widgets/ghosttyreplay.h
+    )
+    target_link_libraries(test-ghosttylive PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets qtermwidget pj-ghostty-vt)
+    target_include_directories(test-ghosttylive PRIVATE src-widgets)
+endif()
+
 # ---------------------------------------------------------------------------
 # puddlejumper-qml — the original Qt Quick implementation.
 #

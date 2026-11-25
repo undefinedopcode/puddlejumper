@@ -9,6 +9,7 @@
  */
 
 #include "ghosttysnapshot.h"
+#include "ghostty_fixture.h"
 
 #include <QCoreApplication>
 #include <QDir>
@@ -37,41 +38,17 @@ void check(bool ok, const char *what, int line)
 }
 #define CHECK(x) check(static_cast<bool>(x), #x, __LINE__)
 
-struct Fixture
-{
-    QString name;
-    QString type;
-    QStringList params;
-    int offset = 0;
-    QByteArray data;
-};
+using Fixture = GhosttyFixture;
 
 QString fixtureDir;
 
 Fixture load(const QString &name)
 {
-    Fixture f;
-    f.name = name;
-    QFile file(QDir(fixtureDir).filePath(name));
-    if (!file.open(QIODevice::ReadOnly)) {
-        QTextStream(stderr) << "FAIL: can't read " << file.fileName() << "\n";
+    Fixture f = loadGhosttyFixture(fixtureDir, name);
+    if (!f.ok) {
+        QTextStream(stderr) << "FAIL: can't read " << QDir(fixtureDir).filePath(name) << "\n";
         ++failures;
-        return f;
     }
-    QByteArray hex;
-    for (const QByteArray &line : file.readAll().split('\n')) {
-        const qsizetype hash = line.indexOf('#');
-        const QByteArray content = hash < 0 ? line : line.left(hash);
-        const QString comment = hash < 0 ? QString() : QString::fromUtf8(line.mid(hash + 1)).trimmed();
-        hex += content.simplified().replace(' ', "");
-        if (comment.startsWith(QLatin1String("Kaitai type:")))
-            f.type = comment.mid(12).trimmed();
-        else if (comment.startsWith(QLatin1String("Kaitai params:")))
-            f.params = comment.mid(14).split(QLatin1Char(' '), Qt::SkipEmptyParts);
-        else if (comment.startsWith(QLatin1String("Kaitai offset:")))
-            f.offset = comment.mid(14).trimmed().toInt(nullptr, 0);
-    }
-    f.data = QByteArray::fromHex(hex);
     return f;
 }
 
