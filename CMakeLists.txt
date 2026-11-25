@@ -307,6 +307,21 @@ target_include_directories(test-ghosttyreplay PRIVATE src-widgets)
 target_compile_definitions(test-ghosttyreplay PRIVATE
     PJ_GHOSTTY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/src-widgets/dev/ghostty-snapshot")
 
+# test-rexterminalstream — the Rex terminal stream (snapshot, markers,
+# output) on a capture from a Rex-compatible server, and the client path from
+# it into qtermwidget. Dev tool only; never installed.
+# Run: ./build/test-rexterminalstream
+qt_add_executable(test-rexterminalstream
+    src-widgets/dev/test_rexterminalstream.cpp
+    src-widgets/rexterminalstream.cpp src-widgets/rexterminalstream.h
+    src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
+    src-widgets/ghosttyreplay.cpp src-widgets/ghosttyreplay.h
+)
+target_link_libraries(test-rexterminalstream PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets qtermwidget)
+target_include_directories(test-rexterminalstream PRIVATE src-widgets)
+target_compile_definitions(test-rexterminalstream PRIVATE
+    PJ_REX_CAPTURES="${CMAKE_CURRENT_SOURCE_DIR}/src-widgets/dev/rex-capture")
+
 # With a libghostty-vt build (in a Ghostty checkout: zig build -Demit-lib-vt,
 # then -DPJ_GHOSTTY_VT=<checkout>/zig-out), two more dev tools that use a
 # real Ghostty terminal:
