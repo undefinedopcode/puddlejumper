@@ -173,14 +173,14 @@ inline QRect paintStatusPill(QPainter *p, const QPoint &topLeft, const Status &s
     return pill;
 }
 
-inline QIcon dotIcon(qreal dpr)
+inline QIcon dotIcon(qreal dpr, const QColor &colour = QColor())
 {
     QPixmap dot(QSize(16, 16) * dpr);
     dot.setDevicePixelRatio(dpr);
     dot.fill(Qt::transparent);
     QPainter p(&dot);
     p.setRenderHint(QPainter::Antialiasing);
-    paintDot(&p, QPointF(8, 8), accent());
+    paintDot(&p, QPointF(8, 8), colour.isValid() ? colour : accent());
     p.end();
     return QIcon(dot);
 }

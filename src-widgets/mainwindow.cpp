@@ -148,6 +148,11 @@ constexpr char kFloated[] = "puddlejumperFloated";
 constexpr char kFloatHome[] = "puddlejumperFloatHome";
 constexpr char kFloatHeld[] = "puddlejumperFloatHeld";
 
+// On a tab (see updateInbox()): what it last wanted of you, and since when
+// (ms since the epoch).
+constexpr char kInboxKey[] = "puddlejumperInboxKey";
+constexpr char kInboxSince[] = "puddlejumperInboxSince";
+
 // On a new tab: until when (ms since the epoch) its output is its shell
 // starting up, not news.
 constexpr char kQuietUntilProperty[] = "puddlejumperQuietUntil";
@@ -561,6 +566,11 @@ void MainWindow::buildMenus()
         m_tabs->setCurrentIndex((m_tabs->currentIndex() - 1 + n) % n);
     });
 
+    // Ctrl+Shift+J: unused by terminal programs, as the others here.
+    m_nextNeedingYouAct = file->addAction(tr("Next Tab Needing &You"));
+    m_nextNeedingYouAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+J")));
+    connect(m_nextNeedingYouAct, &QAction::triggered, this, &MainWindow::showNextNeedingYou);
+
     file->addSeparator();
     auto *settingsAct = file->addAction(tr("&Settings…"));
     settingsAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+,")));
@@ -824,6 +834,18 @@ void MainWindow::buildMenus()
     auto *spacer = new QWidget(bar);
     spacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
     bar->addWidget(spacer);
+
+    // What needs you, in every tab and workspace: a count, and a menu of them.
+    m_inboxMenu = new QMenu(this);
+    connect(m_inboxMenu, &QMenu::aboutToShow, this, &MainWindow::fillInboxMenu);
+    m_inboxButton = new QToolButton(bar);
+    m_inboxButton->setIcon(appIcon("bell"));
+    m_inboxButton->setMenu(m_inboxMenu);
+    m_inboxButton->setPopupMode(QToolButton::InstantPopup);
+    m_inboxButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    bar->addWidget(m_inboxButton);
+    updateInbox();
+
     bar->addAction(settingsAct);
 
     unifyTitleBar(this, bar);
@@ -1359,6 +1381,7 @@ void MainWindow::closePane(TerminalWidget *pane)
 
 void MainWindow::removeTab(Tab *tab)
 {
+    scheduleUpdateInbox();
     const int index = m_tabs->indexOf(tab);
     if (index < 0) {
         // Parked in another workspace (its shell exited, or its tmux window
@@ -1989,20 +2012,25 @@ void MainWindow::updateStatus()
 void MainWindow::updateProgramStatus(QWidget *page)
 {
     // The most pressing record of any pane in the tab.
-    ProgramStatusRecord best;
     auto *tab = qobject_cast<TerminalTab *>(page);
+    const ProgramStatusRecord best = tab ? tabStatus(tab) : ProgramStatusRecord();
     if (tab) {
-        for (TerminalWidget *pane : tab->panes()) {
-            const ProgramStatusRecord r = pane->programStatus()->mostPressing();
-            if (ProgramStatus::rank(r) > ProgramStatus::rank(best))
-                best = r;
-        }
         notifyProgramStatus(tab, best);   // in any workspace
         const bool blocked = best.state == ProgramStatusRecord::Blocked;
         if (tab->property(kBlocked).toBool() != blocked) {
             tab->setProperty(kBlocked, blocked);
             scheduleFloatBlockedTabs();
         }
+        // Since when it has wanted this of you: a new state, record or kind
+        // starts the clock again; anything less (a new message) doesn't.
+        const QString key = ProgramStatus::rank(best) >= 2
+            ? QStringList{QString::number(best.state), best.id, best.kind}.join(QChar(0x1f))
+            : QString();
+        if (tab->property(kInboxKey).toString() != key) {
+            tab->setProperty(kInboxKey, key);
+            tab->setProperty(kInboxSince, QDateTime::currentMSecsSinceEpoch());
+        }
+        scheduleUpdateInbox();
     }
 
     const int index = page ? m_tabs->indexOf(page) : -1;
@@ -2122,6 +2150,132 @@ void MainWindow::floatBlockedTabs()
         page->setProperty(kFloatHome, QVariant::fromValue(home));
         moveTabTo(page, to);
     }
+}
+
+ProgramStatusRecord MainWindow::tabStatus(TerminalTab *tab)
+{
+    ProgramStatusRecord best;
+    for (TerminalWidget *pane : tab->panes()) {
+        const ProgramStatusRecord r = pane->programStatus()->mostPressing();
+        if (ProgramStatus::rank(r) > ProgramStatus::rank(best))
+            best = r;
+    }
+    return best;
+}
+
+QList<MainWindow::InboxItem> MainWindow::inbox() const
+{
+    // Needing you first, then failed, then done; within each, the longest
+    // waiting first.
+    QList<InboxItem> items;
+    for (TerminalTab *tab : allTabs()) {
+        const ProgramStatusRecord r = tabStatus(tab);
+        if (ProgramStatus::rank(r) >= 2)
+            items.append({tab, r, tab->property(kInboxSince).toLongLong()});
+    }
+    std::stable_sort(items.begin(), items.end(), [](const InboxItem &a, const InboxItem &b) {
+        const int ra = ProgramStatus::rank(a.record), rb = ProgramStatus::rank(b.record);
+        return ra != rb ? ra > rb : a.since < b.since;
+    });
+    return items;
+}
+
+void MainWindow::scheduleUpdateInbox()
+{
+    if (m_inboxPending)
+        return;
+    m_inboxPending = true;
+    // Later: a closed tab is still among them until it's gone.
+    QTimer::singleShot(0, this, [this]() {
+        m_inboxPending = false;
+        updateInbox();
+    });
+}
+
+void MainWindow::updateInbox()
+{
+    if (!m_inboxButton)
+        return;
+    int waiting = 0, finished = 0;
+    for (const InboxItem &item : inbox())
+        ++(item.record.state == ProgramStatusRecord::Blocked ? waiting : finished);
+    const int total = waiting + finished;
+    m_inboxButton->setText(total ? QString::number(total) : QString());
+    QStringList parts;
+    if (waiting)
+        parts << tr("%n waiting on you", nullptr, waiting);
+    if (finished)
+        parts << tr("%n finished or failed", nullptr, finished);
+    m_inboxButton->setToolTip(
+        (parts.isEmpty() ? tr("Nothing needs you") : parts.join(QStringLiteral(", ")))
+        + QStringLiteral(" (%1)").arg(m_nextNeedingYouAct->shortcut().toString(QKeySequence::NativeText)));
+}
+
+QString MainWindow::waitedFor(qint64 since)
+{
+    const qint64 secs = (QDateTime::currentMSecsSinceEpoch() - since) / 1000;
+    if (since <= 0 || secs < 60)
+        return tr("just now");
+    if (secs < 3600)
+        return tr("%n min", nullptr, int(secs / 60));
+    return tr("%n h", nullptr, int(secs / 3600));
+}
+
+void MainWindow::fillInboxMenu()
+{
+    m_inboxMenu->clear();
+    const QList<InboxItem> items = inbox();
+    if (items.isEmpty()) {
+        m_inboxMenu->addAction(tr("Nothing needs you"))->setEnabled(false);
+        return;
+    }
+    const QFontMetrics fm(m_inboxMenu->font());
+    for (const InboxItem &item : items) {
+        cardstyle::Status::Kind kind = cardstyle::Status::Done;
+        if (item.record.state == ProgramStatusRecord::Blocked)
+            kind = cardstyle::Status::Blocked;
+        else if (item.record.state == ProgramStatusRecord::Error)
+            kind = cardstyle::Status::Error;
+        // What, where, what it said, and for how long. Programs' text: no
+        // mnemonics from it.
+        QStringList parts{ProgramStatus::label(item.record), describeTab(item.tab)};
+        if (!item.record.msg.isEmpty())
+            parts << fm.elidedText(item.record.msg, Qt::ElideRight, 320);
+        parts << waitedFor(item.since);
+        QString text = parts.join(QStringLiteral("  ·  "));
+        text.replace(QLatin1Char('&'), QLatin1String("&&"));
+        QAction *act = m_inboxMenu->addAction(
+            cardstyle::dotIcon(devicePixelRatioF(), cardstyle::statusColour(kind)), text);
+        if (item.tab == currentPage()) {   // the one on screen
+            QFont bold = act->font();
+            bold.setBold(true);
+            act->setFont(bold);
+        }
+        connect(act, &QAction::triggered, this, [this, tab = QPointer<TerminalTab>(item.tab)]() {
+            if (tab)
+                showTab(tab);
+        });
+    }
+    m_inboxMenu->addSeparator();
+    m_inboxMenu->addAction(m_nextNeedingYouAct);
+}
+
+void MainWindow::showNextNeedingYou()
+{
+    const QList<InboxItem> items = inbox();
+    if (items.isEmpty()) {
+        statusBar()->showMessage(tr("Nothing needs you"), 3000);
+        return;
+    }
+    // The one after the tab on screen, if it's among them; else the first.
+    int next = 0;
+    for (int i = 0; i < items.size(); ++i) {
+        if (items.at(i).tab == currentPage()) {
+            next = (i + 1) % items.size();
+            break;
+        }
+    }
+    showTab(items.at(next).tab);
 }
 
 QString MainWindow::notificationKey(const QWidget *tab)

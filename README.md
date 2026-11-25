@@ -770,7 +770,12 @@ tab, and it goes away once you have. Needing you also flashes the taskbar
 (bounces the Dock). **Settings → Scrolling → Watch a Terminal → Programs**
 turns notifications off.
 
-The same place has two options, off by default, for tabs waiting on you: tint
+The bell on the toolbar counts the tabs that need you, in every workspace:
+waiting on you, failed, or done and not yet looked at. Its menu lists them,
+waiting first and the longest waiting first, with what each said and for how
+long; **File → Next Tab Needing You** (Ctrl+Shift+J) goes to each in turn.
+
+The Programs settings also have two options, off by default, for tabs waiting on you: tint
 them amber, and move them to the front of the tabs until answered, then back
 where they were. The tab you're looking at stays put, and so does one you have
 dragged since it moved.

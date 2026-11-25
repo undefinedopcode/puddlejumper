@@ -12,6 +12,7 @@
 #include <QVector>
 
 #include "profiles.h"
+#include "programstatus.h"
 #include "settings.h"
 #include "workspace.h"
 #include "workspacefile.h"
@@ -26,7 +27,7 @@ class QToolButton;
 class Notifier;
 class Tab;
 class TerminalTab;
-struct ProgramStatusRecord;
+class QAction;
 class TerminalWidget;
 class TmuxSession;
 class SettingsDialog;
@@ -219,6 +220,24 @@ private:
     void floatBlockedTabs();
     void moveTabTo(QWidget *page, int to);
     void heldByHand(QWidget *page);
+
+    /*
+     * What needs you: tabs in any workspace whose program waits on you, has
+     * failed or is done and not yet seen. A toolbar button counts and lists
+     * them; Next Tab Needing You goes through them.
+     */
+    struct InboxItem {
+        TerminalTab *tab;
+        ProgramStatusRecord record;
+        qint64 since;   // ms since the epoch
+    };
+    static ProgramStatusRecord tabStatus(TerminalTab *tab);
+    QList<InboxItem> inbox() const;
+    void scheduleUpdateInbox();
+    void updateInbox();
+    void fillInboxMenu();
+    void showNextNeedingYou();
+    static QString waitedFor(qint64 since);
     /* A desktop notification when a tab not being looked at needs you, has
      * finished or has failed; taken away once it's seen, or resolved. */
     void notifyProgramStatus(TerminalTab *tab, const ProgramStatusRecord &record);
@@ -290,6 +309,10 @@ private:
     QWidget *m_parking = nullptr;       // hidden parent of parked tabs
     bool m_switchingWorkspace = false;
     bool m_floatPending = false;
+    bool m_inboxPending = false;
+    QToolButton *m_inboxButton = nullptr;
+    QMenu *m_inboxMenu = nullptr;
+    QAction *m_nextNeedingYouAct = nullptr;
     QMenu *m_workspaceMenu = nullptr;
     QToolButton *m_workspaceButton = nullptr;
     QAction *m_newWorkspaceAct = nullptr;
