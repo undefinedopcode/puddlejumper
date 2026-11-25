@@ -74,6 +74,9 @@ void Vt102Emulation::reset()
   _screen[0]->reset();
   resetCharset(1);
   _screen[1]->reset();
+  // puddlejumper: a reset takes the images, too.
+  _screen[0]->graphics().clear();
+  _screen[1]->graphics().clear();
 
   bufferedUpdate();
 }
@@ -172,6 +175,11 @@ void Vt102Emulation::resetTokenizer()
   tokenBufferPos = 0;
   tokenOverflow = false;
   tmuxEscPending = false;
+  longString = LongString::None;
+  graphicsData.clear();
+  passthroughData.clear();
+  longStringOverflow = false;
+  longStringEscPending = false;
   argc = 0;
   argv[0] = 0;
   argv[1] = 0;
@@ -301,8 +309,8 @@ bool Vt102Emulation::inTmuxPassthrough() const
 // plainly.
 void Vt102Emulation::unwrapTmuxPassthrough()
 {
-  const bool overflow = tokenOverflow;
-  const std::u32string inner(tokenBuffer + 7, tokenBuffer + tokenBufferPos);
+  const bool overflow = longStringOverflow;
+  const std::u32string inner = std::move(passthroughData);
   resetTokenizer();
   if (overflow)
     return;
@@ -310,21 +318,24 @@ void Vt102Emulation::unwrapTmuxPassthrough()
     receiveChar(c);
 }
 
-void Vt102Emulation::receiveChar(char32_t cc)
-{
-  if (cc == DEL)
-    return; //VT100: ignore.
+// Long enough for an image sent whole (most come in 4096-byte chunks).
+static constexpr qsizetype kMaxLongString = 64 * 1024 * 1024;
 
-  // puddlejumper: inside tmux's passthrough, ESC ESC is an ESC of the inner
-  // sequence, and ESC \ the end of the whole.
-  if (inTmuxPassthrough())
+bool Vt102Emulation::receiveLongString(char32_t cc)
+{
+  if (longString == LongString::None)
+    return false;
+
+  if (longString == LongString::Passthrough)
   {
+    // Inside it, ESC ESC is an ESC of the inner sequence, and ESC \ the end
+    // of the whole.
     if (cc == ESC)
     {
       if (tmuxEscPending)
-        addToCurrentToken(ESC);
+        passthroughData.push_back(ESC);
       tmuxEscPending = !tmuxEscPending;
-      return;
+      return true;
     }
     if (tmuxEscPending)
     {
@@ -332,13 +343,65 @@ void Vt102Emulation::receiveChar(char32_t cc)
       if (cc == '\\')
       {
         unwrapTmuxPassthrough();
-        return;
+        return true;
       }
-      addToCurrentToken(ESC);
+      passthroughData.push_back(ESC);
     }
-    addToCurrentToken(cc);
-    return;
+    if (qsizetype(passthroughData.size()) < kMaxLongString)
+      passthroughData.push_back(cc);
+    else
+      longStringOverflow = true;
+    return true;
   }
+
+  // A graphics command, to the String Terminator (or BEL).
+  if (longStringEscPending)
+  {
+    longStringEscPending = false;
+    if (cc == '\\')
+    {
+      const bool overflow = longStringOverflow;
+      const QByteArray body = std::move(graphicsData);
+      resetTokenizer();
+      if (!overflow)
+        processGraphicsCommand(body);
+      return true;
+    }
+    // Any other escape ends it unfinished, and starts afresh.
+    resetTokenizer();
+    receiveChar(ESC);
+    receiveChar(cc);
+    return true;
+  }
+  if (cc == ESC)
+  {
+    longStringEscPending = true;
+    return true;
+  }
+  if (cc == 7)
+  {
+    const bool overflow = longStringOverflow;
+    const QByteArray body = std::move(graphicsData);
+    resetTokenizer();
+    if (!overflow)
+      processGraphicsCommand(body);
+    return true;
+  }
+  if (graphicsData.size() < kMaxLongString && cc < 128)
+    graphicsData.append(char(cc));
+  else
+    longStringOverflow = true;
+  return true;
+}
+
+void Vt102Emulation::receiveChar(char32_t cc)
+{
+  if (cc == DEL)
+    return; //VT100: ignore.
+
+  // puddlejumper: kitty graphics commands and tmux's passthrough.
+  if (receiveLongString(cc))
+    return;
 
   if (ces(CTL))
   {
@@ -363,6 +426,21 @@ void Vt102Emulation::receiveChar(char32_t cc)
   }
   // advance the state
   addToCurrentToken(cc);
+
+  // puddlejumper: the start of a long string; the rest goes to
+  // receiveLongString().
+  if (tokenBufferPos == 3 && tokenBuffer[0] == ESC && tokenBuffer[1] == '_' && tokenBuffer[2] == 'G')
+  {
+    resetTokenizer();
+    longString = LongString::Graphics;
+    return;
+  }
+  if (inTmuxPassthrough())
+  {
+    resetTokenizer();
+    longString = LongString::Passthrough;
+    return;
+  }
 
   char32_t* s = tokenBuffer;
   int  p = tokenBufferPos;
@@ -428,6 +506,30 @@ void Vt102Emulation::receiveChar(char32_t cc)
         processToken( TY_CSI_PS(cc, argv[0]), argv[1], argv[2]);
         resetTokenizer();
         return;
+    }
+
+    // puddlejumper: a CSI with an intermediate byte not handled above (such
+    // as DECSACE, CSI Ps * x, which kitty's icat sends) is taken whole and
+    // ignored, rather than its final byte printed or taken for another
+    // sequence's.
+    if (p >= 3 && s[1] == '[')
+    {
+      auto unhandledIntermediate = [](char32_t c) {
+        return c >= 0x21 && c <= 0x2F && c != '!' && c != '$';
+      };
+      if (unhandledIntermediate(cc))
+        return;
+      if (cc >= 0x40 && cc <= 0x7E)
+      {
+        for (int k = 2; k < p - 1; k++)
+        {
+          if (unhandledIntermediate(s[k]))
+          {
+            resetTokenizer();
+            return;
+          }
+        }
+      }
     }
 
     if (epe(   )) { processToken( TY_CSI_PE(cc), 0, 0); resetTokenizer(); return; }
@@ -687,6 +789,12 @@ void Vt102Emulation::processToken(int token, char32_t p, int q)
     case TY_CSI_PS('t',   8) : setImageSize( p /*lines */, q /* columns */ );
                                emit imageResizeRequest(QSize(q, p));
                                break;
+
+// puddlejumper: the text area's size (CSI 4 ; height ; width t) and a cell's
+// (CSI 6 ; height ; width t), in device pixels: what programs that show
+// images scale them by.
+    case TY_CSI_PS('t',   14) : reportPixelSize(false); break;
+    case TY_CSI_PS('t',   16) : reportPixelSize(true); break;
 
 // change tab text color : \e[28;<color>t  color: 0-16,777,215
     case TY_CSI_PS('t',   28) : emit changeTabTextColorRequest      ( p        );          break;
@@ -1055,6 +1163,38 @@ void Vt102Emulation::reportCursorPosition()
     qWarning("Vt102Emulation::reportCursorPosition: Buffer too small\n");
   }
   sendString(tmp);
+}
+
+void Vt102Emulation::reportPixelSize(bool cell)
+{
+  if (!answerQueries()) return; // puddlejumper: see Emulation::setAnswerQueries()
+  const QSize size = cellPixelSize();
+  if (size.isEmpty())
+    return;
+  char tmp[64];
+  if (cell)
+    snprintf(tmp, sizeof tmp, "\033[6;%d;%dt", size.height(), size.width());
+  else
+    snprintf(tmp, sizeof tmp, "\033[4;%d;%dt", size.height() * _currentScreen->getLines(),
+             size.width() * _currentScreen->getColumns());
+  sendString(tmp);
+}
+
+// puddlejumper: a kitty graphics command (see TerminalGraphics), for the
+// screen showing.
+void Vt102Emulation::processGraphicsCommand(const QByteArray &body)
+{
+  TerminalGraphics::Context context;
+  context.cursorRow = _currentScreen->getCursorY();
+  context.cursorColumn = _currentScreen->getCursorX();
+  context.lines = _currentScreen->getLines();
+  context.columns = _currentScreen->getColumns();
+  context.cellSize = cellPixelSize();
+  const TerminalGraphics::Result result = _currentScreen->graphics().command(body, context);
+  if (result.moveCursor)
+    _currentScreen->moveCursorPastImage(result.cursorColumns, result.cursorRows);
+  if (!result.reply.isEmpty() && answerQueries())
+    sendString(result.reply.constData(), result.reply.size());
 }
 
 void Vt102Emulation::reportTerminalType()

@@ -26,6 +26,8 @@
 // Konsole
 #include "Screen.h"
 
+#include <algorithm>
+
 using namespace Konsole;
 
 ScreenWindow::ScreenWindow(QObject* parent)
@@ -197,6 +199,54 @@ QPoint ScreenWindow::cursorPosition() const
 int ScreenWindow::currentLine() const
 {
     return qBound(0,_currentLine,lineCount()-windowLines());
+}
+
+QList<GraphicsPlacement> ScreenWindow::graphicsPlacements() const
+{
+    QList<GraphicsPlacement> shown;
+    if (_screen->graphics().isEmpty())
+        return shown;
+    // Screen rows (negative: in the history) to the window's.
+    const int shift = _screen->getHistLines() - currentLine();
+    const int lines = windowLines();
+    for (GraphicsPlacement p : _screen->graphics().placements())
+    {
+        if (p.isVirtual)
+            continue;
+        p.row += shift;
+        if (p.row + p.rows > 0 && p.row < lines)
+            shown << p;
+    }
+    // Lower z under higher; then the lower id, then the older.
+    std::sort(shown.begin(), shown.end(), [](const GraphicsPlacement &a, const GraphicsPlacement &b) {
+        if (a.z != b.z)
+            return a.z < b.z;
+        if (a.imageId != b.imageId)
+            return a.imageId < b.imageId;
+        return a.serial < b.serial;
+    });
+    return shown;
+}
+
+QList<GraphicsPlacement> ScreenWindow::graphicsVirtualPlacements() const
+{
+    QList<GraphicsPlacement> found;
+    for (const GraphicsPlacement &p : _screen->graphics().placements())
+    {
+        if (p.isVirtual)
+            found << p;
+    }
+    return found;
+}
+
+QImage ScreenWindow::graphicsImage(quint32 id) const
+{
+    return _screen->graphics().image(id);
+}
+
+quint64 ScreenWindow::graphicsGeneration() const
+{
+    return _screen->graphics().generation();
 }
 
 void ScreenWindow::scrollBy( RelativeScrollMode mode , int amount )

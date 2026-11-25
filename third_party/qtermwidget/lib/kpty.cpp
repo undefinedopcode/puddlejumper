@@ -685,12 +685,19 @@ bool KPty::tcSetAttr(struct ::termios * ttmode)
 
 bool KPty::setWinSize(int lines, int columns)
 {
+    return setWinSize(lines, columns, 0, 0);
+}
+
+bool KPty::setWinSize(int lines, int columns, int xpixel, int ypixel)
+{
     Q_D(KPty);
 
     struct winsize winSize;
     memset(&winSize, 0, sizeof(winSize));
     winSize.ws_row = (unsigned short)lines;
     winSize.ws_col = (unsigned short)columns;
+    winSize.ws_xpixel = (unsigned short)qBound(0, xpixel, 0xffff);
+    winSize.ws_ypixel = (unsigned short)qBound(0, ypixel, 0xffff);
     return ioctl(d->masterFd, TIOCSWINSZ, (char *)&winSize) != -1;
 }
 

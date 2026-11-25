@@ -105,6 +105,36 @@ with a `puddlejumper:` comment.
     `renderScreen()` (patch 8) measures the font without that spacing before
     applying its own.
 
+12. **Images, by kitty's graphics protocol.** New `lib/TerminalGraphics.*`
+    keeps each screen's images and placements (the normal and alternate
+    screens have their own, as in kitty) and carries out the commands
+    (`ESC _ G … ESC \`): transmitting (direct only, as RGB, RGBA or PNG,
+    zlib-compressed or not, in chunks), placing (source rectangle, cell
+    offset, columns and rows, z-index, `C=1`), querying (with `e=` feature
+    queries) and deleting, with kitty's 320 MB quota a screen. The tokenizer
+    in `Vt102Emulation` collects the command (up to 64 MB, as it now does a
+    tmux passthrough too). `Screen` tells the graphics when lines move,
+    scroll into the history, or are cleared, so placements stay with their
+    text. `TerminalDisplay` draws them in kitty's layers: under cell
+    backgrounds, under the text, over it. Unicode placeholders (`U=1`
+    virtual placements, shown by cells holding U+10EEEE, numbered by the
+    combining marks in `lib/PlaceholderDiacritics.h`) work too; that is how
+    images get through tmux. The pty's size now carries pixels
+    (`ws_xpixel`, `ws_ypixel`), and `CSI 14 t` and `CSI 16 t` report the
+    window's and a cell's size in pixels. Not done: files and shared memory,
+    indexed colour, animation, relative placements, and placement ids in the
+    underline colour.
+
+13. **A CSI sequence with an intermediate byte it doesn't know is ignored.**
+    Such a sequence (`CSI * x`, DECSACE, say) used to end the escape at the
+    intermediate, so its final byte was printed: kitty's `icat` left an "x"
+    before its images.
+
+14. **Combining characters past U+FFFF combine.** `displayCharacter()` asked
+    `QChar(c).category()`, which cut such a character to 16 bits; it now asks
+    `QChar::category(c)`. And U+10EEEE, a private-use character, always takes
+    one cell.
+
 The build also defines `HAVE_UTMPX` on macOS (in our `CMakeLists.txt`, not the
 sources): it has only the utmpx API, and `kpty.cpp` otherwise falls back to
 utmp functions that don't exist there.

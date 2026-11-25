@@ -24,6 +24,7 @@
 #define SCREEN_H
 
 // Qt
+#include "TerminalGraphics.h"
 #include <QRect>
 #include <QSet>
 #include <QTextStream>
@@ -561,6 +562,14 @@ public:
       */
     static void fillWithDefaultChar(Character* dest, int count);
 
+    /* puddlejumper: the images shown on this screen (kitty's graphics
+     * protocol). Their placements follow the text as it moves. */
+    TerminalGraphics &graphics() { return _graphics; }
+    const TerminalGraphics &graphics() const { return _graphics; }
+    /* After an image: right by its columns and down to its last row, as
+     * kitty does; past the right edge, to the start of the next line. */
+    void moveCursorPastImage(int columns, int rows);
+
     QSet<uint> usedExtendedChars() const
     {
         QSet<uint> result;
@@ -706,6 +715,8 @@ private:
     unsigned short lastDrawnChar;
 
     static Character defaultChar;
+
+    TerminalGraphics _graphics;
 };
 
 }
