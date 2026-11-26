@@ -808,10 +808,15 @@ int main(int argc, char *argv[])
                 const QJsonObject lo = lv.toObject();
                 if (lo.value(QLatin1String("kind")).toString() != QLatin1String("floating"))
                     continue;
-                const QJsonObject b = lo.value(QLatin1String("bounds")).toObject();
+                // [x, y, w, h], as Rex sends it (older atlantis: {x, y, w, h}).
+                const QJsonValue b = lo.value(QLatin1String("bounds"));
+                const QJsonArray a = b.toArray();
+                const QJsonObject o = b.toObject();
                 out.append({lo.value(QLatin1String("layer_id")).toString(),
-                            QRectF(b.value(QLatin1String("x")).toDouble(), b.value(QLatin1String("y")).toDouble(),
-                                   b.value(QLatin1String("w")).toDouble(), b.value(QLatin1String("h")).toDouble())});
+                            b.isArray() ? QRectF(a.at(0).toDouble(), a.at(1).toDouble(), a.at(2).toDouble(),
+                                                 a.at(3).toDouble())
+                                        : QRectF(o.value(QLatin1String("x")).toDouble(), o.value(QLatin1String("y")).toDouble(),
+                                                 o.value(QLatin1String("w")).toDouble(), o.value(QLatin1String("h")).toDouble())});
             }
         }
         return out;
@@ -836,8 +841,7 @@ int main(int argc, char *argv[])
         // Resized elsewhere.
         server.call(QStringLiteral("session.resize_layer"),
                     QJsonObject{{QStringLiteral("session_id"), sid}, {QStringLiteral("layer_id"), layer},
-                                {QStringLiteral("bounds"), QJsonObject{{QStringLiteral("x"), 0.0}, {QStringLiteral("y"), 0.0},
-                                                                       {QStringLiteral("w"), 0.5}, {QStringLiteral("h"), 0.5}}}});
+                                {QStringLiteral("bounds"), QJsonArray{0.0, 0.0, 0.5, 0.5}}});
         check(waitFor([&] { return screenSize(floater).width() < floatedSize.width(); }),
               QStringLiteral("a layer resized elsewhere is followed"));
         agrees(server, c, QStringLiteral("layer resized elsewhere"));
@@ -883,8 +887,7 @@ int main(int argc, char *argv[])
                 windowId = wv.toObject().value(QLatin1String("window_id")).toString();
         server.call(QStringLiteral("session.new_layer"),
                     QJsonObject{{QStringLiteral("session_id"), sid}, {QStringLiteral("window_id"), windowId},
-                                {QStringLiteral("bounds"), QJsonObject{{QStringLiteral("x"), 0.5}, {QStringLiteral("y"), 0.5},
-                                                                       {QStringLiteral("w"), 0.45}, {QStringLiteral("h"), 0.45}}},
+                                {QStringLiteral("bounds"), QJsonArray{0.5, 0.5, 0.45, 0.45}},
                                 {QStringLiteral("layout"), QJsonObject{{QStringLiteral("block"),
                                     QJsonObject{{QStringLiteral("flavor"), QStringLiteral("com.superlogical.terminal.shell")}}}}}});
         check(waitFor([&] { return second->panes().size() == 3; }), QStringLiteral("a layer made elsewhere is shown"));

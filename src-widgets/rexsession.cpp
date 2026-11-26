@@ -47,6 +47,25 @@ QJsonObject shellLayout()
     return QJsonObject{{QStringLiteral("block"), QJsonObject{{QStringLiteral("flavor"), kShellFlavor}}}};
 }
 
+// A rect as Rex sends it, [x, y, w, h], or as {x, y, w, h}, which older
+// atlantis sent.
+QRectF rectFrom(const QJsonValue &v)
+{
+    if (v.isArray()) {
+        const QJsonArray a = v.toArray();
+        return a.size() == 4 ? QRectF(a.at(0).toDouble(), a.at(1).toDouble(), a.at(2).toDouble(), a.at(3).toDouble())
+                             : QRectF();
+    }
+    const QJsonObject o = v.toObject();
+    return QRectF(o.value(QLatin1String("x")).toDouble(), o.value(QLatin1String("y")).toDouble(),
+                  o.value(QLatin1String("w")).toDouble(), o.value(QLatin1String("h")).toDouble());
+}
+
+QJsonArray rectJson(double x, double y, double w, double h)
+{
+    return QJsonArray{x, y, w, h};
+}
+
 QString str(const QJsonObject &o, const char *key)
 {
     return o.value(QLatin1String(key)).toString();
@@ -388,11 +407,9 @@ void RexSession::applyView(const QJsonObject &view)
             const QJsonObject lo = lv.toObject();
             if (str(lo, "kind") != QLatin1String("floating"))
                 continue;
-            const QJsonObject b = lo.value(QLatin1String("bounds")).toObject();
             Window::Layer layer;
             layer.id = str(lo, "layer_id");
-            layer.bounds = QRectF(b.value(QLatin1String("x")).toDouble(), b.value(QLatin1String("y")).toDouble(),
-                                  b.value(QLatin1String("w")).toDouble(), b.value(QLatin1String("h")).toDouble());
+            layer.bounds = rectFrom(lo.value(QLatin1String("bounds")));
             layer.layout = lo.value(QLatin1String("layout")).toObject();
             for (const QJsonValue &bv : lo.value(QLatin1String("blocks")).toArray()) {
                 const QJsonObject bo = bv.toObject();
@@ -1092,10 +1109,7 @@ void RexSession::floatingMoved(Window &w, const QString &layerId, const QRect &f
         m_control->request(QStringLiteral("session.resize_layer"),
                            QJsonObject{{QStringLiteral("session_id"), m_sessionId},
                                        {QStringLiteral("layer_id"), layerId},
-                                       {QStringLiteral("bounds"), QJsonObject{{QStringLiteral("x"), x},
-                                                                              {QStringLiteral("y"), y},
-                                                                              {QStringLiteral("w"), width},
-                                                                              {QStringLiteral("h"), height}}}},
+                                       {QStringLiteral("bounds"), rectJson(x, y, width, height)}},
                            [this](const QJsonObject &, const QJsonObject &error) {
                                // Refused: put the frame back where the view says.
                                if (!error.isEmpty()) {
@@ -1209,10 +1223,7 @@ void RexSession::floatPane(TerminalWidget *pane)
     m_control->request(QStringLiteral("session.float_block"),
                        QJsonObject{{QStringLiteral("session_id"), m_sessionId},
                                    {QStringLiteral("block_id"), id},
-                                   {QStringLiteral("bounds"), QJsonObject{{QStringLiteral("x"), 0.2},
-                                                                          {QStringLiteral("y"), 0.15},
-                                                                          {QStringLiteral("w"), 0.6},
-                                                                          {QStringLiteral("h"), 0.6}}}});
+                                   {QStringLiteral("bounds"), rectJson(0.2, 0.15, 0.6, 0.6)}});
 }
 
 void RexSession::dockPane(TerminalWidget *pane)
