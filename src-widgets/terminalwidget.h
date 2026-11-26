@@ -12,6 +12,7 @@
 #include "settings.h"
 
 class ProgramStatus;
+class QLabel;
 class QTermWidget;
 class QTimer;
 class QMenu;
@@ -104,6 +105,10 @@ public:
     /* External terminals: output to display, and the screen size to keep. */
     void feed(const QByteArray &data);
     void setScreenSize(int columns, int lines);
+    /* External terminals: a note in the pane's top corner while its size
+     * comes from elsewhere (another client); empty takes it away. */
+    void setFollowing(const QString &note);
+    bool isFollowing() const;
 
     /* One character cell, in pixels. */
     QSize cellSize() const;
@@ -209,6 +214,8 @@ signals:
 
     /* External terminals: bytes typed (or mouse reports) to deliver. */
     void externalInput(const QByteArray &data);
+    /* A mouse button was pressed on the screen. */
+    void pointerPressed();
 
     /* From the context menu; the owner decides what a split means. */
     void splitRequested(Qt::Orientation orientation);
@@ -227,6 +234,7 @@ signals:
 protected:
     void paintEvent(QPaintEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     /* QTermWidget's display widget, which it doesn't expose. */
@@ -248,6 +256,8 @@ private:
     const Settings &m_settings;
     TerminalProfile m_profile;
     QTermWidget *m_terminal = nullptr;
+    QLabel *m_followBadge = nullptr;  // setFollowing()
+    void placeFollowBadge();
     QString m_title;
 
     /*

@@ -344,6 +344,7 @@ void RexSession::attach()
                            m_attached = true;
                            qCInfo(lcRex) << "attached" << m_sessionId << "on" << m_server;
                            applyView(payload.value(QLatin1String("view")).toObject());
+                           requestBlocks();
                            sendScripts();  // then the keymap
                        });
 }
@@ -458,6 +459,15 @@ void RexSession::applyView(const QJsonObject &view)
         if (existed && w.tab && oldLabel != w.label)
             emit tabRenamed(w.tab, w.label);
     }
+    // Who owns each block (left out: no one).
+    for (const QJsonValue &v : view.value(QLatin1String("windows")).toArray())
+        for (const QJsonValue &lv : v.toObject().value(QLatin1String("layers")).toArray())
+            for (const QJsonValue &bv : lv.toObject().value(QLatin1String("blocks")).toArray()) {
+                const QJsonObject bo = bv.toObject();
+                auto it = m_blocks.find(str(bo, "block_id"));
+                if (it != m_blocks.end())
+                    setOwner(it->second.get(), str(bo, "owner"));
+            }
     if (m_windows.isEmpty())
         endIfEmpty();
     else if (!oldLabel.isEmpty() && oldLabel != m_label)
@@ -630,8 +640,14 @@ void RexSession::layoutWindow(Window &w)
     for (const FloatingLayout &f : std::as_const(floating))
         collectLeaves(f.layout, sizes);
     sizes.remove(-1);
-    for (auto it = sizes.cbegin(); it != sizes.cend(); ++it)
-        sendSize(block(m_paneBlocks.value(it.key())), it.value());
+    for (auto it = sizes.cbegin(); it != sizes.cend(); ++it) {
+        Block *b = block(m_paneBlocks.value(it.key()));
+        sendSize(b, it.value());
+        // Another client's block keeps its size: the pane shows that, not
+        // the layout's.
+        if (following(b) && b->pane && !b->screen.isEmpty())
+            b->pane->setScreenSize(b->screen.width(), b->screen.height());
+    }
 
     if (fresh)
         emit tabAdded(w.tab, w.label);
@@ -662,8 +678,14 @@ TerminalWidget *RexSession::makePane(Block *b)
         if (it != m_blocks.end())
             sendInput(it->second.get(), bytes);
     });
+    connect(pane, &TerminalWidget::pointerPressed, this, [this, id]() {
+        auto it = m_blocks.find(id);
+        if (it != m_blocks.end())
+            takeBlock(it->second.get());
+    });
     b->pane = pane;
     sendTheme(b);
+    showFollowing(b);
     return pane;
 }
 
@@ -729,6 +751,7 @@ void RexSession::onSnapshot(Block *b, const GhosttySnapshot::Snapshot &snapshot)
     // (a resync, or after the stream couldn't be resumed) rebuilds the pane.
     b->pane->setScreenSize(b->screen.width(), b->screen.height());
     b->pane->feed(GhosttySnapshot::replay(snapshot));
+    showFollowing(b);
     checkSize(b);
 }
 
@@ -736,6 +759,8 @@ void RexSession::onMarker(Block *b, const QJsonObject &marker)
 {
     const QString type = str(marker, "type");
     if (type == QLatin1String("resize")) {
+        if (marker.contains(QLatin1String("owner")))  // atlantis's; owner events say the rest
+            setOwner(b, str(marker, "owner"));
         const QSize size(marker.value(QLatin1String("cols")).toInt(), marker.value(QLatin1String("rows")).toInt());
         qCDebug(lcRex) << "marker" << b->id.right(8) << size << "screen" << b->screen;
         if (size.isEmpty() || size == b->screen) {
@@ -750,6 +775,7 @@ void RexSession::onMarker(Block *b, const QJsonObject &marker)
         // a fresh snapshot shows what the server has.
         if (widthChanged && b->stream)
             b->stream->resync();
+        showFollowing(b);
         checkSize(b);
     } else if (type == QLatin1String("child_exited")) {
         b->exited = true;
@@ -816,6 +842,10 @@ void RexSession::onEvent(const QJsonObject &message)
     const QJsonObject payload = event.value(QLatin1String("payload")).toObject();
     if (type == QLatin1String("session_view_changed") || type == QLatin1String("block_closed")) {
         m_viewTimer->start();
+    } else if (type == QLatin1String("block_owner_changed")) {
+        auto it = m_blocks.find(str(payload, "block_id"));
+        if (it != m_blocks.end())
+            setOwner(it->second.get(), str(payload, "owner"));
     } else if (type == QLatin1String("block_event")
                && str(payload, "name") == QLatin1String("child_exited")) {
         auto it = m_blocks.find(str(payload, "block_id"));
@@ -981,6 +1011,7 @@ void RexSession::sendInput(Block *b, const QByteArray &bytes)
     // snapshot gave it the modes: bracketed paste, mouse, keypad).
     if (b->exited || m_finished)
         return;
+    takeBlock(b);
     for (qsizetype i = 0; i < bytes.size(); i += kWriteChunk) {
         QJsonObject p = target(b);
         p.insert(QStringLiteral("args"),
@@ -1030,6 +1061,8 @@ void RexSession::checkSize(Block *b)
     // again, a few times. The pane keeps the layout's size meanwhile.
     if (b->resizing > 0 || b->screen.isEmpty() || b->sent.isEmpty() || b->screen == b->sent)
         return;
+    if (following(b))
+        return;  // another client's size, until this one takes the block
     if (b->retries >= 3) {
         qCWarning(lcRex) << "block" << b->id << "stays" << b->screen << "not" << b->sent;
         return;
@@ -1041,6 +1074,101 @@ void RexSession::checkSize(Block *b)
         if (it != m_blocks.end() && it->second->screen != it->second->sent && it->second->resizing == 0)
             sendSize(it->second.get(), it->second->sent, true);
     });
+}
+
+bool RexSession::isFollowing(const TerminalWidget *pane) const
+{
+    for (const auto &[id, b] : m_blocks)
+        if (b->pane == pane)
+            return following(b.get());
+    return false;
+}
+
+bool RexSession::following(const Block *b) const
+{
+    return !b->owner.isEmpty() && b->owner != m_control->clientId();
+}
+
+void RexSession::setOwner(Block *b, const QString &owner)
+{
+    if (b->owner == owner)
+        return;
+    const bool was = following(b);
+    b->owner = owner;
+    qCDebug(lcRex) << "owner" << b->id.right(8) << owner.right(8) << (following(b) ? "following" : "");
+    showFollowing(b);
+    if (following(b) && b->pane && !b->screen.isEmpty())
+        b->pane->setScreenSize(b->screen.width(), b->screen.height());
+    // Ours again: the server applies the size this client last asked for;
+    // check it did.
+    if (was && !following(b)) {
+        b->retries = 0;
+        checkSize(b);
+    }
+}
+
+void RexSession::showFollowing(Block *b)
+{
+    if (!b->pane)
+        return;
+    if (!following(b)) {
+        b->pane->setFollowing({});
+        b->pane->setToolTip({});
+        return;
+    }
+    QString note = tr("Following another client");
+    if (!b->screen.isEmpty())
+        note = tr("Following another client \u00b7 %1\u00d7%2").arg(b->screen.width()).arg(b->screen.height());
+    b->pane->setFollowing(note);
+    b->pane->setToolTip(tr("Another client sizes this terminal. Type or click in it to take it over."));
+}
+
+void RexSession::takeBlock(Block *b)
+{
+    // Using a pane makes this client the block's owner: the block takes this
+    // pane's size (session.own_block, take).
+    if (!following(b) || b->taking || m_finished)
+        return;
+    b->taking = true;
+    const QString id = b->id;
+    m_control->request(QStringLiteral("session.own_block"),
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId},
+                                   {QStringLiteral("block_ids"), QJsonArray{id}},
+                                   {QStringLiteral("mode"), QStringLiteral("take")}},
+                       [this, id](const QJsonObject &reply, const QJsonObject &error) {
+                           auto it = m_blocks.find(id);
+                           if (it == m_blocks.end())
+                               return;
+                           it->second->taking = false;
+                           if (!error.isEmpty()) {
+                               qCInfo(lcRex) << "own_block refused:" << error;
+                               return;
+                           }
+                           for (const QJsonValue &v : reply.value(QLatin1String("blocks")).toArray())
+                               if (str(v.toObject(), "block_id") == id)
+                                   setOwner(it->second.get(), str(v.toObject(), "owner"));
+                       });
+}
+
+void RexSession::requestBlocks()
+{
+    // Every block no one owns becomes this client's, and it joins the line
+    // for the rest (session.own_block, request): it gets them when their
+    // owners give them up or leave.
+    m_control->request(QStringLiteral("session.own_block"),
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId},
+                                   {QStringLiteral("mode"), QStringLiteral("request")}},
+                       [this](const QJsonObject &reply, const QJsonObject &error) {
+                           if (!error.isEmpty()) {
+                               qCInfo(lcRex) << "own_block (request) refused:" << error;
+                               return;
+                           }
+                           for (const QJsonValue &v : reply.value(QLatin1String("blocks")).toArray()) {
+                               auto it = m_blocks.find(str(v.toObject(), "block_id"));
+                               if (it != m_blocks.end())
+                                   setOwner(it->second.get(), str(v.toObject(), "owner"));
+                           }
+                       });
 }
 
 void RexSession::sendTheme(Block *b)
@@ -1157,6 +1285,7 @@ void RexSession::toggleZoom(TerminalWidget *pane)
     const QString id = blockId(pane);
     if (id.isEmpty() || m_finished)
         return;
+    takeBlock(block(id));  // used here: sized here
     m_control->request(QStringLiteral("session.zoom_block"),
                        QJsonObject{{QStringLiteral("session_id"), m_sessionId}, {QStringLiteral("block_id"), id}},
                        [](const QJsonObject &, const QJsonObject &error) {
@@ -1259,10 +1388,32 @@ void RexSession::floatPane(TerminalWidget *pane)
     const QString id = blockId(pane);
     if (id.isEmpty() || isFloating(pane))
         return;
+    takeBlock(block(id));
+    // Where the pane is, unless that is (nearly) the whole window or too
+    // small to use: then centred.
+    QRectF bounds(0.2, 0.15, 0.6, 0.6);
+    for (const Window &w : std::as_const(m_windows))
+        if (w.tab && w.tab->contains(pane)) {
+            const QRectF at = paneBounds(w.tab, pane);
+            if (at.width() >= 0.15 && at.height() >= 0.15 && at.width() * at.height() < 0.8)
+                bounds = at;
+        }
     m_control->request(QStringLiteral("session.float_block"),
                        QJsonObject{{QStringLiteral("session_id"), m_sessionId},
                                    {QStringLiteral("block_id"), id},
-                                   {QStringLiteral("bounds"), rectJson(0.2, 0.15, 0.6, 0.6)}});
+                                   {QStringLiteral("bounds"), rectJson(bounds.x(), bounds.y(), bounds.width(),
+                                                                       bounds.height())}});
+}
+
+QRectF RexSession::paneBounds(const TerminalTab *tab, const TerminalWidget *pane)
+{
+    const QRect area = tab->layoutRect();
+    if (area.isEmpty() || !pane->isVisibleTo(tab))
+        return {};
+    const QRect r(pane->mapTo(tab, QPoint(0, 0)), pane->size());
+    const QRectF out((r.x() - area.x()) / double(area.width()), (r.y() - area.y()) / double(area.height()),
+                     r.width() / double(area.width()), r.height() / double(area.height()));
+    return out.intersected(QRectF(0, 0, 1, 1));
 }
 
 void RexSession::dockPane(TerminalWidget *pane)
@@ -1270,25 +1421,53 @@ void RexSession::dockPane(TerminalWidget *pane)
     const QString id = blockId(pane);
     if (id.isEmpty() || !isFloating(pane))
         return;
+    takeBlock(block(id));
     for (const Window &w : std::as_const(m_windows)) {
         if (!w.tab || !w.tab->contains(pane))
             continue;
-        // Beside the window's focused tiled block, or its first.
         QStringList tiled;
         layoutBlocks(w.layout, tiled);
         if (tiled.isEmpty())
             return;  // nothing tiled to dock beside
+        // Where the float's middle is: beside the tiled pane under it (or
+        // the nearest), on the side of that pane it leans to.
+        QPointF middle(0.5, 0.5);
+        const QString layerId = w.tab->floatingLayerOf(pane);
+        for (const Window::Layer &l : std::as_const(w.floating))
+            if (l.id == layerId)
+                middle = l.bounds.center();
         QString anchor = tiled.first();
-        for (TerminalWidget *p : w.tab->panes()) {
-            const QString bid = blockId(p);
-            if (p == w.tab->activePane() && tiled.contains(bid))
+        QRectF anchorRect;
+        double best = -1;
+        for (const QString &bid : std::as_const(tiled)) {
+            const Block *tb = m_blocks.count(bid) ? m_blocks.at(bid).get() : nullptr;
+            const QRectF r = tb && tb->pane ? paneBounds(w.tab, tb->pane) : QRectF();
+            if (r.isEmpty())
+                continue;  // hidden (a zoom)
+            const double dx = qMax(0.0, qMax(r.left() - middle.x(), middle.x() - r.right()));
+            const double dy = qMax(0.0, qMax(r.top() - middle.y(), middle.y() - r.bottom()));
+            const double d = dx * dx + dy * dy;
+            if (best < 0 || d < best) {
+                best = d;
                 anchor = bid;
+                anchorRect = r;
+            }
+        }
+        QString direction = QStringLiteral("horizontal"), side = QStringLiteral("after");
+        if (!anchorRect.isEmpty()) {
+            const double dx = (middle.x() - anchorRect.center().x()) / anchorRect.width();
+            const double dy = (middle.y() - anchorRect.center().y()) / anchorRect.height();
+            if (qAbs(dy) > qAbs(dx))
+                direction = QStringLiteral("vertical");
+            if ((direction == QLatin1String("vertical") ? dy : dx) < 0)
+                side = QStringLiteral("before");
         }
         m_control->request(QStringLiteral("session.move_block"),
                            QJsonObject{{QStringLiteral("session_id"), m_sessionId},
                                        {QStringLiteral("block_id"), id},
                                        {QStringLiteral("anchor_block_id"), anchor},
-                                       {QStringLiteral("direction"), QStringLiteral("horizontal")}});
+                                       {QStringLiteral("direction"), direction},
+                                       {QStringLiteral("side"), side}});
         return;
     }
 }

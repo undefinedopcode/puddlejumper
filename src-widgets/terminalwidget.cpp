@@ -6,6 +6,7 @@
 
 #include "terminalwidget.h"
 
+#include "cardstyle.h"
 #include "colorscheme.h"
 #include "formername.h"
 #include "procinfo.h"
@@ -21,6 +22,8 @@
 #include <QFileInfo>
 #include <QFont>
 #include <QHash>
+#include <QLabel>
+#include <QMouseEvent>
 #include <QMenu>
 #include <QPainter>
 #include <QScrollBar>
@@ -62,6 +65,8 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings,
     applyAppearance();
     applyScrolling();
     m_terminal->setKeyBindings(QStringLiteral("default"));
+    if (auto *d = display())
+        d->installEventFilter(this);  // pointerPressed()
 
     connect(m_terminal, &QTermWidget::titleChanged, this, [this]() {
         const QString t = m_terminal->title().trimmed();
@@ -398,7 +403,64 @@ void TerminalWidget::setPaneFrame(PaneFrame frame)
 void TerminalWidget::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
+    placeFollowBadge();
     emit resized();
+}
+
+bool TerminalWidget::eventFilter(QObject *watched, QEvent *event)
+{
+    if (event->type() == QEvent::MouseButtonPress && watched == display())
+        emit pointerPressed();
+    return QWidget::eventFilter(watched, event);
+}
+
+void TerminalWidget::setFollowing(const QString &note)
+{
+    if (note.isEmpty()) {
+        if (m_followBadge)
+            m_followBadge->hide();
+        return;
+    }
+    if (!m_followBadge) {
+        m_followBadge = new QLabel(this);
+        m_followBadge->setAttribute(Qt::WA_TransparentForMouseEvents);
+        m_followBadge->setObjectName(QStringLiteral("followBadge"));
+    }
+    // In the terminal's own colours, a little lifted off its background,
+    // with an outline that reads on light and dark schemes alike.
+    QColor fg = palette().color(QPalette::WindowText), bg = palette().color(QPalette::Window);
+    if (auto *d = display()) {
+        fg = d->colorTable()[0].color;
+        bg = d->colorTable()[1].color;
+    }
+    // The accent outlines it, as it does the active pane and floats.
+    const QColor accent = cardstyle::accent();
+    m_followBadge->setStyleSheet(QStringLiteral("QLabel#followBadge { color: %1; background: %2; border: 1.5px solid %3;"
+                                                " border-radius: 10px; padding: 3px 10px; }")
+                                     .arg(fg.name(), cardstyle::mix(bg, accent, 0.28).name(), accent.name()));
+    QFont f = font();
+    f.setPointSizeF(qMax(8.0, f.pointSizeF() * 0.92));
+    f.setWeight(QFont::DemiBold);
+    m_followBadge->setFont(f);
+    m_followBadge->setText(note);
+    m_followBadge->adjustSize();
+    placeFollowBadge();
+    m_followBadge->show();
+    m_followBadge->raise();
+}
+
+bool TerminalWidget::isFollowing() const
+{
+    return m_followBadge && !m_followBadge->isHidden();
+}
+
+void TerminalWidget::placeFollowBadge()
+{
+    if (!m_followBadge)
+        return;
+    const int inset = 6 + (m_frame == PaneFrame::None ? 0 : kPaneBorder);
+    m_followBadge->adjustSize();
+    m_followBadge->move(qMax(inset, width() - m_followBadge->width() - inset - 10), inset);
 }
 
 void TerminalWidget::paintEvent(QPaintEvent *)

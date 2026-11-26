@@ -268,6 +268,10 @@ bool agrees(Server &server, Client &c, const QString &when)
             got = paneLines(pane);
             return serverSize == paneSize && want == got;
         }, 6000);
+        // A block another client owns keeps that client's size; the pane
+        // shows it, and says so.
+        if (same && pane->isFollowing() != c.session->isFollowing(pane))
+            ok &= check(false, QStringLiteral("%1: pane %2's following badge").arg(when, bid.right(8)));
         if (!check(same, QStringLiteral("%1: pane %2 agrees with its block (pane %3x%4, block %5x%6)")
                              .arg(when, bid.right(8)).arg(paneSize.width()).arg(paneSize.height())
                              .arg(serverSize.width()).arg(serverSize.height()))) {
@@ -660,6 +664,27 @@ int main(int argc, char *argv[])
                                     QJsonObject{{QStringLiteral("flavor"), QStringLiteral("com.superlogical.terminal.shell")}}}}}});
         check(waitFor([&] { return second->panes().size() == 4; }), QStringLiteral("a split elsewhere is followed"));
         agrees(server, c, QStringLiteral("split elsewhere"));
+
+        // Its block is the other client's: shown at that client's size,
+        // marked following, until it is used here.
+        TerminalWidget *theirs = nullptr;
+        for (TerminalWidget *p : second->panes())
+            if (c.session->isFollowing(p))
+                theirs = p;
+        if (check(theirs && theirs->isFollowing(), QStringLiteral("a block made elsewhere is followed, and marked"))) {
+            const QString bid = c.session->blockId(theirs);
+            const QSize before = server.size(sid, bid);
+            if (const QString shots = qEnvironmentVariable("PUDDLEJUMPER_TEST_SHOTS"); !shots.isEmpty()) {
+                waitFor([] { return false; }, 300);
+                second->grab().save(shots + QStringLiteral("/following.png"));
+            }
+            type(theirs, QStringLiteral("echo TAKEN\r"));
+            check(waitFor([&] { return !c.session->isFollowing(theirs) && !theirs->isFollowing(); }),
+                  QStringLiteral("typing takes it"));
+            check(waitFor([&] { return server.size(sid, bid) != before; }),
+                  QStringLiteral("and it takes this pane's size"));
+            agrees(server, c, QStringLiteral("taken"));
+        }
     }
 
     // ---- The session renamed, here and elsewhere; the active window.
@@ -896,7 +921,7 @@ int main(int argc, char *argv[])
         // Resized elsewhere.
         server.call(QStringLiteral("session.resize_layer"),
                     QJsonObject{{QStringLiteral("session_id"), sid}, {QStringLiteral("layer_id"), layer},
-                                {QStringLiteral("bounds"), QJsonArray{0.0, 0.0, 0.5, 0.5}}});
+                                {QStringLiteral("bounds"), QJsonArray{0.0, 0.0, 0.4, 0.4}}});
         check(waitFor([&] { return screenSize(floater).width() < floatedSize.width(); }),
               QStringLiteral("a layer resized elsewhere is followed"));
         agrees(server, c, QStringLiteral("layer resized elsewhere"));
@@ -915,7 +940,7 @@ int main(int argc, char *argv[])
                   return qAbs(b.x() - 0.25) < 0.02 && qAbs(b.y() - 0.25) < 0.02;
               }), QStringLiteral("moved here: the server's bounds follow"));
         const QRectF moved = layersOf(label).value(0).second;
-        check(moved.width() == 0.5 && moved.height() == 0.5,
+        check(qAbs(moved.width() - 0.4) < 1e-9 && qAbs(moved.height() - 0.4) < 1e-9,
               QStringLiteral("moved, not resized: size kept (%1 x %2)").arg(moved.width()).arg(moved.height()));
         QPoint at;
         check(frame && waitFor([&] {
@@ -927,7 +952,7 @@ int main(int argc, char *argv[])
         // Resized here (as dragging its border does).
         emit second->floatingGeometryChanged(layer, QRect(frame->geometry().topLeft() - second->layoutRect().topLeft(),
                                                           frameSize + QSize(120, 60)));
-        check(waitFor([&] { return layersOf(label).value(0).second.width() > 0.55; }),
+        check(waitFor([&] { return layersOf(label).value(0).second.width() > 0.45; }),
               QStringLiteral("resized here: the server's bounds follow"));
         agrees(server, c, QStringLiteral("layer resized here"));
         check(shows(floater, QStringLiteral("FLOAT_OK")) || paneLines(floater).join(QString()).contains(QLatin1Char('$')),
@@ -964,6 +989,77 @@ int main(int argc, char *argv[])
         check(waitFor([&] { return second->panes().size() == 2 && layersOf(label).size() == 1; }),
               QStringLiteral("a layer closed"));
         agrees(server, c, QStringLiteral("layer closed"));
+    }
+
+    // ---- Floated where it sits, and docked by where the float is: back
+    // where it was if it hasn't moved, else beside the pane under it.
+    {
+        c.session->newWindow();
+        TerminalTab *tab = waitFor([&] { return c.tabs.size() == 3; }) ? c.tabs.value(2) : nullptr;
+        if (check(tab != nullptr, QStringLiteral("dock test: a window"))) {
+            c.session->renameWindow(tab, QStringLiteral("dock test"));
+            waitFor([&] { return c.names.value(tab) == QLatin1String("dock test"); });
+            c.session->splitPane(tab->activePane(), Qt::Horizontal);
+            waitFor([&] { return tab->panes().size() == 2; });
+            c.session->splitPane(tab->panes().at(1), Qt::Vertical);
+            waitFor([&] { return tab->panes().size() == 3; });
+            // The tiled layout's shape: blocks, and splits' direction and ratio.
+            const auto shape = [&]() {
+                std::function<QString(const QJsonObject &)> walk = [&](const QJsonObject &n) -> QString {
+                    if (n.contains(QLatin1String("block_id")))
+                        return n.value(QLatin1String("block_id")).toString().right(4);
+                    const QJsonObject sp = n.value(QLatin1String("split")).toObject();
+                    return QStringLiteral("%1/%2(%3,%4)")
+                        .arg(sp.value(QLatin1String("direction")).toString().left(1))
+                        .arg(sp.value(QLatin1String("ratio")).toDouble(), 0, 'f', 2)
+                        .arg(walk(sp.value(QLatin1String("before")).toObject()),
+                             walk(sp.value(QLatin1String("after")).toObject()));
+                };
+                for (const QJsonValue &wv : server.view(sid).value(QLatin1String("windows")).toArray())
+                    if (wv.toObject().value(QLatin1String("label")).toString() == QLatin1String("dock test"))
+                        for (const QJsonValue &lv : wv.toObject().value(QLatin1String("layers")).toArray())
+                            if (lv.toObject().value(QLatin1String("kind")).toString() == QLatin1String("tiled"))
+                                return walk(lv.toObject().value(QLatin1String("layout")).toObject());
+                return QString();
+            };
+            const QString before = shape();
+            TerminalWidget *third = tab->panes().value(2);
+            const QRect area = tab->layoutRect();
+            const QRect at(third->mapTo(tab, QPoint(0, 0)) - area.topLeft(), third->size());
+            c.session->floatPane(third);
+            check(waitFor([&] { return c.session->isFloating(third); }), QStringLiteral("dock test: floated"));
+            const QList<QPair<QString, QRectF>> layers = layersOf(QStringLiteral("dock test"));
+            const QRectF b = layers.value(0).second;
+            check(layers.size() == 1 && qAbs(b.x() - at.x() / double(area.width())) < 0.02
+                      && qAbs(b.y() - at.y() / double(area.height())) < 0.02
+                      && qAbs(b.width() - at.width() / double(area.width())) < 0.02,
+                  QStringLiteral("floated where it sat (%1,%2 %3x%4)").arg(b.x()).arg(b.y()).arg(b.width()).arg(b.height()));
+            c.session->dockPane(third);
+            check(waitFor([&] { return !c.session->isFloating(third) && shape() == before; }),
+                  QStringLiteral("docked straight back: the layout as it was (%1, was %2)").arg(shape(), before));
+
+            // Floated again and moved to the left edge: docked left of the
+            // left pane.
+            const QString leftId = c.session->blockId(tab->panes().value(0));
+            c.session->floatPane(third);
+            waitFor([&] { return c.session->isFloating(third) && layersOf(QStringLiteral("dock test")).size() == 1; });
+            server.call(QStringLiteral("session.resize_layer"),
+                        QJsonObject{{QStringLiteral("session_id"), sid},
+                                    {QStringLiteral("layer_id"), layersOf(QStringLiteral("dock test")).value(0).first},
+                                    {QStringLiteral("bounds"), QJsonArray{0.0, 0.3, 0.2, 0.4}}});
+            waitFor([&] {
+                return qAbs(layersOf(QStringLiteral("dock test")).value(0).second.x()) < 0.01
+                       && c.session->isFloating(third) && third->isVisible();
+            });
+            waitFor([] { return false; }, 300);  // the view followed here
+            c.session->dockPane(third);
+            const QString moved = c.session->blockId(third).right(4), left = leftId.right(4);
+            check(waitFor([&] { return shape().startsWith(QStringLiteral("h/")) && shape().contains(QStringLiteral("(%1,%2)").arg(moved, left)); }),
+                  QStringLiteral("docked where the float was: left of the left pane (%1)").arg(shape()));
+            agrees(server, c, QStringLiteral("dock test"));
+            c.session->closeWindow(tab);
+            waitFor([&] { return c.tabs.size() == 2; });
+        }
     }
 
     // ---- Detached and attached again: the same windows, splits, history.

@@ -88,6 +88,9 @@ public:
     QString windowName(const TerminalTab *tab) const;
     QString blockId(const TerminalWidget *pane) const;
     TerminalWidget *paneForBlock(const QString &blockId) const;
+    /* Whether another client sizes this pane's block (until a key or a
+     * click here takes it). */
+    bool isFollowing(const TerminalWidget *pane) const;
     /* Whether this pane's program has exited (its block kept to be read). */
     bool hasExited(const TerminalWidget *pane) const;
 
@@ -103,8 +106,11 @@ public:
     void windowShown(TerminalTab *tab);
     /* Whether a pane is in a floating layer. */
     bool isFloating(const TerminalWidget *pane) const;
-    /* Float a tiled pane over the window, or dock a floating one back into
-     * the tiled layout (beside the window's focused tiled pane). */
+    /* Float a tiled pane over the window where it sits, or dock a floating
+     * one back into the tiled layout where it is: beside the tiled pane
+     * under (or nearest) its middle, on the side it leans to. Floating a
+     * pane and docking it straight back puts it where it was; moving the
+     * float first moves the pane. */
     void floatPane(TerminalWidget *pane);
     void dockPane(TerminalWidget *pane);
     /* Swap a pane with the next in its window (wrapping round). */
@@ -198,6 +204,8 @@ private:
         bool exited = false;
         int exitCode = 0;
         QString label;  // the server's name for it, if any
+        QString owner;  // the client whose size it follows (empty: none)
+        bool taking = false;  // session.own_block (take) on its way
     };
     struct Window
     {
@@ -238,8 +246,18 @@ private:
     void sendSize(Block *b, const QSize &cells, bool again = false);
     void checkSize(Block *b);
     void sendTheme(Block *b);
+    /* Block owners. Another client's block keeps its size and the pane
+     * says so (following); typing or clicking in the pane takes it. */
+    bool following(const Block *b) const;
+    void setOwner(Block *b, const QString &owner);
+    void showFollowing(Block *b);
+    void takeBlock(Block *b);
+    void requestBlocks();
     void splitterDragged(Window &w, TerminalWidget *before, Qt::Orientation orientation, int pixels);
     void floatingMoved(Window &w, const QString &layerId, const QRect &frame);
+    /* A pane's rectangle in its tab's layout area, as proportions (empty if
+     * it isn't shown). */
+    static QRectF paneBounds(const TerminalTab *tab, const TerminalWidget *pane);
     /* A window's layout area, and its size in cells. */
     QSize windowArea(const Window &w);
     /* Where a floating layer's frame goes in `area`, and its layout's cells. */
