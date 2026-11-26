@@ -819,13 +819,11 @@ void MainWindow::buildMenus()
         TerminalWidget *t = currentTerminal();
         if (RexSession *rex = t ? rexSessionFor(t) : nullptr)
             rex->swapWithNext(t);
+        else
+            statusBar()->showMessage(tr("Only Rex panes can swap"), 3000);
     });
-    connect(view, &QMenu::aboutToShow, swapPaneAct, [this, swapPaneAct]() {
-        TerminalWidget *t = currentTerminal();
-        RexSession *rex = t ? rexSessionFor(t) : nullptr;
-        swapPaneAct->setVisible(rex != nullptr);
-        swapPaneAct->setEnabled(currentTab() && currentTab()->panes().size() > 1);
-    });
+    // The pane actions stay visible and enabled: hiding or disabling one
+    // would kill its shortcut until the menu next opened over a Rex pane.
     // Into another of the session's windows: filled as the menu opens.
     auto *movePaneMenu = view->addMenu(tr("&Move Pane to Window"));
     connect(view, &QMenu::aboutToShow, movePaneMenu, [this, movePaneMenu]() {
@@ -851,13 +849,11 @@ void MainWindow::buildMenus()
     connect(view, &QMenu::aboutToShow, zoomPaneAct, [this, zoomPaneAct]() {
         TerminalWidget *t = currentTerminal();
         RexSession *rex = t ? rexSessionFor(t) : nullptr;
-        zoomPaneAct->setVisible(rex != nullptr);
         zoomPaneAct->setChecked(rex && rex->isZoomed(currentTab()));
     });
     connect(view, &QMenu::aboutToShow, floatPaneAct, [this, floatPaneAct]() {
         TerminalWidget *t = currentTerminal();
         RexSession *rex = t ? rexSessionFor(t) : nullptr;
-        floatPaneAct->setVisible(rex != nullptr);
         floatPaneAct->setText(rex && rex->isFloating(t) ? tr("&Dock Pane") : tr("&Float Pane"));
     });
 #endif

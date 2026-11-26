@@ -48,14 +48,14 @@ QColor colourFor(QIcon::Mode mode)
 class LucideIconEngine : public QIconEngine
 {
 public:
-    explicit LucideIconEngine(const QString &name) : m_name(name) {}
+    explicit LucideIconEngine(const QString &name, const QColor &fixed = {}) : m_name(name), m_fixed(fixed) {}
 
     void paint(QPainter *painter, const QRect &rect, QIcon::Mode mode, QIcon::State) override
     {
         // The colour goes into the SVG without its alpha, which is applied as
         // opacity instead: macOS's palette is translucent (text at 85%,
         // disabled text at 25%), and that is all that tells disabled apart.
-        const QColor colour = colourFor(mode);
+        const QColor colour = colour_(mode);
         QByteArray svg = svgSource(m_name);
         svg.replace("currentColor", colour.name(QColor::HexRgb).toLatin1());
         QSvgRenderer renderer(svg);
@@ -81,7 +81,7 @@ public:
         // time is wasteful, so cache per size, scale and colour.
         const QString key = QStringLiteral("puddlejumper-lucide/%1/%2x%3@%4/%5")
                                 .arg(m_name).arg(size.width()).arg(size.height())
-                                .arg(scale).arg(colourFor(mode).rgba());
+                                .arg(scale).arg(colour_(mode).rgba());
         QPixmap pm;
         if (QPixmapCache::find(key, &pm))
             return pm;
@@ -104,12 +104,24 @@ public:
         return {side, side};
     }
 
-    QIconEngine *clone() const override { return new LucideIconEngine(m_name); }
+    QIconEngine *clone() const override { return new LucideIconEngine(m_name, m_fixed); }
     QString key() const override { return QStringLiteral("puddlejumper-lucide"); }
     QString iconName() override { return m_name; }
 
 private:
+    // A fixed colour (dimmed when disabled), or the palette's.
+    QColor colour_(QIcon::Mode mode) const
+    {
+        if (!m_fixed.isValid())
+            return colourFor(mode);
+        QColor c = m_fixed;
+        if (mode == QIcon::Disabled)
+            c.setAlphaF(c.alphaF() * 0.35);
+        return c;
+    }
+
     QString m_name;
+    QColor m_fixed;
 };
 
 } // namespace
@@ -120,4 +132,12 @@ QIcon appIcon(const char *lucideName)
     if (svgSource(name).isEmpty())
         return QIcon();
     return QIcon(new LucideIconEngine(name));
+}
+
+QIcon appIcon(const char *lucideName, const QColor &colour)
+{
+    const QString name = QString::fromLatin1(lucideName);
+    if (svgSource(name).isEmpty())
+        return QIcon();
+    return QIcon(new LucideIconEngine(name, colour));
 }

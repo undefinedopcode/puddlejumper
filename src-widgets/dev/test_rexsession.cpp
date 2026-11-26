@@ -39,6 +39,9 @@
 #include "terminalwidget.h"
 
 #include <QApplication>
+#include <QCursor>
+#include <QEventLoop>
+#include <QTimer>
 #include <QDir>
 #include <QFile>
 #include <QElapsedTimer>
@@ -837,6 +840,22 @@ int main(int argc, char *argv[])
         type(floater, QStringLiteral("echo FLOAT_OK\r"));
         check(waitFor([&] { return shows(floater, QStringLiteral("FLOAT_OK")); }), QStringLiteral("floating pane typed into"));
         agrees(server, c, QStringLiteral("floated"));
+        // Pictures of the floating frame and a tiled pane's hover buttons, to
+        // look at: PUDDLEJUMPER_TEST_SHOTS=dir.
+        if (const QString shots = qEnvironmentVariable("PUDDLEJUMPER_TEST_SHOTS"); !shots.isEmpty()) {
+            const auto settle = [](int ms) {
+                QEventLoop loop;
+                QTimer::singleShot(ms, &loop, &QEventLoop::quit);
+                loop.exec();
+            };
+            settle(300);
+            second->grab().save(shots + QStringLiteral("/float.png"));
+            TerminalWidget *tiled = second->panes().first();
+            QCursor::setPos(tiled->mapToGlobal(QPoint(60, tiled->height() - 60)));
+            second->updateHoverControls();
+            settle(200);
+            second->grab().save(shots + QStringLiteral("/hover.png"));
+        }
 
         // Resized elsewhere.
         server.call(QStringLiteral("session.resize_layer"),

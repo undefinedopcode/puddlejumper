@@ -426,6 +426,11 @@ if(TARGET Qt6::WebSockets)
         src-widgets/screenshotoverlay.cpp src-widgets/screenshotoverlay.h
     )
     target_link_libraries(test-rexsession PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::WebSockets qtermwidget)
+    qt_add_resources(test-rexsession "lucide_icons"
+        PREFIX "/lucide"
+        BASE icons/lucide
+        FILES ${LUCIDE_ICONS}
+    )
     target_include_directories(test-rexsession PRIVATE src-widgets)
 endif()
 

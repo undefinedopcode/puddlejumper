@@ -145,6 +145,17 @@ public:
     /* The terminal's default text colour. */
     QColor foregroundColour() const override;
 
+    /*
+     * Zoom and float buttons: on floating frames' title strips, and on tiled
+     * panes while the mouse is over them. They ask with paneZoomRequested()
+     * and paneFloatRequested(); Rex tabs turn them on.
+     */
+    void setPaneControls(bool on);
+    /* The pane shown zoomed, if any, for the zoom buttons' state. */
+    void setZoomedPane(TerminalWidget *pane);
+    /* Show, move or hide the hover buttons for where the mouse is now. */
+    void updateHoverControls();
+
     /* To the active pane. */
     void focusContent() override;
 
@@ -168,11 +179,15 @@ signals:
     /* One of a floating layer's panes became active while the layer was
      * under another. */
     void floatingRaiseRequested(const QString &layerId);
+    /* A zoom or float button was clicked for `pane` (setPaneControls()). */
+    void paneZoomRequested(TerminalWidget *pane);
+    void paneFloatRequested(TerminalWidget *pane);
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
     void showEvent(QShowEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 private:
     QSplitter *makeSplitter(Qt::Orientation orientation);
@@ -218,4 +233,7 @@ private:
     // out, nor among panes(); a zoomed window's others.
     QList<QPointer<TerminalWidget>> m_parked;
     bool m_applyingLayout = false;
+    bool m_paneControls = false;
+    QPointer<QWidget> m_hover;            // the PaneControls
+    QPointer<TerminalWidget> m_zoomedPane;
 };

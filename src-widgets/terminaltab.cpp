@@ -7,9 +7,11 @@
 #include "terminaltab.h"
 
 #include "appicon.h"
+#include "cardstyle.h"
 #include "terminalwidget.h"
 
 #include <QApplication>
+#include <QCursor>
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QMouseEvent>
@@ -17,6 +19,7 @@
 #include <QToolButton>
 #include <QJsonArray>
 #include <QPainter>
+#include <QPainterPath>
 #include <QSet>
 #include <QSplitter>
 #include <QSplitterHandle>
@@ -82,10 +85,26 @@ QString layoutShape(const PaneLayout &node)
     return out;
 }
 
-// A floating layer's frame: a title strip to move it by, a border to resize
-// it by (right, bottom, or the corner), and a close button.
-constexpr int kFloatBorder = 3;
-constexpr int kFloatTitle = 18;
+// A floating layer's frame: a rounded panel with a soft shadow and a clear
+// edge (as the Rex prompts have), a title strip to move it by, a border to
+// resize it by (right, bottom, or the corner), and its buttons. The shadow is
+// drawn in a margin inside the frame's geometry, which is the layer's rect.
+constexpr int kFloatShadow = 6;
+constexpr int kFloatBorder = 4;   // the panel's edge round the content
+constexpr int kFloatTitle = 22;
+constexpr int kFloatRadius = 8;
+
+// A small icon button for a frame's title strip or a pane's hover controls.
+QToolButton *miniButton(QWidget *parent, int size)
+{
+    auto *b = new QToolButton(parent);
+    b->setAutoRaise(true);
+    b->setIconSize(QSize(size - 8, size - 8));
+    b->setFixedSize(size, size);
+    b->setCursor(Qt::ArrowCursor);
+    b->setFocusPolicy(Qt::NoFocus);
+    return b;
+}
 
 class FloatingFrame : public QWidget
 {
@@ -97,7 +116,8 @@ public:
     {
         setMouseTracking(true);
         auto *v = new QVBoxLayout(this);
-        v->setContentsMargins(kFloatBorder, 0, kFloatBorder, kFloatBorder);
+        v->setContentsMargins(kFloatShadow + kFloatBorder, kFloatShadow, kFloatShadow + kFloatBorder,
+                              kFloatShadow + kFloatBorder);
         v->setSpacing(0);
         m_title = new QWidget(this);
         m_title->setFixedHeight(kFloatTitle);
@@ -111,17 +131,26 @@ public:
         small.setPointSizeF(small.pointSizeF() * 0.85);
         m_label->setFont(small);
         h->addWidget(m_label, 1);
-        auto *close = new QToolButton(m_title);
-        close->setAutoRaise(true);
-        close->setIcon(appIcon("x"));
-        close->setIconSize(QSize(kFloatTitle - 6, kFloatTitle - 6));
-        close->setFixedSize(kFloatTitle, kFloatTitle);
-        close->setCursor(Qt::ArrowCursor);
-        close->setToolTip(QObject::tr("Close this floating pane"));
-        QObject::connect(close, &QToolButton::clicked, this, [this]() {
+        m_zoom = miniButton(m_title, kFloatTitle);
+        QObject::connect(m_zoom, &QToolButton::clicked, this, [this]() {
+            if (TerminalWidget *p = pane())
+                emit m_tab->paneZoomRequested(p);
+        });
+        h->addWidget(m_zoom);
+        m_dock = miniButton(m_title, kFloatTitle);
+        m_dock->setToolTip(QObject::tr("Dock this pane back into the layout"));
+        QObject::connect(m_dock, &QToolButton::clicked, this, [this]() {
+            if (TerminalWidget *p = pane())
+                emit m_tab->paneFloatRequested(p);
+        });
+        h->addWidget(m_dock);
+        m_close = miniButton(m_title, kFloatTitle);
+        m_close->setToolTip(QObject::tr("Close this floating pane"));
+        QObject::connect(m_close, &QToolButton::clicked, this, [this]() {
             emit m_tab->floatingCloseRequested(m_id);
         });
-        h->addWidget(close);
+        h->addWidget(m_close);
+        setControls(false, false);
         v->addWidget(m_title);
     }
 
@@ -146,6 +175,30 @@ public:
         update();
     }
 
+    /* Zoom and dock buttons (for Rex layers), and whether its pane is zoomed. */
+    void setControls(bool on, bool zoomed)
+    {
+        m_zoom->setVisible(on);
+        m_dock->setVisible(on);
+        m_zoomed = zoomed;
+        m_zoom->setToolTip(zoomed ? QObject::tr("Unzoom this pane") : QObject::tr("Zoom this pane to fill the window"));
+        updateIcons();
+    }
+
+    /* The pane the buttons act on: the active one if it is in this layer,
+     * else the layer's first. */
+    TerminalWidget *pane() const
+    {
+        if (!m_content)
+            return nullptr;
+        TerminalWidget *active = m_tab->activePane();
+        if (active && (active == m_content || m_content->isAncestorOf(active)))
+            return active;
+        if (auto *p = qobject_cast<TerminalWidget *>(m_content.data()))
+            return p;
+        return m_content->findChild<TerminalWidget *>();
+    }
+
     void setTitle(const QString &title)
     {
         m_label->setText(m_label->fontMetrics().elidedText(title, Qt::ElideRight,
@@ -157,9 +210,11 @@ public:
         if (background == m_background)
             return;
         m_background = background;
+        m_foreground = foreground;
         QPalette pal = m_label->palette();
         pal.setColor(QPalette::WindowText, foreground);
         m_label->setPalette(pal);
+        updateIcons();
         update();
     }
 
@@ -167,15 +222,30 @@ protected:
     void paintEvent(QPaintEvent *) override
     {
         QPainter p(this);
-        const QColor edge = m_active ? palette().color(QPalette::Highlight) : palette().color(QPalette::Mid);
-        p.fillRect(rect(), m_background.isValid() ? m_background : palette().color(QPalette::Window));
-        // The title strip a shade of the frame colour over the terminal's
-        // background, so it reads as part of the layer.
-        QColor strip = edge;
-        strip.setAlphaF(m_active ? 0.55 : 0.35);
-        p.fillRect(QRect(0, 0, width(), kFloatTitle), strip);
-        p.setPen(QPen(edge, 1));
-        p.drawRect(rect().adjusted(0, 0, -1, -1));
+        p.setRenderHint(QPainter::Antialiasing);
+        const QColor bg = m_background.isValid() ? m_background : palette().color(QPalette::Window);
+        const QColor fg = m_foreground.isValid() ? m_foreground : palette().color(QPalette::WindowText);
+        const QRectF panel = QRectF(rect()).adjusted(kFloatShadow, kFloatShadow - 2, -kFloatShadow, -kFloatShadow);
+        // A soft shadow, rings fading out from the panel and a little below it.
+        for (int i = kFloatShadow; i > 0; --i) {
+            QPainterPath ring;
+            ring.addRoundedRect(panel.adjusted(-i, -i + 2, i, i + 2), kFloatRadius + i, kFloatRadius + i);
+            const qreal t = 1.0 - qreal(i) / kFloatShadow;
+            p.fillPath(ring, QColor(0, 0, 0, int(22 * t * t)));
+        }
+        QPainterPath path;
+        path.addRoundedRect(panel, kFloatRadius, kFloatRadius);
+        p.fillPath(path, bg);
+        // The title strip, tinted towards the edge colour.
+        const QColor edge = m_active ? cardstyle::accent() : cardstyle::mix(bg, fg, 0.62);
+        p.save();
+        p.setClipPath(path);
+        p.fillRect(QRectF(panel.left(), panel.top(), panel.width(), kFloatTitle + 2),
+                   cardstyle::mix(bg, edge, m_active ? 0.32 : 0.16));
+        p.restore();
+        // The edge, plain against any background: the accent when active.
+        p.setPen(QPen(edge, m_active ? 2.0 : 1.5));
+        p.drawPath(path);
     }
 
     bool eventFilter(QObject *watched, QEvent *event) override
@@ -231,9 +301,17 @@ protected:
 private:
     enum { None = 0, Right = 1, Bottom = 2, Move = 4 };
 
+    void updateIcons()
+    {
+        const QColor fg = m_foreground.isValid() ? m_foreground : palette().color(QPalette::WindowText);
+        m_zoom->setIcon(appIcon(m_zoomed ? "minimize-2" : "maximize-2", fg));
+        m_dock->setIcon(appIcon("picture-in-picture", fg));
+        m_close->setIcon(appIcon("x", fg));
+    }
+
     int edgesAt(const QPoint &pos) const
     {
-        const int grab = kFloatBorder * 2;
+        const int grab = kFloatShadow + kFloatBorder * 2;
         int e = None;
         if (pos.x() >= width() - grab)
             e |= Right;
@@ -282,9 +360,14 @@ private:
     QString m_id;
     QWidget *m_title = nullptr;
     QLabel *m_label = nullptr;
+    QToolButton *m_zoom = nullptr;
+    QToolButton *m_dock = nullptr;
+    QToolButton *m_close = nullptr;
     QPointer<QWidget> m_content;
     QColor m_background;
+    QColor m_foreground;
     bool m_active = false;
+    bool m_zoomed = false;
     int m_drag = None;
     QPoint m_pressed;
     QRect m_start;
@@ -337,7 +420,7 @@ QString TerminalTab::floatingLayerOf(const TerminalWidget *pane) const
 
 QSize TerminalTab::floatingChrome()
 {
-    return QSize(2 * kFloatBorder, kFloatTitle + kFloatBorder);
+    return QSize(2 * (kFloatShadow + kFloatBorder), 2 * kFloatShadow + kFloatTitle + kFloatBorder);
 }
 
 QRect TerminalTab::layoutRect() const
@@ -413,6 +496,7 @@ void TerminalTab::replaceInTree(QWidget *from, QWidget *to)
 
 void TerminalTab::watchPane(TerminalWidget *pane)
 {
+    pane->installEventFilter(this);
     // A pane deleted from outside (its session ended) must not stay active.
     connect(pane, &QObject::destroyed, this, [this]() {
         if (!m_active)
@@ -630,6 +714,8 @@ void TerminalTab::updateFrames()
         if (auto *frame = static_cast<FloatingFrame *>(f.frame.data())) {
             frame->setActive(f.id == activeLayer);
             frame->setColours(backgroundColour(), foregroundColour());
+            frame->setControls(m_paneControls, m_zoomedPane && f.root
+                                                   && (f.root == m_zoomedPane || f.root->isAncestorOf(m_zoomedPane)));
             TerminalWidget *first = firstPaneIn(f.root);
             const QString title = first ? first->sessionTitle() : QString();
             frame->setTitle(!title.isEmpty() ? title : !f.title.isEmpty() ? f.title : tr("Terminal"));
@@ -965,4 +1051,160 @@ void TerminalTab::applyLayout(const PaneLayout &layout,
     }
     updateFrames();
     m_applyingLayout = false;
+}
+
+namespace {
+
+/*
+ * Hover controls for tiled panes (Rex tabs): a small pill of buttons in the
+ * top-right corner of the pane under the mouse, to zoom it or float it.
+ */
+class PaneControls : public QWidget
+{
+public:
+    explicit PaneControls(TerminalTab *tab)
+        : QWidget(tab), m_tab(tab)
+    {
+        auto *h = new QHBoxLayout(this);
+        h->setContentsMargins(4, 3, 4, 3);
+        h->setSpacing(2);
+        m_zoom = miniButton(this, 22);
+        m_float = miniButton(this, 22);
+        h->addWidget(m_zoom);
+        h->addWidget(m_float);
+        QObject::connect(m_zoom, &QToolButton::clicked, this, [this]() {
+            if (m_pane)
+                emit m_tab->paneZoomRequested(m_pane);
+        });
+        QObject::connect(m_float, &QToolButton::clicked, this, [this]() {
+            if (m_pane)
+                emit m_tab->paneFloatRequested(m_pane);
+        });
+        setCursor(Qt::ArrowCursor);
+        hide();
+    }
+
+    TerminalWidget *pane() const { return m_pane; }
+
+    void showFor(TerminalWidget *pane, bool zoomed, const QColor &bg, const QColor &fg)
+    {
+        m_pane = pane;
+        m_bg = bg;
+        m_fg = fg;
+        m_zoom->setIcon(appIcon(zoomed ? "minimize-2" : "maximize-2", fg));
+        m_zoom->setToolTip(zoomed ? QObject::tr("Unzoom this pane") : QObject::tr("Zoom this pane to fill the window"));
+        m_float->setIcon(appIcon("picture-in-picture-2", fg));
+        m_float->setToolTip(QObject::tr("Float this pane over the window"));
+        adjustSize();
+        const QPoint corner = pane->mapTo(m_tab, QPoint(pane->width(), 0));
+        move(corner.x() - width() - 8, corner.y() + 6);
+        raise();
+        show();
+        update();
+    }
+
+    void dismiss()
+    {
+        m_pane = nullptr;
+        hide();
+    }
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        QPainterPath path;
+        path.addRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 7, 7);
+        p.fillPath(path, cardstyle::mix(m_bg, m_fg, 0.12));
+        p.setPen(QPen(cardstyle::mix(m_bg, m_fg, 0.40), 1.0));
+        p.drawPath(path);
+    }
+
+    void leaveEvent(QEvent *) override
+    {
+        QTimer::singleShot(0, m_tab, [tab = QPointer<TerminalTab>(m_tab)]() {
+            if (tab)
+                tab->updateHoverControls();
+        });
+    }
+
+private:
+    TerminalTab *m_tab;
+    QPointer<TerminalWidget> m_pane;
+    QToolButton *m_zoom = nullptr;
+    QToolButton *m_float = nullptr;
+    QColor m_bg;
+    QColor m_fg;
+};
+
+} // namespace
+
+void TerminalTab::setPaneControls(bool on)
+{
+    m_paneControls = on;
+    if (on && !m_hover)
+        m_hover = new PaneControls(this);
+    if (!on && m_hover)
+        static_cast<PaneControls *>(m_hover.data())->dismiss();
+    updateFrames();
+}
+
+void TerminalTab::setZoomedPane(TerminalWidget *pane)
+{
+    if (m_zoomedPane == pane)
+        return;
+    m_zoomedPane = pane;
+    updateFrames();
+    updateHoverControls();
+}
+
+void TerminalTab::updateHoverControls()
+{
+    auto *controls = static_cast<PaneControls *>(m_hover.data());
+    if (!controls)
+        return;
+    const QPoint global = QCursor::pos();
+    if (!m_paneControls || !isVisible() || QApplication::mouseButtons() != Qt::NoButton) {
+        controls->dismiss();
+        return;
+    }
+    // Over the controls themselves: they stay.
+    if (controls->isVisible() && controls->rect().contains(controls->mapFromGlobal(global)))
+        return;
+    // A tiled pane under the mouse, not covered by a floating frame.
+    for (const Floating &f : std::as_const(m_floating)) {
+        if (f.frame && f.frame->isVisible() && f.frame->rect().contains(f.frame->mapFromGlobal(global))) {
+            controls->dismiss();
+            return;
+        }
+    }
+    for (TerminalWidget *pane : panes()) {
+        if (!pane->isVisible() || !floatingLayerOf(pane).isEmpty())
+            continue;
+        if (pane->rect().contains(pane->mapFromGlobal(global))) {
+            if (controls->pane() != pane || !controls->isVisible())
+                controls->showFor(pane, pane == m_zoomedPane, backgroundColour(), foregroundColour());
+            return;
+        }
+    }
+    controls->dismiss();
+}
+
+bool TerminalTab::eventFilter(QObject *watched, QEvent *event)
+{
+    if (m_paneControls && qobject_cast<TerminalWidget *>(watched)) {
+        switch (event->type()) {
+        case QEvent::Enter:
+        case QEvent::Leave:
+        case QEvent::Resize:
+        case QEvent::Move:
+        case QEvent::Hide:
+            QTimer::singleShot(0, this, &TerminalTab::updateHoverControls);
+            break;
+        default:
+            break;
+        }
+    }
+    return Tab::eventFilter(watched, event);
 }

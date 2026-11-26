@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <QColor>
 #include <QIcon>
 
 /*
@@ -21,3 +22,6 @@
  * An unknown name gives a null icon, and a toolbar button shows its text.
  */
 QIcon appIcon(const char *lucideName);
+/* The same, always in `colour` (dimmed when disabled): for icons drawn over a
+ * terminal's background rather than the window's. */
+QIcon appIcon(const char *lucideName, const QColor &colour);

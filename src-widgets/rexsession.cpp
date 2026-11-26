@@ -534,7 +534,15 @@ void RexSession::layoutWindow(Window &w)
         w.tab = new TerminalTab(nullptr);
         w.tab->setAlwaysFramed(true);
         w.tab->setPadding(m_settings.appearance().terminalMargin);
+        w.tab->setPaneControls(true);
         TerminalTab *tab = w.tab;
+        connect(tab, &TerminalTab::paneZoomRequested, this, [this](TerminalWidget *pane) { toggleZoom(pane); });
+        connect(tab, &TerminalTab::paneFloatRequested, this, [this](TerminalWidget *pane) {
+            if (isFloating(pane))
+                dockPane(pane);
+            else
+                floatPane(pane);
+        });
         // The pane with the focus here is the focused block on the server.
         connect(tab, &TerminalTab::activePaneChanged, this, [this, tab](TerminalWidget *pane) {
             const QString id = blockId(pane);
@@ -583,6 +591,10 @@ void RexSession::layoutWindow(Window &w)
         Block *b = block(m_paneBlocks.value(paneId));
         return b->pane ? b->pane.data() : makePane(b);
     }, cell, chrome, floating, hidden);
+    {
+        Block *zb = w.zoomedBlock.isEmpty() || !m_blocks.count(w.zoomedBlock) ? nullptr : block(w.zoomedBlock);
+        w.tab->setZoomedPane(zb ? zb->pane.data() : nullptr);
+    }
 
     // The server's focused block is the active pane here too (it decides
     // which pane a zoom shows, and focusing another ends a zoom). Keyboard
