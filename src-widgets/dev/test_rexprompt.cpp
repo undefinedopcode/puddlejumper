@@ -5,10 +5,11 @@
  *
  * test-rexprompt: a Rex prompt (rex.ui.input, rex.ui.pick) as PuddleJumper
  * asks it, with the examples from Rex's "Custom UI" page: filtering, keys,
- * ticks and answers. With a directory argument, also saves a picture of each
+ * ticks and answers; and the command palette, which looks the same. With a directory argument, also saves a picture of each
  * (dark and light) there.
  */
 
+#include "commandpalette.h"
 #include "rexprompt.h"
 
 #include <QApplication>
@@ -40,7 +41,7 @@ QJsonObject json(const char *text)
     return QJsonDocument::fromJson(text).object();
 }
 
-void key(RexPrompt &p, int k, Qt::KeyboardModifiers mods = Qt::NoModifier)
+void key(PaletteDialog &p, int k, Qt::KeyboardModifiers mods = Qt::NoModifier)
 {
     QKeyEvent e(QEvent::KeyPress, k, mods);
     QApplication::sendEvent(p.filterField(), &e);
@@ -53,7 +54,7 @@ QString answer(const RexPrompt &p)
 
 QString shotDir;
 
-void shot(RexPrompt &p, const QString &name)
+void shot(PaletteDialog &p, const QString &name)
 {
     if (shotDir.isEmpty())
         return;
@@ -165,6 +166,43 @@ void run()
         check(p.shownTitles() == QStringList{"Nothing to choose from"}, QStringLiteral("no items"));
     }
     check(RexPrompt::iconNames().size() == 16, QStringLiteral("Rex's sixteen icons"));
+
+    // The command palette.
+    {
+        QString ran;
+        const auto entry = [&ran](const char *title, const char *category, const char *name, const char *keys,
+                                  const char *keywords = "") {
+            const QString n = QString::fromLatin1(name);
+            return CommandPalette::Entry{QString::fromUtf8(title), QString::fromLatin1(category), n,
+                                         QString::fromLatin1(keywords), QString::fromUtf8(keys), [&ran, n]() { ran = n; }};
+        };
+        QWidget host;
+        auto *p = new CommandPalette({entry("New Tab", "Tabs", "client.tab.new", "Ctrl+Shift+T"),
+                                      entry("Close Tab", "Tabs", "client.tab.close", "Ctrl+Shift+W"),
+                                      entry("Split Right", "Panes", "pane.split.right", "Ctrl+Shift+D"),
+                                      entry("Split Down", "Panes", "pane.split.down", "Ctrl+Shift+E"),
+                                      entry("Copy", "Edit", "pane.copy", "Ctrl+Shift+C"),
+                                      entry("Paste", "Edit", "pane.paste", "Ctrl+Shift+V"),
+                                      entry("Clear Terminal", "Terminal", "com.superlogical.terminal.clear", "",
+                                            "clear screen scrollback"),
+                                      entry("Git: New Branch…", "Git", "new_branch", "Alt+Ctrl+B")},
+                                     &host);
+        check(p->shown().first() == QLatin1String("pane.copy"), QStringLiteral("palette: by category, then title"));
+        shot(*p, QStringLiteral("palette"));
+        p->setFilter(QStringLiteral("split"));
+        check(p->shown() == QStringList({"pane.split.down", "pane.split.right"}), QStringLiteral("palette: filtered"));
+        shot(*p, QStringLiteral("palette-filtered"));
+        p->setFilter(QStringLiteral("scrollback"));
+        check(p->shown() == QStringList{"com.superlogical.terminal.clear"}, QStringLiteral("palette: keywords"));
+        p->setFilter(QStringLiteral("zzz"));
+        check(p->shown().isEmpty() && p->shownTitles() == QStringList{"No matching actions"},
+              QStringLiteral("palette: nothing"));
+        p->setFilter(QStringLiteral("tab"));
+        key(*p, Qt::Key_Down);
+        key(*p, Qt::Key_Return);
+        QApplication::processEvents();
+        check(ran == QLatin1String("client.tab.new"), QStringLiteral("palette: return runs, after closing: ") + ran);
+    }
 }
 
 void setDark(bool dark)
