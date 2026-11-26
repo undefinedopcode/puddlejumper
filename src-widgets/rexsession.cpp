@@ -398,6 +398,7 @@ void RexSession::applyView(const QJsonObject &view)
         w.layout = tiledLayout(wo);
         w.focusedBlock = str(wo, "focused_block_id");
         w.zoomedBlock = str(wo, "zoomed_block_id");
+        w.tiledZoom = str(wo, "tiled_zoomed_block_id");
         for (const Window &old : std::as_const(m_windows))
             if (old.id == w.id)
                 w.tab = old.tab;
@@ -509,24 +510,36 @@ void RexSession::layoutWindow(Window &w)
         floating.append({l.id, frame.topLeft(), toPaneLayout(l.layout, cells.width(), cells.height(), paneId),
                          first.isEmpty() ? QString() : block(first)->label});
     }
-    // Zoomed: that block fills the window; the others are kept, hidden, at
-    // the sizes they had.
+    // Zoomed: the block fills the window; the others are kept, hidden, at
+    // the sizes they had. A zoom over everything (a floating block's, or an
+    // older server's only one) hides every layer; the tiled zoom (revision
+    // 21) hides only the rest of the tiled layer, under the floating ones.
     QList<int> hidden;
-    if (!w.zoomedBlock.isEmpty() && m_blocks.count(w.zoomedBlock)) {
-        QStringList all;
-        layoutBlocks(w.layout, all);
+    QStringList tiledIds;
+    layoutBlocks(w.layout, tiledIds);
+    const QString overAll = w.zoomedBlock != w.tiledZoom ? w.zoomedBlock : QString();
+    if (!overAll.isEmpty() && m_blocks.count(overAll)) {
+        QStringList all = tiledIds;
         for (const Window::Layer &l : std::as_const(w.floating))
             layoutBlocks(l.layout, all);
-        if (all.contains(w.zoomedBlock)) {
+        if (all.contains(overAll)) {
             for (const QString &id : std::as_const(all))
-                if (id != w.zoomedBlock)
+                if (id != overAll)
                     hidden << block(id)->paneId;
             layout = PaneLayout();
-            layout.paneId = block(w.zoomedBlock)->paneId;
+            layout.paneId = block(overAll)->paneId;
             layout.columns = columns;
             layout.lines = lines;
             floating.clear();
         }
+    } else if (!w.tiledZoom.isEmpty() && m_blocks.count(w.tiledZoom) && tiledIds.contains(w.tiledZoom)) {
+        for (const QString &id : std::as_const(tiledIds))
+            if (id != w.tiledZoom)
+                hidden << block(id)->paneId;
+        layout = PaneLayout();
+        layout.paneId = block(w.tiledZoom)->paneId;
+        layout.columns = columns;
+        layout.lines = lines;
     }
 
     const bool fresh = !w.tab;
@@ -592,8 +605,11 @@ void RexSession::layoutWindow(Window &w)
         return b->pane ? b->pane.data() : makePane(b);
     }, cell, chrome, floating, hidden);
     {
-        Block *zb = w.zoomedBlock.isEmpty() || !m_blocks.count(w.zoomedBlock) ? nullptr : block(w.zoomedBlock);
-        w.tab->setZoomedPane(zb ? zb->pane.data() : nullptr);
+        QList<TerminalWidget *> zoomed;
+        for (const QString &id : {w.zoomedBlock, w.tiledZoom})
+            if (!id.isEmpty() && m_blocks.count(id) && block(id)->pane)
+                zoomed << block(id)->pane.data();
+        w.tab->setZoomedPanes(zoomed);
     }
 
     // The server's focused block is the active pane here too (it decides
@@ -1152,7 +1168,18 @@ void RexSession::toggleZoom(TerminalWidget *pane)
 bool RexSession::isZoomed(const TerminalTab *tab) const
 {
     const Window *w = windowOf(tab);
-    return w && !w->zoomedBlock.isEmpty();
+    return w && (!w->zoomedBlock.isEmpty() || !w->tiledZoom.isEmpty());
+}
+
+bool RexSession::isZoomed(const TerminalWidget *pane) const
+{
+    const QString id = blockId(pane);
+    if (id.isEmpty())
+        return false;
+    for (const Window &w : m_windows)
+        if (w.zoomedBlock == id || w.tiledZoom == id)
+            return true;
+    return false;
 }
 
 void RexSession::swapWithNext(TerminalWidget *pane)

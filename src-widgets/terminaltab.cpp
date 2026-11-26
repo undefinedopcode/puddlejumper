@@ -714,8 +714,7 @@ void TerminalTab::updateFrames()
         if (auto *frame = static_cast<FloatingFrame *>(f.frame.data())) {
             frame->setActive(f.id == activeLayer);
             frame->setColours(backgroundColour(), foregroundColour());
-            frame->setControls(m_paneControls, m_zoomedPane && f.root
-                                                   && (f.root == m_zoomedPane || f.root->isAncestorOf(m_zoomedPane)));
+            frame->setControls(m_paneControls, isZoomedPane(frame->pane()));
             TerminalWidget *first = firstPaneIn(f.root);
             const QString title = first ? first->sessionTitle() : QString();
             frame->setTitle(!title.isEmpty() ? title : !f.title.isEmpty() ? f.title : tr("Terminal"));
@@ -1150,13 +1149,26 @@ void TerminalTab::setPaneControls(bool on)
     updateFrames();
 }
 
-void TerminalTab::setZoomedPane(TerminalWidget *pane)
+void TerminalTab::setZoomedPanes(const QList<TerminalWidget *> &panes)
 {
-    if (m_zoomedPane == pane)
+    QList<QPointer<TerminalWidget>> next;
+    for (TerminalWidget *p : panes)
+        next << p;
+    if (next == m_zoomedPanes)
         return;
-    m_zoomedPane = pane;
+    m_zoomedPanes = next;
     updateFrames();
+    if (auto *controls = static_cast<PaneControls *>(m_hover.data()))
+        controls->dismiss();  // shown again with its new state
     updateHoverControls();
+}
+
+bool TerminalTab::isZoomedPane(const TerminalWidget *pane) const
+{
+    for (const QPointer<TerminalWidget> &p : m_zoomedPanes)
+        if (p && p.data() == pane)
+            return true;
+    return false;
 }
 
 void TerminalTab::updateHoverControls()
@@ -1184,7 +1196,7 @@ void TerminalTab::updateHoverControls()
             continue;
         if (pane->rect().contains(pane->mapFromGlobal(global))) {
             if (controls->pane() != pane || !controls->isVisible())
-                controls->showFor(pane, pane == m_zoomedPane, backgroundColour(), foregroundColour());
+                controls->showFor(pane, isZoomedPane(pane), backgroundColour(), foregroundColour());
             return;
         }
     }

@@ -151,8 +151,9 @@ public:
      * and paneFloatRequested(); Rex tabs turn them on.
      */
     void setPaneControls(bool on);
-    /* The pane shown zoomed, if any, for the zoom buttons' state. */
-    void setZoomedPane(TerminalWidget *pane);
+    /* The panes shown zoomed (a window can zoom a tiled and a floating
+     * one), for the zoom buttons' state. */
+    void setZoomedPanes(const QList<TerminalWidget *> &panes);
     /* Show, move or hide the hover buttons for where the mouse is now. */
     void updateHoverControls();
 
@@ -235,5 +236,6 @@ private:
     bool m_applyingLayout = false;
     bool m_paneControls = false;
     QPointer<QWidget> m_hover;            // the PaneControls
-    QPointer<TerminalWidget> m_zoomedPane;
+    QList<QPointer<TerminalWidget>> m_zoomedPanes;
+    bool isZoomedPane(const TerminalWidget *pane) const;
 };

@@ -64,7 +64,7 @@ public:
     // ws(s)://host:port + path.
     QUrl socketUrl(const QString &path) const;
 
-    static constexpr int kApiRevision = 18;
+    static constexpr int kApiRevision = 21;
     static constexpr int kApiMinRevision = 8;
 
 signals:

@@ -857,6 +857,42 @@ int main(int argc, char *argv[])
             second->grab().save(shots + QStringLiteral("/hover.png"));
         }
 
+        // Two zooms (revision 21): the tiled pane zoomed stays under the
+        // floating one, and keeps its zoom while the float has focus; a
+        // zoomed float covers everything, until focus leaves it.
+        {
+            TerminalWidget *tiled = second->panes().first();
+            const QString tiledBlock = c.session->blockId(tiled);
+            const QString floatBlock = c.session->blockId(floater);
+            const auto zoom = [&](const QString &block, bool on) {
+                server.call(QStringLiteral("session.zoom_block"),
+                            QJsonObject{{QStringLiteral("session_id"), sid}, {QStringLiteral("block_id"), block},
+                                        {QStringLiteral("zoom"), on}});
+            };
+            const auto focus = [&](const QString &block) {
+                server.call(QStringLiteral("session.focus_block"),
+                            QJsonObject{{QStringLiteral("session_id"), sid}, {QStringLiteral("block_id"), block}});
+            };
+            zoom(tiledBlock, true);
+            check(waitFor([&] { return c.session->isZoomed(tiled) && second->panes().size() == 2
+                                       && c.session->isFloating(floater); }),
+                  QStringLiteral("tiled zoom: the float still shown over it"));
+            focus(floatBlock);
+            check(waitFor([&] { return second->activePane() == floater; }), QStringLiteral("focus on the float"));
+            check(c.session->isZoomed(tiled) && second->panes().size() == 2,
+                  QStringLiteral("tiled zoom kept while the float has focus"));
+            zoom(floatBlock, true);
+            check(waitFor([&] { return second->panes() == QList<TerminalWidget *>{floater}; }),
+                  QStringLiteral("a zoomed float covers everything"));
+            focus(tiledBlock);
+            check(waitFor([&] { return second->panes().size() == 2 && !c.session->isZoomed(floater); }),
+                  QStringLiteral("focus off the float ends its zoom"));
+            check(c.session->isZoomed(tiled), QStringLiteral("and the tiled zoom is still on"));
+            agrees(server, c, QStringLiteral("two zooms"));
+            zoom(tiledBlock, false);
+            check(waitFor([&] { return !c.session->isZoomed(tiled); }), QStringLiteral("tiled zoom off"));
+        }
+
         // Resized elsewhere.
         server.call(QStringLiteral("session.resize_layer"),
                     QJsonObject{{QStringLiteral("session_id"), sid}, {QStringLiteral("layer_id"), layer},

@@ -849,7 +849,7 @@ void MainWindow::buildMenus()
     connect(view, &QMenu::aboutToShow, zoomPaneAct, [this, zoomPaneAct]() {
         TerminalWidget *t = currentTerminal();
         RexSession *rex = t ? rexSessionFor(t) : nullptr;
-        zoomPaneAct->setChecked(rex && rex->isZoomed(currentTab()));
+        zoomPaneAct->setChecked(rex && rex->isZoomed(t));
     });
     connect(view, &QMenu::aboutToShow, floatPaneAct, [this, floatPaneAct]() {
         TerminalWidget *t = currentTerminal();

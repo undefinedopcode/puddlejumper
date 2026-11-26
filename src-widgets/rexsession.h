@@ -115,6 +115,8 @@ public:
     /* Zoom a pane to fill its window (the others hidden), or back. */
     void toggleZoom(TerminalWidget *pane);
     bool isZoomed(const TerminalTab *tab) const;
+    /* Whether this pane is shown zoomed (either of a window's two zooms). */
+    bool isZoomed(const TerminalWidget *pane) const;
 
     /* Keymaps and actions. Before start(): what client.keymap is sent (this
      * app's actions and default bindings); without it no keymap is fetched.
@@ -211,7 +213,13 @@ private:
         };
         QList<Layer> floating;   // bottom to top
         QString focusedBlock;
-        QString zoomedBlock;     // filling the window, the rest hidden
+        // Zooms (API revision 21): zoomedBlock is the focused block when it
+        // is zoomed; tiledZoom the tiled layer's zoomed block, drawn over the
+        // window behind the floating layers. A zoomedBlock that isn't the
+        // tiled zoom (a floating block's, or any from an older server) is
+        // drawn over everything.
+        QString zoomedBlock;
+        QString tiledZoom;
     };
 
     void attach();
