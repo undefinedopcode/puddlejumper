@@ -206,6 +206,14 @@ public:
     void saveWindowGeometry(const QByteArray &geometry, const QByteArray &state);
     QByteArray windowGeometry() const;
     QByteArray windowState() const;
+    /*
+     * A Lua file of this client's own scripts for Rex servers, sent with
+     * client.set_script whenever a Rex session attaches (and again when this
+     * changes): key handlers, rex.bind('ctrl+n', function(ctx, key) … end).
+     * Empty: none. Setting the same path again sends the file again.
+     */
+    QString rexScriptsFile() const { return m_rexScriptsFile; }
+    void setRexScriptsFile(const QString &path);
     /* The thumbnail sidebar's width in pixels; 0 when never set. */
     int sidebarWidth() const;
     void setSidebarWidth(int pixels);
@@ -219,6 +227,7 @@ signals:
      * sizing.
      */
     void monitoringChanged();
+    void rexChanged();
 
 private:
     void load();
@@ -226,6 +235,7 @@ private:
     QSettings m_settings;
     Appearance m_appearance;
     Scrolling m_scrolling;
+    QString m_rexScriptsFile;
 
     /*
      * Live scheme override for this process, set by setLiveScheme(): the

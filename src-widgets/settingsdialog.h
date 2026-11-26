@@ -155,6 +155,7 @@ private:
     QComboBox *m_scrollbarPosBox = nullptr;
     QCheckBox *m_pasteConfirmBox = nullptr;
     QCheckBox *m_pasteTrimBox = nullptr;
+    QLineEdit *m_rexScriptsEdit = nullptr;
     QCheckBox *m_flowControlWarnBox = nullptr;
 
     // Tabs & Window.

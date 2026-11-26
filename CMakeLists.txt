@@ -53,6 +53,7 @@ qt_add_executable(puddlejumper
     src-widgets/main.cpp
     src-widgets/mainwindow.cpp
     src-widgets/rexactions.cpp
+    src-widgets/rexprompt.cpp src-widgets/rexprompt.h
     src-widgets/commandpalette.cpp src-widgets/commandpalette.h
     src-widgets/mainwindow.h
     src-widgets/notifier.cpp
@@ -289,6 +290,7 @@ set_target_properties(probe-settingsdialog PROPERTIES AUTOMOC ON)
 # Probe sources live under src-widgets/dev, so give it access to the parent
 # headers without "../..".
 target_include_directories(probe-settingsdialog PRIVATE src-widgets)
+target_compile_definitions(probe-settingsdialog PRIVATE PUDDLEJUMPER_REX)  # its Rex settings too
 
 # ---------------------------------------------------------------------------
 # test-programstatus — the OSC 7501 parser and records against the spec's
@@ -355,6 +357,23 @@ target_link_libraries(test-rexterminalstream PRIVATE Qt6::Core Qt6::Gui Qt6::Wid
 target_include_directories(test-rexterminalstream PRIVATE src-widgets)
 target_compile_definitions(test-rexterminalstream PRIVATE
     PJ_REX_CAPTURES="${CMAKE_CURRENT_SOURCE_DIR}/src-widgets/dev/rex-capture")
+
+# test-rexprompt — a Rex prompt (rex.ui.input/pick) as a palette: filtering,
+# keys, ticks, answers. Dev tool only; never installed.
+# Run: ./build/test-rexprompt [DIR]  (DIR: pictures of each, dark and light)
+qt_add_executable(test-rexprompt
+    src-widgets/dev/test_rexprompt.cpp
+    src-widgets/rexprompt.cpp src-widgets/rexprompt.h
+    src-widgets/appicon.cpp src-widgets/appicon.h
+)
+target_link_libraries(test-rexprompt PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg)
+qt_add_resources(test-rexprompt "lucide_icons"
+    PREFIX "/lucide"
+    BASE icons/lucide
+    FILES ${LUCIDE_ICONS}
+)
+set_target_properties(test-rexprompt PROPERTIES AUTOMOC ON)
+target_include_directories(test-rexprompt PRIVATE src-widgets)
 
 # test-rexkeymap — a Rex keymap: key spellings, lookups, sequences and modes.
 # Dev tool only; never installed. Run: ./build/test-rexkeymap

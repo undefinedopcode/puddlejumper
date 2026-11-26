@@ -14,6 +14,8 @@
 
 #include "TerminalDisplay.h"
 
+#include <QFile>
+#include <QFileInfo>
 #include <QJsonArray>
 #include <QLoggingCategory>
 #include <QSet>
@@ -323,7 +325,7 @@ void RexSession::attach()
                            m_attached = true;
                            qCInfo(lcRex) << "attached" << m_sessionId << "on" << m_server;
                            applyView(payload.value(QLatin1String("view")).toObject());
-                           fetchKeymap();
+                           sendScripts();  // then the keymap
                        });
 }
 
@@ -840,11 +842,44 @@ void RexSession::setScripts(const QJsonArray &scripts,
         return;
     m_control->request(QStringLiteral("client.set_script"), QJsonObject{{QStringLiteral("scripts"), scripts}},
                        [this, done](const QJsonObject &payload, const QJsonObject &error) {
-                           if (error.isEmpty())
-                               fetchKeymap();  // the handlers' bindings
+                           fetchKeymap();  // with the handlers' bindings
                            if (done)
                                done(payload, error);
                        });
+}
+
+void RexSession::sendScripts()
+{
+    if (m_finished || !m_attached)
+        return;
+    const QString path = m_settings.rexScriptsFile();
+    if (path.isEmpty() && !m_scriptsSent) {
+        fetchKeymap();
+        return;
+    }
+    QJsonArray scripts;
+    const QString name = QFileInfo(path).fileName();
+    if (!path.isEmpty()) {
+        QFile f(path);
+        if (!f.open(QIODevice::ReadOnly)) {
+            emit actionFailed(name, f.errorString());
+            fetchKeymap();
+            return;
+        }
+        scripts << QJsonObject{{QStringLiteral("name"), name},
+                               {QStringLiteral("source"), QString::fromUtf8(f.readAll())}};
+    }
+    setScripts(scripts, [this, name, sent = !scripts.isEmpty()](const QJsonObject &, const QJsonObject &error) {
+        if (error.isEmpty()) {
+            m_scriptsSent = sent;
+            qCInfo(lcRex) << (sent ? "scripts sent:" : "scripts removed") << name;
+        } else if (str(error, "code") == QLatin1String("method_not_found")) {
+            qCInfo(lcRex) << "the server takes no client scripts";
+        } else {
+            // The scripts before (if any) stay in use.
+            emit actionFailed(name, str(error, "message"));
+        }
+    });
 }
 
 void RexSession::forwardKey(const TerminalWidget *pane, const QJsonObject &key, const QStringList &prefix)

@@ -444,6 +444,43 @@ QWidget *SettingsDialog::buildTerminalPage()
     input->addRow(QString(), makeHint(tr("Ctrl+S pauses output until Ctrl+Q, which "
                                          "otherwise looks like a hung terminal."), page));
 
+#ifdef PUDDLEJUMPER_REX
+    QFormLayout *rex = addGroup(layout, tr("Rex"));
+    auto *scriptsRow = new QWidget(page);
+    auto *scriptsLayout = new QHBoxLayout(scriptsRow);
+    scriptsLayout->setContentsMargins(0, 0, 0, 0);
+    m_rexScriptsEdit = new QLineEdit(scriptsRow);
+    m_rexScriptsEdit->setPlaceholderText(tr("None"));
+    m_rexScriptsEdit->setClearButtonEnabled(true);
+    auto *browse = new QToolButton(scriptsRow);
+    browse->setText(tr("Choose…"));
+    scriptsLayout->addWidget(m_rexScriptsEdit, 1);
+    scriptsLayout->addWidget(browse);
+    // On finishing the edit, not every keystroke: each change is sent to
+    // every Rex server connected.
+    connect(m_rexScriptsEdit, &QLineEdit::editingFinished, this, [this]() {
+        if (const QString path = m_rexScriptsEdit->text().trimmed(); path != m_settings.rexScriptsFile())
+            m_settings.setRexScriptsFile(path);
+    });
+    connect(m_rexScriptsEdit, &QLineEdit::textChanged, this, [this](const QString &text) {
+        if (text.isEmpty() && !m_settings.rexScriptsFile().isEmpty())  // the clear button
+            m_settings.setRexScriptsFile(QString());
+    });
+    connect(browse, &QToolButton::clicked, this, [this]() {
+        const QString start = m_rexScriptsEdit->text().isEmpty() ? QDir::homePath() : m_rexScriptsEdit->text();
+        const QString path =
+            QFileDialog::getOpenFileName(this, tr("Rex Scripts"), start, tr("Lua (*.lua);;All files (*)"));
+        if (path.isEmpty())
+            return;
+        m_rexScriptsEdit->setText(path);
+        m_settings.setRexScriptsFile(path);
+    });
+    rex->addRow(tr("Scripts"), scriptsRow);
+    rex->addRow(QString(), makeHint(tr("Key handlers for Rex servers, sent on connecting: "
+                                       "rex.bind('ctrl+n', function(ctx, key) … return true end). "
+                                       "Choose the file again to resend it after editing."), page));
+#endif
+
     layout->addStretch(1);
     return page;
 }
@@ -1061,6 +1098,8 @@ void SettingsDialog::syncFromSettings()
         m_scrollbarPosBox->setCurrentIndex(sbIndex);
     m_pasteConfirmBox->setChecked(s.confirmMultilinePaste);
     m_pasteTrimBox->setChecked(s.trimPastedTrailingNewlines);
+    if (m_rexScriptsEdit)
+        m_rexScriptsEdit->setText(m_settings.rexScriptsFile());
     m_flowControlWarnBox->setChecked(s.flowControlWarning);
 
     const int layoutIndex = m_tabLayoutBox->findData(a.tabLayout);

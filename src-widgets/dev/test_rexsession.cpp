@@ -43,6 +43,7 @@
 #include <QFile>
 #include <QElapsedTimer>
 #include <QJsonArray>
+#include <QTemporaryDir>
 #include <QJsonDocument>
 #include <QStandardPaths>
 #include <QTextStream>
@@ -291,7 +292,7 @@ void type(TerminalWidget *pane, const QString &text)
  * Keymaps and actions. With dev/rex-test-keys.lua as the server's
  * configuration, all of it; without, the keymap only.
  */
-void keymapTests(Server &server, Client &c)
+void keymapTests(Server &server, Client &c, Settings &settings)
 {
     RexSession *s = c.session;
     QObject guard;
@@ -473,6 +474,30 @@ void keymapTests(Server &server, Client &c)
             s->setScripts({});
             check(waitFor([&] { return s->keymap().lookup({}, {{"ctrl+shift+u"}}, all) == RexKeymap::Result::Unbound; }),
                   QStringLiteral("scripts removed: the key unbound"));
+
+            // The scripts file in the settings (as on attaching, or a change).
+            QTemporaryDir dir;
+            const QString file = dir.filePath(QStringLiteral("pj-keys.lua"));
+            const auto writeLua = [&](const QByteArray &lua) {
+                QFile f(file);
+                f.open(QIODevice::WriteOnly | QIODevice::Truncate);
+                f.write(lua);
+            };
+            writeLua("rex.bind('ctrl+shift+k', function() return true end)\n");
+            settings.setRexScriptsFile(file);
+            s->sendScripts();
+            check(waitFor([&] { return s->keymap().lookup({}, {{"ctrl+shift+k"}}, all, &b) == RexKeymap::Result::Run
+                                       && b->action == QLatin1String("client.key.forward"); }),
+                  QStringLiteral("the settings' scripts file sent"));
+            writeLua("this is not lua");
+            s->sendScripts();
+            check(waitFor([&] { return failed.contains(QStringLiteral("pj-keys.lua")); })
+                      && s->keymap().lookup({}, {{"ctrl+shift+k"}}, all) == RexKeymap::Result::Run,
+                  QStringLiteral("a broken file is reported, the scripts before kept"));
+            settings.setRexScriptsFile(QString());
+            s->sendScripts();
+            check(waitFor([&] { return s->keymap().lookup({}, {{"ctrl+shift+k"}}, all) == RexKeymap::Result::Unbound; }),
+                  QStringLiteral("no file: the scripts sent removed"));
         }
     }
 
@@ -912,7 +937,7 @@ int main(int argc, char *argv[])
     }
 
     // ---- Keymaps and actions.
-    keymapTests(server, c);
+    keymapTests(server, c, settings);
 
     // ---- Closing a window.
     c.session->closeWindow(c.tabs.value(1));

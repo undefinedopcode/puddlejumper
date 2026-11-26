@@ -26,9 +26,25 @@ int main(int argc, char *argv[])
 {
     // probe-settingsdialog servers OUT.png: the Servers page with a few
     // entries, to look at (test-mode settings, the real ones left alone).
-    if (argc > 2 && QByteArray(argv[1]) == "servers")
+    // probe-settingsdialog terminal OUT.png: the Terminal page (its Rex
+    // group among them).
+    if (argc > 2 && (QByteArray(argv[1]) == "servers" || QByteArray(argv[1]) == "terminal"))
         QStandardPaths::setTestModeEnabled(true);
     QApplication app(argc, argv);
+
+    if (argc > 2 && QByteArray(argv[1]) == "terminal") {
+        Settings settings;
+        settings.setRexScriptsFile(QStringLiteral("/home/me/.config/puddlejumper/keys.lua"));
+        ProfileStore profiles;
+        SettingsDialog dlg(settings, profiles);
+        dlg.resize(860, 760);
+        dlg.showSection(SettingsDialog::Terminal);
+        for (int i = 0; i < 5; ++i)
+            app.processEvents();
+        dlg.grab().save(QString::fromLocal8Bit(argv[2]));
+        settings.setRexScriptsFile(QString());
+        return 0;
+    }
 
     if (argc > 2 && QByteArray(argv[1]) == "servers") {
         Settings settings;

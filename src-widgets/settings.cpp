@@ -41,6 +41,7 @@ constexpr auto kMonitorSilence  = "scrolling/monitorSilence";
 constexpr auto kSilenceTimeout  = "scrolling/silenceTimeout";
 constexpr auto kConfirmMultilinePaste = "input/confirmMultilinePaste";
 constexpr auto kTrimPastedNewlines    = "input/trimPastedTrailingNewlines";
+constexpr auto kRexScriptsFile        = "rex/scriptsFile";
 constexpr auto kGeometry    = "window/qtGeometry";
 constexpr auto kWinState    = "window/qtState";
 constexpr auto kSidebarWidth = "window/sidebarWidth";
@@ -139,6 +140,7 @@ void Settings::load()
         m_settings.value(kConfirmMultilinePaste, m_scrolling.confirmMultilinePaste).toBool();
     m_scrolling.trimPastedTrailingNewlines =
         m_settings.value(kTrimPastedNewlines, m_scrolling.trimPastedTrailingNewlines).toBool();
+    m_rexScriptsFile = m_settings.value(kRexScriptsFile).toString();
 
     // Snap to the half-point grid the UI offers.
     m_appearance.fontSize = qRound(m_appearance.fontSize * 2) / 2.0;
@@ -369,6 +371,17 @@ void Settings::setConfirmMultilinePaste(bool v)
     m_settings.setValue(kConfirmMultilinePaste, v);
     m_settings.sync();
     emit scrollingChanged();
+}
+
+void Settings::setRexScriptsFile(const QString &path)
+{
+    // The same path again still says so: the file may have changed.
+    if (m_rexScriptsFile != path) {
+        m_rexScriptsFile = path;
+        m_settings.setValue(kRexScriptsFile, path);
+        m_settings.sync();
+    }
+    emit rexChanged();
 }
 
 void Settings::setTrimPastedTrailingNewlines(bool v)

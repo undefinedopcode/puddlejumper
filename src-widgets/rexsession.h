@@ -132,6 +132,11 @@ public:
      * the reply ({bindings, diagnostics}) or an error. */
     void setScripts(const QJsonArray &scripts,
                     std::function<void(const QJsonObject &reply, const QJsonObject &error)> done = {});
+    /* Send the scripts file in the settings (rexScriptsFile), if any, or
+     * remove scripts sent before; done on attaching, and when the setting
+     * changes. A file that can't be read, or Lua the server refuses, is
+     * actionFailed(<file name>, …). */
+    void sendScripts();
     /* Send a key to the server (client.key) for a pane's block: one bound
      * to client.key.forward, after the keys of its sequence before it
      * (prefix). The server's handler for it runs, or the server types it;
@@ -260,4 +265,5 @@ private:
     RexKeymap m_keymap;
     bool m_keymapPending = false;
     bool m_keymapAgain = false;  // fetch again once the pending one is in
+    bool m_scriptsSent = false;  // scripts given to the server, to remove
 };

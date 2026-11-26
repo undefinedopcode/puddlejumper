@@ -33,6 +33,7 @@
 
 #ifdef PUDDLEJUMPER_REX
 #include "rexkeymap.h"
+#include "rexprompt.h"
 #include "rexsession.h"
 #endif
 
@@ -169,6 +170,8 @@ QJsonObject MainWindow::rexKeymapRequest() const
 void MainWindow::wireRexActions(RexSession *session)
 {
     session->setKeymapRequest([this]() { return rexKeymapRequest(); });
+    // The scripts file (Settings > Terminal > Rex), sent again when it changes.
+    connect(&m_settings, &Settings::rexChanged, session, &RexSession::sendScripts);
     connect(session, &RexSession::keymapChanged, this, [this, session]() {
         const QStringList d = session->keymap().diagnostics();
         if (!d.isEmpty()) {
@@ -382,78 +385,21 @@ void MainWindow::showRexPrompt(RexSession *session, const QString &callId, const
                                                 tr("PuddleJumper shows one prompt at a time")));
         return;
     }
-    const QString title = prompt.value(QLatin1String("title")).toString();
     QPointer<RexSession> from(session);
-    auto answer = [this, from](const QString &call, const QJsonObject &result) {
+    auto answer = [this, from](const QJsonObject &result) {
+        const QString call = std::exchange(m_rexPromptCall, QString());
         if (from && !call.isEmpty())
             from->replyCall(call, result);
     };
-    auto *dialog = new QDialog(this);
-    dialog->setAttribute(Qt::WA_DeleteOnClose);
-    dialog->setWindowTitle(title);
-    auto *layout = new QVBoxLayout(dialog);
-    auto *label = new QLabel(title, dialog);
-    label->setWordWrap(true);
-    layout->addWidget(label);
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
-    const QString confirm = prompt.value(QLatin1String("confirm")).toString();
-    if (!confirm.isEmpty())
-        buttons->button(QDialogButtonBox::Ok)->setText(confirm);
-
-    QLineEdit *edit = nullptr;
-    QListWidget *list = nullptr;
-    const bool pick = prompt.value(QLatin1String("kind")).toString() == QLatin1String("pick");
-    const bool multiple = prompt.value(QLatin1String("multiple")).toBool();
-    if (pick) {
-        list = new QListWidget(dialog);
-        list->setSelectionMode(multiple ? QAbstractItemView::MultiSelection : QAbstractItemView::SingleSelection);
-        for (const QJsonValue &v : prompt.value(QLatin1String("items")).toArray()) {
-            const QJsonObject it = v.toObject();
-            const QString id = it.value(QLatin1String("id")).toVariant().toString();
-            QString text = it.value(QLatin1String("title")).toString(id);
-            if (const QString sub = it.value(QLatin1String("subtitle")).toString(); !sub.isEmpty())
-                text += QStringLiteral(" — ") + sub;
-            auto *item = new QListWidgetItem(text, list);
-            item->setData(Qt::UserRole, it.value(QLatin1String("id")).toVariant());
-            item->setToolTip(it.value(QLatin1String("detail")).toString());
-            item->setSelected(it.value(QLatin1String("selected")).toBool());
-        }
-        if (!multiple && list->count() && list->selectedItems().isEmpty())
-            list->setCurrentRow(0);
-        layout->addWidget(list);
-        connect(list, &QListWidget::itemActivated, dialog, &QDialog::accept);
-    }
-    if (!pick || prompt.value(QLatin1String("allow_other")).toBool()) {
-        edit = new QLineEdit(prompt.value(QLatin1String("value")).toString(), dialog);
-        edit->setPlaceholderText(prompt.value(QLatin1String("placeholder")).toString(
-            pick ? tr("Or type another answer") : QString()));
-        layout->addWidget(edit);
-        edit->setFocus();
-    }
-    layout->addWidget(buttons);
-    connect(buttons, &QDialogButtonBox::accepted, dialog, &QDialog::accept);
-    connect(buttons, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
-    connect(dialog, &QDialog::accepted, this, [this, edit, list, pick, answer]() {
-        const QString call = std::exchange(m_rexPromptCall, QString());
-        if (pick && !(edit && !edit->text().trimmed().isEmpty())) {
-            QJsonArray ids;
-            for (const QListWidgetItem *item : list->selectedItems())
-                ids << QJsonValue::fromVariant(item->data(Qt::UserRole));
-            if (ids.isEmpty() && list->currentItem())
-                ids << QJsonValue::fromVariant(list->currentItem()->data(Qt::UserRole));
-            answer(call, QJsonObject{{QStringLiteral("ids"), ids}});
-        } else {
-            answer(call, QJsonObject{{QStringLiteral("text"), edit ? edit->text() : QString()}});
-        }
-    });
-    connect(dialog, &QDialog::rejected, this, [this, answer]() {
-        const QString call = std::exchange(m_rexPromptCall, QString());
-        answer(call, QJsonObject{{QStringLiteral("cancelled"), true}});
-    });
-    m_rexPrompt = dialog;
+    // A palette over this window (rexprompt.h), as Rex's apps ask.
+    auto *palette = new RexPrompt(prompt, this);
+    palette->setAttribute(Qt::WA_DeleteOnClose);
+    connect(palette, &QDialog::accepted, this, [palette, answer]() { answer(palette->answer()); });
+    connect(palette, &QDialog::rejected, this, [answer]() { answer(QJsonObject{{QStringLiteral("cancelled"), true}}); });
+    m_rexPrompt = palette;
     m_rexPromptCall = callId;
     m_rexPromptSession = session;
-    dialog->open();
+    palette->open();
 }
 
 #endif  // PUDDLEJUMPER_REX
