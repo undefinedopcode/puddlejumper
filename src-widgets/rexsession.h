@@ -204,6 +204,7 @@ private:
         RexTerminalConnection *stream = nullptr;
         QSize screen;  // the block's size, as the server last said
         QSize sent;    // the size last asked for
+        QSize sentCell;  // the cell size, in pixels, sent with it
         int resizing = 0;  // resize requests not yet answered
         int retries = 0;   // asked again, the server having kept another size
         bool exited = false;

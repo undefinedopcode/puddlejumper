@@ -643,6 +643,26 @@ int main(int argc, char *argv[])
     check(waitFor([&] { return shows(first, QStringLiteral("DONE_ONE")); }), QStringLiteral("typed and echoed"));
     agrees(server, c, QStringLiteral("first window"));
 
+    // A font change: the cells change size, so the grid does, and the
+    // server is told (it was left at the old size).
+    {
+        TerminalWidget *pane = c.panes().value(0);
+        const QSize before = screenSize(pane);
+        const qreal size = settings.appearance().fontSize;
+        settings.setFontSize(size + 4);
+        check(waitFor([&] { return screenSize(pane).width() < before.width() && screenSize(pane).height() < before.height(); }),
+              QStringLiteral("bigger font: fewer cells (%1x%2, were %3x%4)")
+                  .arg(screenSize(pane).width()).arg(screenSize(pane).height()).arg(before.width()).arg(before.height()));
+        const QSize cell = pane->cellSize();
+        const QSize grid = screenSize(pane);
+        check(grid.width() * cell.width() <= pane->width() && grid.height() * cell.height() <= pane->height(),
+              QStringLiteral("bigger font: the grid fits the pane"));
+        agrees(server, c, QStringLiteral("bigger font"));
+        settings.setFontSize(size);
+        check(waitFor([&] { return screenSize(pane) == before; }), QStringLiteral("font back: the grid back"));
+        agrees(server, c, QStringLiteral("font back"));
+    }
+
     // ---- A new window: a second tab.
     c.session->newWindow();
     check(waitFor([&] { return c.tabs.size() == 2; }), QStringLiteral("a second tab"));

@@ -211,6 +211,11 @@ RexSession::RexSession(const QUrl &server, const QString &sessionId, const Setti
     // A margin or pane frame change (pane cards) changes what fits: queued,
     // after the panes have taken the new appearance.
     connect(&m_settings, &Settings::appearanceChanged, this, [this]() {
+        // The hidden pane that measures cells isn't among the window's
+        // panes: a font change reaches it here, or every layout (and the
+        // sizes the server is told) stays at the old cell size.
+        if (m_metrics)
+            m_metrics->applyAppearance();
         for (Window &w : m_windows) {
             if (!w.tab)
                 continue;
@@ -1071,7 +1076,10 @@ void RexSession::sendSize(Block *b, const QSize &cells, bool again)
 {
     if (m_finished)
         return;
-    if (cells == b->sent && !again) {
+    const QSize cell = cellSize();
+    // The same cells at a new cell size (a font change) is news too: the
+    // server reports pixel sizes to programs from it.
+    if (cells == b->sent && cell == b->sentCell && !again) {
         openStream(b);
         return;
     }
@@ -1079,8 +1087,8 @@ void RexSession::sendSize(Block *b, const QSize &cells, bool again)
     if (cells != b->sent)
         b->retries = 0;
     b->sent = cells;
+    b->sentCell = cell;
     ++b->resizing;
-    const QSize cell = cellSize();
     QJsonObject p = target(b);
     p.insert(QStringLiteral("args"), QJsonObject{{QStringLiteral("columns"), cells.width()},
                                                  {QStringLiteral("rows"), cells.height()},
