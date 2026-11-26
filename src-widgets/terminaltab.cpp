@@ -1055,8 +1055,9 @@ void TerminalTab::applyLayout(const PaneLayout &layout,
 namespace {
 
 /*
- * Hover controls for tiled panes (Rex tabs): a small pill of buttons in the
- * top-right corner of the pane under the mouse, to zoom it or float it.
+ * Hover controls for tiled panes: a small pill of buttons in the top-right
+ * corner of the pane under the mouse, to split it either way or close it,
+ * and in Rex tabs to zoom or float it.
  */
 class PaneControls : public QWidget
 {
@@ -1067,17 +1068,34 @@ public:
         auto *h = new QHBoxLayout(this);
         h->setContentsMargins(4, 3, 4, 3);
         h->setSpacing(2);
+        m_right = miniButton(this, 22);
+        m_down = miniButton(this, 22);
         m_zoom = miniButton(this, 22);
         m_float = miniButton(this, 22);
-        h->addWidget(m_zoom);
-        h->addWidget(m_float);
+        m_close = miniButton(this, 22);
+        for (QToolButton *b : {m_right, m_down, m_zoom, m_float, m_close})
+            h->addWidget(b);
+        // Each asks as the pane's own menu does, or as the tab's zoom and
+        // float buttons do; whoever owns the pane decides what it means.
+        QObject::connect(m_right, &QToolButton::clicked, this, [this]() {
+            if (TerminalWidget *p = take())
+                emit p->splitRequested(Qt::Horizontal);
+        });
+        QObject::connect(m_down, &QToolButton::clicked, this, [this]() {
+            if (TerminalWidget *p = take())
+                emit p->splitRequested(Qt::Vertical);
+        });
+        QObject::connect(m_close, &QToolButton::clicked, this, [this]() {
+            if (TerminalWidget *p = take())
+                emit p->closePaneRequested();
+        });
         QObject::connect(m_zoom, &QToolButton::clicked, this, [this]() {
             if (m_pane)
                 emit m_tab->paneZoomRequested(m_pane);
         });
         QObject::connect(m_float, &QToolButton::clicked, this, [this]() {
-            if (m_pane)
-                emit m_tab->paneFloatRequested(m_pane);
+            if (TerminalWidget *p = take())
+                emit m_tab->paneFloatRequested(p);
         });
         setCursor(Qt::ArrowCursor);
         hide();
@@ -1085,27 +1103,69 @@ public:
 
     TerminalWidget *pane() const { return m_pane; }
 
-    void showFor(TerminalWidget *pane, bool zoomed, const QColor &bg, const QColor &fg)
+    void showFor(TerminalWidget *pane, bool zoomed, bool layoutButtons, const QColor &bg, const QColor &fg)
     {
         m_pane = pane;
         m_bg = bg;
         m_fg = fg;
+        m_right->setIcon(appIcon("columns-2", fg));
+        m_right->setToolTip(QObject::tr("Split right"));
+        m_down->setIcon(appIcon("rows-2", fg));
+        m_down->setToolTip(QObject::tr("Split down"));
         m_zoom->setIcon(appIcon(zoomed ? "minimize-2" : "maximize-2", fg));
         m_zoom->setToolTip(zoomed ? QObject::tr("Unzoom this pane") : QObject::tr("Zoom this pane to fill the window"));
         m_float->setIcon(appIcon("picture-in-picture-2", fg));
         m_float->setToolTip(QObject::tr("Float this pane over the window"));
+        m_close->setIcon(appIcon("x", fg));
+        m_close->setToolTip(QObject::tr("Close this pane"));
+        m_zoom->setVisible(layoutButtons);
+        m_float->setVisible(layoutButtons);
         adjustSize();
-        const QPoint corner = pane->mapTo(m_tab, QPoint(pane->width(), 0));
-        move(corner.x() - width() - 8, corner.y() + 6);
+        place();
         raise();
         show();
         update();
+    }
+
+    /* Into the pane's top-right corner, wherever the pane is now. */
+    void place()
+    {
+        if (!m_pane)
+            return;
+        const QPoint corner = m_pane->mapTo(m_tab, QPoint(m_pane->width(), 0));
+        QRect box(QPoint(corner.x() - width() - 8, corner.y() + 6), size());
+        // Not under a floating frame (one floated in place covers the
+        // corner): left of it, or below it, while still on the pane.
+        const QRect pane(m_pane->mapTo(m_tab, QPoint(0, 0)), m_pane->size());
+        const QList<QRect> frames = m_tab->floatingFrameRects();
+        for (int tries = 0; tries < 4; ++tries) {
+            const auto hit = std::find_if(frames.cbegin(), frames.cend(),
+                                          [&](const QRect &f) { return f.intersects(box); });
+            if (hit == frames.cend())
+                break;
+            QRect left = box;
+            left.moveRight(hit->left() - 8);
+            QRect below = box;
+            below.moveTop(hit->bottom() + 6);
+            box = pane.contains(left) ? left : below;
+        }
+        if (pos() != box.topLeft())
+            move(box.topLeft());
+        raise();
     }
 
     void dismiss()
     {
         m_pane = nullptr;
         hide();
+    }
+
+    /* The pane, the controls going away (it may be about to go itself). */
+    TerminalWidget *take()
+    {
+        TerminalWidget *p = m_pane;
+        dismiss();
+        return p;
     }
 
 protected:
@@ -1131,8 +1191,11 @@ protected:
 private:
     TerminalTab *m_tab;
     QPointer<TerminalWidget> m_pane;
+    QToolButton *m_right = nullptr;
+    QToolButton *m_down = nullptr;
     QToolButton *m_zoom = nullptr;
     QToolButton *m_float = nullptr;
+    QToolButton *m_close = nullptr;
     QColor m_bg;
     QColor m_fg;
 };
@@ -1142,11 +1205,25 @@ private:
 void TerminalTab::setPaneControls(bool on)
 {
     m_paneControls = on;
-    if (on && !m_hover)
-        m_hover = new PaneControls(this);
+    if (m_hover)
+        static_cast<PaneControls *>(m_hover.data())->dismiss();  // shown again with its buttons
+    updateFrames();
+}
+
+QList<QRect> TerminalTab::floatingFrameRects() const
+{
+    QList<QRect> out;
+    for (const Floating &f : m_floating)
+        if (f.frame && f.frame->isVisible())
+            out << f.frame->geometry();
+    return out;
+}
+
+void TerminalTab::setHoverControls(bool on)
+{
+    m_hoverControls = on;
     if (!on && m_hover)
         static_cast<PaneControls *>(m_hover.data())->dismiss();
-    updateFrames();
 }
 
 void TerminalTab::setZoomedPanes(const QList<TerminalWidget *> &panes)
@@ -1173,11 +1250,13 @@ bool TerminalTab::isZoomedPane(const TerminalWidget *pane) const
 
 void TerminalTab::updateHoverControls()
 {
+    if (m_hoverControls && !m_hover)
+        m_hover = new PaneControls(this);
     auto *controls = static_cast<PaneControls *>(m_hover.data());
     if (!controls)
         return;
     const QPoint global = QCursor::pos();
-    if (!m_paneControls || !isVisible() || QApplication::mouseButtons() != Qt::NoButton) {
+    if (!m_hoverControls || !isVisible() || QApplication::mouseButtons() != Qt::NoButton) {
         controls->dismiss();
         return;
     }
@@ -1196,7 +1275,9 @@ void TerminalTab::updateHoverControls()
             continue;
         if (pane->rect().contains(pane->mapFromGlobal(global))) {
             if (controls->pane() != pane || !controls->isVisible())
-                controls->showFor(pane, isZoomedPane(pane), backgroundColour(), foregroundColour());
+                controls->showFor(pane, isZoomedPane(pane), m_paneControls, backgroundColour(), foregroundColour());
+            else
+                controls->place();  // the pane moved or changed size (a zoom)
             return;
         }
     }
@@ -1205,7 +1286,7 @@ void TerminalTab::updateHoverControls()
 
 bool TerminalTab::eventFilter(QObject *watched, QEvent *event)
 {
-    if (m_paneControls && qobject_cast<TerminalWidget *>(watched)) {
+    if (m_hoverControls && qobject_cast<TerminalWidget *>(watched)) {
         switch (event->type()) {
         case QEvent::Enter:
         case QEvent::Leave:

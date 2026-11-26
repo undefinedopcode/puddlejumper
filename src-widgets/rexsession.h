@@ -11,6 +11,7 @@
 #include "terminaltab.h"
 #include "terminalwidget.h"
 
+#include <QElapsedTimer>
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -96,8 +97,12 @@ public:
 
     void newWindow();
     void splitPane(TerminalWidget *pane, Qt::Orientation orientation);
+    /* Closes are undoable: undoClose() reopens this client's most recent
+     * one (pane or window), as it was, for about a minute after; `done`
+     * gets an empty string, or why not (nothing to undo). */
     void closePane(TerminalWidget *pane);
     void closeWindow(TerminalTab *tab);
+    void undoClose(std::function<void(const QString &error)> done = {});
     void renameWindow(TerminalTab *tab, const QString &name);
     /* Rename the session itself (its label). */
     void renameSession(const QString &name);
@@ -263,6 +268,7 @@ private:
     /* Where a floating layer's frame goes in `area`, and its layout's cells. */
     QRect floatingFrame(const QRectF &bounds, const QSize &area, QSize *cells);
     void finish(const QString &reason);
+    QElapsedTimer m_lastUndoable;  // since the last undoable close
     void endIfEmpty();
     Window *windowOf(const TerminalTab *tab);
     const Window *windowOf(const TerminalTab *tab) const;

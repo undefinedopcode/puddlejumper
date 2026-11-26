@@ -784,6 +784,23 @@ void MainWindow::buildMenus()
             closePane(t);
     });
 #ifdef PUDDLEJUMPER_REX
+    // A Rex pane or window closed in the last minute or so comes back.
+    auto *undoCloseAct = view->addAction(tr("&Undo Close"));
+    tagRexAction(undoCloseAct, "session.undo_close", "Pane");
+    undoCloseAct->setShortcut(QKeySequence(QStringLiteral("Ctrl+Alt+Shift+T")));
+    undoCloseAct->setStatusTip(tr("Reopen the Rex pane or window closed most recently"));
+    connect(undoCloseAct, &QAction::triggered, this, [this]() {
+        TerminalWidget *t = currentTerminal();
+        RexSession *rex = t ? rexSessionFor(t) : nullptr;
+        if (!rex) {
+            statusBar()->showMessage(tr("Undo Close reopens Rex panes; this tab isn't one"), 3000);
+            return;
+        }
+        rex->undoClose([this, guard = QPointer<MainWindow>(this)](const QString &error) {
+            if (guard && !error.isEmpty())
+                statusBar()->showMessage(tr("Nothing to undo: %1").arg(error), 3000);
+        });
+    });
     // Rex panes can float over their window, and dock back.
     auto *floatPaneAct = view->addAction(tr("&Float or Dock Pane"));
     tagRexAction(floatPaneAct, "pane.float", "Pane");

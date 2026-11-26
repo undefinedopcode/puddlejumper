@@ -42,6 +42,7 @@
 #include <QCursor>
 #include <QEventLoop>
 #include <QTimer>
+#include <QToolButton>
 #include <QDir>
 #include <QFile>
 #include <QElapsedTimer>
@@ -1057,6 +1058,52 @@ int main(int argc, char *argv[])
             check(waitFor([&] { return shape().startsWith(QStringLiteral("h/")) && shape().contains(QStringLiteral("(%1,%2)").arg(moved, left)); }),
                   QStringLiteral("docked where the float was: left of the left pane (%1)").arg(shape()));
             agrees(server, c, QStringLiteral("dock test"));
+
+            // The hover buttons: split, close (and zoom, float in a Rex
+            // tab), staying in the pane's corner as a zoom resizes it.
+            const auto pill = [&]() -> QWidget * {
+                for (QToolButton *b : tab->findChildren<QToolButton *>())
+                    if (b->toolTip() == QLatin1String("Split right") && b->parentWidget()->isVisible())
+                        return b->parentWidget();
+                return nullptr;
+            };
+            const auto settle = [](int ms) { waitFor([] { return false; }, ms); };
+            TerminalWidget *corner = tab->panes().value(0);
+            QCursor::setPos(corner->mapToGlobal(QPoint(corner->width() / 2, corner->height() / 2)));
+            tab->updateHoverControls();
+            QWidget *controls = pill();
+            int shown = 0;
+            for (QToolButton *b : controls ? controls->findChildren<QToolButton *>() : QList<QToolButton *>())
+                shown += b->isVisibleTo(controls);
+            check(controls && shown == 5, QStringLiteral("hover buttons: split right, split down, zoom, float, close (%1)").arg(shown));
+            const auto inCorner = [&]() {
+                QWidget *w = pill();
+                const QPoint right = corner->mapTo(tab, QPoint(corner->width(), 0));
+                return w && qAbs(w->geometry().right() + 1 + 8 - right.x()) <= 2 && qAbs(w->y() - 6 - right.y()) <= 2;
+            };
+            check(inCorner(), QStringLiteral("hover buttons in the pane's corner"));
+            const int narrow = corner->width();
+            c.session->toggleZoom(corner);
+            check(waitFor([&] { return corner->width() > narrow + 50; }), QStringLiteral("zoomed: the pane fills the window"));
+            settle(100);
+            QCursor::setPos(corner->mapToGlobal(QPoint(corner->width() / 2, corner->height() / 2)));
+            check(waitFor([&] { tab->updateHoverControls(); return inCorner(); }),
+                  QStringLiteral("zoomed: the hover buttons moved with the pane"));
+            c.session->toggleZoom(corner);
+            check(waitFor([&] { return tab->panes().size() == 3; }), QStringLiteral("unzoomed"));
+
+            // Closed, and undone: the same block back where it was.
+            const QString shapeBefore = shape();
+            TerminalWidget *closing = tab->panes().value(1);
+            const QString closedId = c.session->blockId(closing);
+            c.session->closePane(closing);
+            check(waitFor([&] { return tab->panes().size() == 2; }), QStringLiteral("a pane closed"));
+            QString undoError = QStringLiteral("(no answer)");
+            c.session->undoClose([&](const QString &e) { undoError = e; });
+            check(waitFor([&] { return tab->panes().size() == 3 && shape() == shapeBefore; }),
+                  QStringLiteral("undo close: it comes back where it was (%1)").arg(undoError));
+            check(c.session->paneForBlock(closedId) != nullptr, QStringLiteral("undo close: the same block"));
+            agrees(server, c, QStringLiteral("undo close"));
             c.session->closeWindow(tab);
             waitFor([&] { return c.tabs.size() == 2; });
         }

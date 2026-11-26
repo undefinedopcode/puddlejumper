@@ -151,6 +151,14 @@ public:
      * and paneFloatRequested(); Rex tabs turn them on.
      */
     void setPaneControls(bool on);
+    /*
+     * The hover buttons (on by default): split right, split down and close,
+     * asked with the pane's own splitRequested() and closePaneRequested(),
+     * with zoom and float as well when setPaneControls() is on.
+     */
+    void setHoverControls(bool on);
+    /* Where the floating frames are shown, in the tab. */
+    QList<QRect> floatingFrameRects() const;
     /* The panes shown zoomed (a window can zoom a tiled and a floating
      * one), for the zoom buttons' state. */
     void setZoomedPanes(const QList<TerminalWidget *> &panes);
@@ -235,6 +243,7 @@ private:
     QList<QPointer<TerminalWidget>> m_parked;
     bool m_applyingLayout = false;
     bool m_paneControls = false;
+    bool m_hoverControls = true;
     QPointer<QWidget> m_hover;            // the PaneControls
     QList<QPointer<TerminalWidget>> m_zoomedPanes;
     bool isZoomedPane(const TerminalWidget *pane) const;

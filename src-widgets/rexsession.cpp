@@ -1505,8 +1505,20 @@ void RexSession::closePane(TerminalWidget *pane)
     const QString id = blockId(pane);
     if (id.isEmpty())
         return;
+    // Undoable (API revision 20): undoClose() brings it back for a while.
+    m_lastUndoable.start();
     m_control->request(QStringLiteral("block.close"),
-                       QJsonObject{{QStringLiteral("session_id"), m_sessionId}, {QStringLiteral("block_id"), id}});
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId}, {QStringLiteral("block_id"), id},
+                                   {QStringLiteral("undoable"), true}});
+}
+
+void RexSession::undoClose(std::function<void(const QString &error)> done)
+{
+    m_control->request(QStringLiteral("client.undo_close"), QJsonObject{},
+                       [done](const QJsonObject &, const QJsonObject &error) {
+                           if (done)
+                               done(error.isEmpty() ? QString() : str(error, "message"));
+                       });
 }
 
 void RexSession::closeWindow(TerminalTab *tab)
@@ -1514,8 +1526,10 @@ void RexSession::closeWindow(TerminalTab *tab)
     const Window *w = windowOf(tab);
     if (!w)
         return;
+    m_lastUndoable.start();
     m_control->request(QStringLiteral("session.close_window"),
-                       QJsonObject{{QStringLiteral("session_id"), m_sessionId}, {QStringLiteral("window_id"), w->id}});
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId}, {QStringLiteral("window_id"), w->id},
+                                   {QStringLiteral("undoable"), true}});
 }
 
 void RexSession::renameWindow(TerminalTab *tab, const QString &name)
@@ -1562,7 +1576,11 @@ void RexSession::endIfEmpty()
     // is left be.
     m_control->request(QStringLiteral("session.view"), QJsonObject{{QStringLiteral("session_id"), m_sessionId}},
                        [this](const QJsonObject &view, const QJsonObject &error) {
-                           if (!error.isEmpty() || hasBlocks(view)) {
+                           // After an undoable close the server holds what
+                           // closed for a while, and ends the session itself
+                           // when the hold runs out unless it is undone.
+                           const bool held = m_lastUndoable.isValid() && m_lastUndoable.elapsed() < 60000;
+                           if (!error.isEmpty() || hasBlocks(view) || held) {
                                finish(error.isEmpty() ? tr("nothing left to show") : tr("the session ended"));
                                return;
                            }
