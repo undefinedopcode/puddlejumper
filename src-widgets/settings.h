@@ -72,6 +72,10 @@ public:
         /* Experimental: tiled panes drawn as cards, a rounded panel with a
          * small title strip, as floating panes are (TerminalWidget). */
         bool    paneCards = false;
+
+        /* The focused pane's frame (tiled or floating) a brighter edge like
+         * the others', not the accent colour. */
+        bool    quietFocus = false;
     };
 
     struct Scrolling {
@@ -165,6 +169,7 @@ public:
     void setTerminalMargin(int v);
     void setBidi(bool v);
     void setPaneCards(bool v);
+    void setQuietFocus(bool v);
     void setScrollback(int v);
     void setScrollbarPosition(const QString &v);
     void setFlowControlWarning(bool v);

@@ -376,6 +376,14 @@ QWidget *SettingsDialog::buildAppearancePage()
     });
     rendering->addRow(tr("Panes"), m_paneCardsBox);
 
+    m_quietFocusBox = new QCheckBox(tr("Focused pane: a brighter frame, not the accent"), page);
+    m_quietFocusBox->setToolTip(tr("Mark the focused pane (tiled or floating) with a brighter "
+                                   "version of the other panes' frame instead of the accent colour"));
+    connect(m_quietFocusBox, &QCheckBox::toggled, this, [this](bool v) {
+        m_settings.setQuietFocus(v);
+    });
+    rendering->addRow(QString(), m_quietFocusBox);
+
     layout->addStretch(1);
     return page;
 }
@@ -1095,6 +1103,7 @@ void SettingsDialog::syncFromSettings()
     m_lineCharsBox->setChecked(a.drawLineChars);
     m_bidiBox->setChecked(a.bidi);
     m_paneCardsBox->setChecked(a.paneCards);
+    m_quietFocusBox->setChecked(a.quietFocus);
 
     const int cursorIndex = m_cursorShapeBox->findData(QString::number(a.cursorShape));
     if (cursorIndex >= 0)

@@ -50,6 +50,7 @@ constexpr int kCardSide = 3;
 constexpr int kCardTitle = 22;  // as a float's title strip (kFloatTitle)
 constexpr int kCardRadius = 6;
 bool s_paneCards = false;
+bool s_quietFocus = false;
 } // namespace
 
 TerminalWidget::TerminalWidget(int id, const Settings &settings,
@@ -228,6 +229,7 @@ void TerminalWidget::onOutput()
 void TerminalWidget::applyAppearance()
 {
     s_paneCards = m_settings.appearance().paneCards;
+    s_quietFocus = m_settings.appearance().quietFocus;
     applyFrameMargins();
     if (!m_terminal)
         return;
@@ -408,6 +410,49 @@ void TerminalWidget::setPaneFrame(PaneFrame frame)
         return;
     m_frame = frame;
     applyFrameMargins();
+}
+
+void TerminalWidget::setQuietFocus(bool on)
+{
+    s_quietFocus = on;
+}
+
+bool TerminalWidget::quietFocus()
+{
+    return s_quietFocus;
+}
+
+QColor TerminalWidget::themeBackground() const
+{
+    if (auto *d = display())
+        return d->colorTable()[1].color;
+    return palette().color(QPalette::Window);
+}
+
+QColor TerminalWidget::frameEdgeColour(const QColor &bg, const QColor &fg, bool active, bool floating)
+{
+    // Unfocused: a faint edge (a float's plainer, to stand off the panes
+    // under it). Focused: the accent, or with a quiet focus the same edge
+    // brighter.
+    const qreal plain = floating ? 0.62 : 0.2;
+    if (!active)
+        return cardstyle::mix(bg, fg, plain);
+    if (s_quietFocus)
+        return cardstyle::mix(bg, fg, floating ? 0.9 : 0.5);
+    return floating ? cardstyle::accent() : cardstyle::mix(bg, cardstyle::accent(), 0.7);
+}
+
+QColor TerminalWidget::cardStripColour() const
+{
+    QColor bg = palette().color(QPalette::Window), fg = palette().color(QPalette::WindowText);
+    if (auto *d = display()) {
+        fg = d->colorTable()[0].color;
+        bg = d->colorTable()[1].color;
+    }
+    const bool active = m_frame == PaneFrame::Active;
+    if (active && s_quietFocus)
+        return cardstyle::mix(bg, fg, 0.13);
+    return cardstyle::mix(bg, active ? cardstyle::accent() : fg, active ? 0.16 : 0.06);
 }
 
 void TerminalWidget::setPaneCards(bool on)
@@ -591,17 +636,17 @@ void TerminalWidget::paintEvent(QPaintEvent *)
             bg = d->colorTable()[1].color;
         }
         const bool active = m_frame == PaneFrame::Active;
-        const QColor edge = active ? cardstyle::mix(bg, cardstyle::accent(), 0.7) : cardstyle::mix(bg, fg, 0.2);
-        // Round corners onto the surface the cards sit on (the sidebar's).
-        p.fillRect(rect(), cardstyle::surface(bg, fg));
+        const QColor edge = frameEdgeColour(bg, fg, active, false);
+        // Round corners onto the surface the cards sit on (the sidebar's,
+        // from the scheme's own background, not a focus tint).
+        p.fillRect(rect(), cardstyle::surface(themeBackground(), fg));
         const QRectF panel = QRectF(rect()).adjusted(0.75, 0.75, -0.75, -0.75);
         QPainterPath path;
         path.addRoundedRect(panel, kCardRadius, kCardRadius);
         p.fillPath(path, bg);
         p.save();
         p.setClipPath(path);
-        p.fillRect(QRectF(panel.left(), panel.top(), panel.width(), kCardTitle),
-                   cardstyle::mix(bg, active ? cardstyle::accent() : fg, active ? 0.16 : 0.06));
+        p.fillRect(QRectF(panel.left(), panel.top(), panel.width(), kCardTitle), cardStripColour());
         p.restore();
         p.setPen(QPen(edge, active ? 1.5 : 1.0));
         p.drawPath(path);
@@ -638,8 +683,10 @@ void TerminalWidget::paintEvent(QPaintEvent *)
     QPainter p(this);
     QColor colour = palette().color(QPalette::Highlight);
     if (m_frame == PaneFrame::Inactive)
-        colour = display() ? display()->palette().color(QPalette::Window)
-                           : palette().color(QPalette::Window);
+        colour = themeBackground();
+    else if (s_quietFocus)  // a brighter edge than the accent's
+        colour = cardstyle::mix(themeBackground(), display() ? display()->colorTable()[0].color
+                                                             : palette().color(QPalette::WindowText), 0.45);
     p.fillRect(rect(), colour);
 }
 

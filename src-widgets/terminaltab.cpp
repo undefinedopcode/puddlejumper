@@ -235,9 +235,10 @@ protected:
         }
         QPainterPath path;
         path.addRoundedRect(panel, kFloatRadius, kFloatRadius);
+        // Focused, with the focus tint: the frame round the (tinted) pane too.
         p.fillPath(path, bg);
         // The title strip, tinted towards the edge colour.
-        const QColor edge = m_active ? cardstyle::accent() : cardstyle::mix(bg, fg, 0.62);
+        const QColor edge = TerminalWidget::frameEdgeColour(bg, fg, m_active, true);
         p.save();
         p.setClipPath(path);
         p.fillRect(QRectF(panel.left(), panel.top(), panel.width(), kFloatTitle + 2),
@@ -744,10 +745,13 @@ void TerminalTab::updateFrames()
         else
             pane->setPaneFrame(TerminalWidget::PaneFrame::Inactive);
     }
+    if (m_hover)
+        m_hover->update();  // the hover buttons take the strip's colour
     const QString activeLayer = m_active ? floatingLayerOf(m_active) : QString();
     for (const Floating &f : std::as_const(m_floating)) {
         if (auto *frame = static_cast<FloatingFrame *>(f.frame.data())) {
             frame->setActive(f.id == activeLayer);
+            frame->update();  // a quiet focus turned on or off
             frame->setColours(backgroundColour(), foregroundColour());
             frame->setControls(m_paneControls, isZoomedPane(frame->pane()));
             TerminalWidget *first = firstPaneIn(f.root);
@@ -771,11 +775,10 @@ QSize TerminalTab::layoutArea() const
 
 QColor TerminalTab::backgroundColour() const
 {
-    TerminalWidget *pane = m_active ? m_active.data() : firstPaneIn(m_root);
-    if (pane) {
-        if (auto *display = pane->findChild<Konsole::TerminalDisplay *>())
-            return display->palette().color(QPalette::Window);
-    }
+    // The scheme's own, not the active pane's focus tint: the sidebar and
+    // what's behind the panes don't change as the focus moves.
+    if (TerminalWidget *pane = m_active ? m_active.data() : firstPaneIn(m_root))
+        return pane->themeBackground();
     return palette().color(QPalette::Window);
 }
 
@@ -1247,7 +1250,7 @@ protected:
         if (m_compact) {
             // Over the strip's title text, in the strip's own colour.
             path.addRoundedRect(QRectF(rect()).adjusted(0, 1, 0, -1), 4, 4);
-            p.fillPath(path, cardstyle::mix(m_bg, m_fg, 0.09));
+            p.fillPath(path, m_pane ? m_pane->cardStripColour() : cardstyle::mix(m_bg, m_fg, 0.09));
             return;
         }
         path.addRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 7, 7);

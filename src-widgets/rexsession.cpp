@@ -1236,7 +1236,7 @@ void RexSession::sendTheme(Block *b)
     QJsonObject p = target(b);
     p.insert(QStringLiteral("args"),
              QJsonObject{{QStringLiteral("foreground"), colourName(table[0].color)},
-                         {QStringLiteral("background"), colourName(table[1].color)},
+                         {QStringLiteral("background"), colourName(b->pane->themeBackground())},
                          {QStringLiteral("palette"), palette}});
     m_control->request(QStringLiteral("com.superlogical.terminal.set_theme"), p,
                        [](const QJsonObject &, const QJsonObject &error) {

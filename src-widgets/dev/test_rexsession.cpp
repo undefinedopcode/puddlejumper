@@ -59,6 +59,7 @@
 
 #include "ScreenWindow.h"
 #include "TerminalDisplay.h"
+#include "cardstyle.h"
 
 namespace {
 
@@ -593,6 +594,7 @@ int main(int argc, char *argv[])
     Settings settings;
     // The whole run again with pane cards (their chrome is a different size).
     settings.setPaneCards(qEnvironmentVariableIntValue("PUDDLEJUMPER_TEST_PANE_CARDS") == 1);
+    settings.setQuietFocus(qEnvironmentVariableIntValue("PUDDLEJUMPER_TEST_QUIET_FOCUS") == 1);
     const TerminalProfile profile;
 
     // ---- Local panes as cards: titled with what runs in them, and where.
@@ -1129,6 +1131,21 @@ int main(int argc, char *argv[])
                 check(fit, QStringLiteral("every pane fits the window"));
                 if (settings.appearance().paneCards)
                     check(gaps.size() == 1, QStringLiteral("pane cards: one gap size across and down (%1)").arg(gaps.size()));
+            }
+            // A quiet focus: the focused pane's edge brighter than the
+            // others', not the accent; its background the scheme's.
+            if (settings.appearance().quietFocus) {
+                TerminalWidget *active = tab->activePane();
+                const QColor bg = active ? active->themeBackground() : QColor();
+                const QColor fg = tab->foregroundColour();
+                const QColor focused = TerminalWidget::frameEdgeColour(bg, fg, true, false);
+                const QColor other = TerminalWidget::frameEdgeColour(bg, fg, false, false);
+                check(focused != cardstyle::accent() && focused.lightnessF() != other.lightnessF(),
+                      QStringLiteral("quiet focus: a brighter edge, not the accent"));
+                check(TerminalWidget::frameEdgeColour(bg, fg, true, true) != cardstyle::accent(),
+                      QStringLiteral("quiet focus: a float's edge too"));
+                auto *d = active ? active->findChild<Konsole::TerminalDisplay *>() : nullptr;
+                check(d && d->colorTable()[1].color == bg, QStringLiteral("quiet focus: the background left alone"));
             }
             const int narrow = corner->width();
             c.session->toggleZoom(corner);

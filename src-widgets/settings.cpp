@@ -29,6 +29,7 @@ constexpr auto kCursorShape    = "appearance/cursorShape";
 constexpr auto kTerminalMargin = "appearance/terminalMargin";
 constexpr auto kBidi           = "appearance/bidi";
 constexpr auto kPaneCards      = "appearance/paneCards";
+constexpr auto kQuietFocus      = "appearance/quietFocus";
 constexpr auto kScrollback  = "scrolling/scrollback";
 constexpr auto kScrollbarPos   = "scrolling/scrollbarPosition";
 constexpr auto kFlowCtrlWarn   = "scrolling/flowControlWarning";
@@ -113,6 +114,8 @@ void Settings::load()
         m_settings.value(kBidi, m_appearance.bidi).toBool();
     m_appearance.paneCards =
         m_settings.value(kPaneCards, m_appearance.paneCards).toBool();
+    m_appearance.quietFocus =
+        m_settings.value(kQuietFocus, m_appearance.quietFocus).toBool();
     m_appearance.opacity =
         m_settings.value(kOpacity, m_appearance.opacity).toDouble();
 
@@ -326,6 +329,15 @@ void Settings::setPaneCards(bool v)
     if (m_appearance.paneCards == v) return;
     m_appearance.paneCards = v;
     m_settings.setValue(kPaneCards, v);
+    m_settings.sync();
+    emit appearanceChanged();
+}
+
+void Settings::setQuietFocus(bool v)
+{
+    if (m_appearance.quietFocus == v) return;
+    m_appearance.quietFocus = v;
+    m_settings.setValue(kQuietFocus, v);
     m_settings.sync();
     emit appearanceChanged();
 }

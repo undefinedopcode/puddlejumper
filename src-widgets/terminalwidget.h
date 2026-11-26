@@ -141,6 +141,18 @@ public:
     /* The pixels a framed pane's frame takes, across and down: a card's
      * (tiled) or the plain border's. */
     static QSize frameChrome(bool tiled = true);
+    /*
+     * Quiet focus (Settings: appearance/quietFocus): the focused pane's
+     * frame (a card's, a float's, the plain border) a brighter edge like
+     * the others', not the accent. frameEdgeColour() is a frame's edge.
+     */
+    static void setQuietFocus(bool on);
+    static bool quietFocus();
+    static QColor frameEdgeColour(const QColor &bg, const QColor &fg, bool active, bool floating);
+    /* The colour scheme's background. */
+    QColor themeBackground() const;
+    /* The colour of a card's title strip as it's drawn now. */
+    QColor cardStripColour() const;
     /* A card's title strip: its height, and where it is in the pane. */
     static int cardTitleHeight();
     bool isCardShown() const { return isCard(); }

@@ -148,6 +148,7 @@ private:
     QCheckBox *m_lineCharsBox = nullptr;
     QCheckBox *m_bidiBox = nullptr;
     QCheckBox *m_paneCardsBox = nullptr;
+    QCheckBox *m_quietFocusBox = nullptr;
 
     // Terminal.
     QComboBox *m_cursorShapeBox = nullptr;
