@@ -135,8 +135,10 @@ public:
     /* Send the scripts file in the settings (rexScriptsFile), if any, or
      * remove scripts sent before; done on attaching, and when the setting
      * changes. A file that can't be read, or Lua the server refuses, is
-     * actionFailed(<file name>, …). */
-    void sendScripts();
+     * actionFailed(<file name>, …); a server without client scripts is only
+     * logged. `done`, if given, hears how it went: ok, or why not (that
+     * server included). */
+    void sendScripts(std::function<void(bool ok, const QString &message)> done = {});
     /* Send a key to the server (client.key) for a pane's block: one bound
      * to client.key.forward, after the keys of its sequence before it
      * (prefix). The server's handler for it runs, or the server types it;

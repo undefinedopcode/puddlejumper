@@ -735,6 +735,15 @@ void MainWindow::buildMenus()
     connect(paletteAct, &QAction::triggered, this, &MainWindow::showCommandPalette);
     view->addSeparator();
 
+#ifdef PUDDLEJUMPER_REX
+    // The scripts file (Settings > Terminal > Rex) again, after editing it:
+    // in the command palette (and bindable from init.lua), not a menu.
+    auto *resendScripts = new QAction(tr("Resend Rex Scripts"), this);
+    tagRexAction(resendScripts, "client.scripts.resend", "Rex");
+    addAction(resendScripts);
+    connect(resendScripts, &QAction::triggered, this, &MainWindow::resendRexScripts);
+#endif
+
     auto *zoomIn = view->addAction(tr("Zoom &In"));
     tagRexAction(zoomIn, "client.font.increase", "View");
     zoomIn->setShortcut(QKeySequence(QStringLiteral("Ctrl+=")));

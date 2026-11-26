@@ -35,6 +35,10 @@
 #include "rexkeymap.h"
 #include "rexprompt.h"
 #include "rexsession.h"
+
+#include <QFileInfo>
+
+#include <memory>
 #endif
 
 #include <QAction>
@@ -167,11 +171,52 @@ QJsonObject MainWindow::rexKeymapRequest() const
                                                {QStringLiteral("bindings"), bindings}}}}};
 }
 
+void MainWindow::resendRexScripts()
+{
+    const QString file = m_settings.rexScriptsFile();
+    if (file.isEmpty()) {
+        statusBar()->showMessage(tr("No Rex scripts file is set (Settings › Terminal › Rex)"), 6000);
+        return;
+    }
+    if (m_rexSessions.isEmpty()) {
+        statusBar()->showMessage(tr("No Rex session is open to send %1 to").arg(QFileInfo(file).fileName()), 6000);
+        return;
+    }
+    // What each session's server says, then one message for them all.
+    struct Tally
+    {
+        int pending = 0, sent = 0;
+        QStringList problems;
+    };
+    auto tally = std::make_shared<Tally>();
+    tally->pending = int(m_rexSessions.size());
+    const QString name = QFileInfo(file).fileName();
+    QPointer<MainWindow> self(this);
+    statusBar()->showMessage(tr("Sending %1…").arg(name));
+    for (RexSession *s : std::as_const(m_rexSessions)) {
+        s->sendScripts([self, tally, name](bool ok, const QString &message) {
+            if (ok)
+                ++tally->sent;
+            else
+                tally->problems << message;
+            if (--tally->pending > 0 || !self)
+                return;
+            if (tally->problems.isEmpty())
+                self->statusBar()->showMessage(tr("Sent %1 to %n Rex session(s)", nullptr, tally->sent).arg(name), 5000);
+            else
+                self->statusBar()->showMessage(
+                    tr("%1 not sent: %2").arg(name, tally->problems.first())
+                        + (tally->sent ? tr(" (sent to %n other(s))", nullptr, tally->sent) : QString()),
+                    12000);
+        });
+    }
+}
+
 void MainWindow::wireRexActions(RexSession *session)
 {
     session->setKeymapRequest([this]() { return rexKeymapRequest(); });
     // The scripts file (Settings > Terminal > Rex), sent again when it changes.
-    connect(&m_settings, &Settings::rexChanged, session, &RexSession::sendScripts);
+    connect(&m_settings, &Settings::rexChanged, session, [session]() { session->sendScripts(); });
     connect(session, &RexSession::keymapChanged, this, [this, session]() {
         const QStringList d = session->keymap().diagnostics();
         if (!d.isEmpty()) {

@@ -848,13 +848,20 @@ void RexSession::setScripts(const QJsonArray &scripts,
                        });
 }
 
-void RexSession::sendScripts()
+void RexSession::sendScripts(std::function<void(bool ok, const QString &message)> done)
 {
-    if (m_finished || !m_attached)
+    const auto report = [done](bool ok, const QString &message) {
+        if (done)
+            done(ok, message);
+    };
+    if (m_finished || !m_attached) {
+        report(false, tr("not connected yet"));
         return;
+    }
     const QString path = m_settings.rexScriptsFile();
     if (path.isEmpty() && !m_scriptsSent) {
         fetchKeymap();
+        report(true, {});
         return;
     }
     QJsonArray scripts;
@@ -864,20 +871,27 @@ void RexSession::sendScripts()
         if (!f.open(QIODevice::ReadOnly)) {
             emit actionFailed(name, f.errorString());
             fetchKeymap();
+            report(false, f.errorString());
             return;
         }
         scripts << QJsonObject{{QStringLiteral("name"), name},
                                {QStringLiteral("source"), QString::fromUtf8(f.readAll())}};
     }
-    setScripts(scripts, [this, name, sent = !scripts.isEmpty()](const QJsonObject &, const QJsonObject &error) {
+    const QString server = m_server.host();
+    setScripts(scripts, [this, name, server, report, sent = !scripts.isEmpty()](const QJsonObject &,
+                                                                                const QJsonObject &error) {
         if (error.isEmpty()) {
             m_scriptsSent = sent;
             qCInfo(lcRex) << (sent ? "scripts sent:" : "scripts removed") << name;
+            report(true, {});
         } else if (str(error, "code") == QLatin1String("method_not_found")) {
+            // An older server: quiet on attaching, said when asked.
             qCInfo(lcRex) << "the server takes no client scripts";
+            report(false, tr("%1 doesn't take client scripts (no client.set_script)").arg(server));
         } else {
             // The scripts before (if any) stay in use.
             emit actionFailed(name, str(error, "message"));
+            report(false, str(error, "message"));
         }
     });
 }

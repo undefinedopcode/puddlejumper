@@ -238,6 +238,10 @@ private:
 #endif
     /* Every action by name; a Rex pane's server actions too. */
     void showCommandPalette();
+#ifdef PUDDLEJUMPER_REX
+    /* Send the scripts file to every Rex session again (sendScripts). */
+    void resendRexScripts();
+#endif
     /* The window's actions with Rex names (menus' included). */
     QList<QAction *> namedActions() const;
 

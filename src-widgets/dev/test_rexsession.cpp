@@ -480,20 +480,35 @@ void keymapTests(Server &server, Client &c, Settings &settings)
             const QString file = dir.filePath(QStringLiteral("pj-keys.lua"));
             const auto writeLua = [&](const QByteArray &lua) {
                 QFile f(file);
-                f.open(QIODevice::WriteOnly | QIODevice::Truncate);
-                f.write(lua);
+                check(f.open(QIODevice::WriteOnly | QIODevice::Truncate) && f.write(lua) == lua.size(),
+                      QStringLiteral("write ") + file);
             };
             writeLua("rex.bind('ctrl+shift+k', function() return true end)\n");
             settings.setRexScriptsFile(file);
-            s->sendScripts();
+            int outcomes = 0;
+            bool lastOk = false;
+            QString lastMessage;
+            const auto outcome = [&](bool ok, const QString &message) {
+                ++outcomes;
+                lastOk = ok;
+                lastMessage = message;
+            };
+            s->sendScripts(outcome);
             check(waitFor([&] { return s->keymap().lookup({}, {{"ctrl+shift+k"}}, all, &b) == RexKeymap::Result::Run
                                        && b->action == QLatin1String("client.key.forward"); }),
                   QStringLiteral("the settings' scripts file sent"));
+            check(waitFor([&] { return outcomes == 1; }) && lastOk, QStringLiteral("sendScripts: ok"));
             writeLua("this is not lua");
-            s->sendScripts();
+            s->sendScripts(outcome);
             check(waitFor([&] { return failed.contains(QStringLiteral("pj-keys.lua")); })
                       && s->keymap().lookup({}, {{"ctrl+shift+k"}}, all) == RexKeymap::Result::Run,
                   QStringLiteral("a broken file is reported, the scripts before kept"));
+            check(waitFor([&] { return outcomes == 2; }) && !lastOk && lastMessage.contains(QLatin1String("pj-keys.lua")),
+                  QStringLiteral("sendScripts: the server's reason: ") + lastMessage);
+            // An init.lua action isn't a client script, as in Rex.
+            writeLua("rex.action{name = 'x', title = 'X', run = function() end}");
+            s->sendScripts(outcome);
+            check(waitFor([&] { return outcomes == 3; }) && !lastOk, QStringLiteral("rex.action refused: ") + lastMessage);
             settings.setRexScriptsFile(QString());
             s->sendScripts();
             check(waitFor([&] { return s->keymap().lookup({}, {{"ctrl+shift+k"}}, all) == RexKeymap::Result::Unbound; }),
