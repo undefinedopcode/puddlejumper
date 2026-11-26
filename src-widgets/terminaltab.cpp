@@ -376,6 +376,23 @@ private:
 
 } // namespace
 
+TerminalTab::~TerminalTab()
+{
+    // The panes are deleted after this, by QWidget's destructor, once this
+    // class's members are gone: nothing of theirs may reach back here then
+    // (their destroyed() went to a slot reading m_active, their events to
+    // eventFilter(); a use after free that corrupted the heap, and crashed
+    // later, closing a workspace of Rex tabs say).
+    QList<TerminalWidget *> panes = findChildren<TerminalWidget *>();
+    for (const QPointer<TerminalWidget> &p : std::as_const(m_parked))
+        if (p && !panes.contains(p.data()))
+            panes << p.data();
+    for (TerminalWidget *pane : std::as_const(panes)) {
+        pane->removeEventFilter(this);
+        disconnect(pane, nullptr, this, nullptr);
+    }
+}
+
 TerminalTab::TerminalTab(TerminalWidget *firstPane, QWidget *parent)
     : Tab(parent)
 {

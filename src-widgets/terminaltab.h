@@ -68,6 +68,7 @@ class TerminalTab : public Tab
 
 public:
     explicit TerminalTab(TerminalWidget *firstPane, QWidget *parent = nullptr);
+    ~TerminalTab() override;
 
     TerminalWidget *activePane() const { return m_active; }
     /* In layout order: left to right, top to bottom. */
