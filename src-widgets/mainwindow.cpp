@@ -32,6 +32,7 @@
 #include "wsl.h"
 #ifdef PUDDLEJUMPER_REX
 #include "rexsession.h"
+#include "rexsocket.h"
 #endif
 
 #include <QAction>
@@ -1845,7 +1846,7 @@ void MainWindow::rebuildServersMenu()
                 return;
             if (QMessageBox::question(this, tr("End Rex Session?"),
                                       tr("End Rex session “%1”? Its programs are stopped on %2.")
-                                          .arg(session->label(), session->server().authority()))
+                                          .arg(session->label(), rexaddress::displayName(session->server())))
                     == QMessageBox::Yes
                 && session)
                 session->destroySession();
@@ -1867,7 +1868,10 @@ void MainWindow::openSavedServer(const SavedServer &s)
     switch (s.kind) {
     case SavedServer::Rex:
 #ifdef PUDDLEJUMPER_REX
-        chooseRexSession(QUrl(text));
+        if (const QUrl server = rexaddress::parse(s.address); server.isValid())
+            chooseRexSession(server);
+        else
+            statusBar()->showMessage(tr("“%1” is not a Rex server address").arg(s.address), 4000);
 #endif
         break;
     case SavedServer::Tmux:
@@ -2068,14 +2072,13 @@ void MainWindow::newRexTab()
     const QString last = settings.value(QStringLiteral("rex/lastServer"),
                                         QStringLiteral("http://127.0.0.1:51433")).toString();
     bool ok = false;
-    QString text = QInputDialog::getText(this, tr("New Rex Tab"), tr("Rex server (http://host:port):"),
+    QString text = QInputDialog::getText(this, tr("New Rex Tab"),
+                                         tr("Rex server (http://host:port, or unix: for this computer's):"),
                                          QLineEdit::Normal, last, &ok).trimmed();
     if (!ok || text.isEmpty())
         return;
-    if (!text.contains(QLatin1String("://")))
-        text.prepend(QLatin1String("http://"));
-    const QUrl server(text);
-    if (!server.isValid() || server.host().isEmpty()) {
+    const QUrl server = rexaddress::parse(text);
+    if (!server.isValid()) {
         QMessageBox::warning(this, tr("Rex"), tr("“%1” is not a server address.").arg(text));
         return;
     }
@@ -2085,7 +2088,7 @@ void MainWindow::newRexTab()
 
 void MainWindow::chooseRexSession(const QUrl &server)
 {
-    statusBar()->showMessage(tr("Connecting to %1…").arg(server.authority()));
+    statusBar()->showMessage(tr("Connecting to %1…").arg(rexaddress::displayName(server)));
     QPointer<MainWindow> self(this);
     RexSession::listSessions(server, this,
                              [self, server](const QList<QPair<QString, QString>> &sessions, const QString &error) {
@@ -2094,7 +2097,7 @@ void MainWindow::chooseRexSession(const QUrl &server)
         self->statusBar()->clearMessage();
         if (!error.isEmpty()) {
             QMessageBox::warning(self, tr("Rex"),
-                                 tr("Could not connect to %1.").arg(server.authority())
+                                 tr("Could not connect to %1.").arg(rexaddress::displayName(server))
                                      + QStringLiteral("\n\n") + error);
             return;
         }
@@ -2104,7 +2107,7 @@ void MainWindow::chooseRexSession(const QUrl &server)
         bool chosen = false;
         const QString named = self->m_servers.rexServer(server.toString()).name;
         const QString item = QInputDialog::getItem(self, tr("New Rex Tab"),
-                                                   tr("Session on %1:").arg(named.isEmpty() ? server.authority()
+                                                   tr("Session on %1:").arg(named.isEmpty() ? rexaddress::displayName(server)
                                                                                             : named),
                                                    items, sessions.isEmpty() ? 0 : 1, false, &chosen);
         if (!chosen)
@@ -2161,7 +2164,7 @@ void MainWindow::openRex(const QUrl &server, const QString &sessionId, const QSt
                 return;
             }
             QMessageBox::warning(this, tr("Rex"),
-                                 tr("Could not open a Rex session on %1.").arg(session->server().authority())
+                                 tr("Could not open a Rex session on %1.").arg(rexaddress::displayName(session->server()))
                                      + (reason.isEmpty() ? QString() : QStringLiteral("\n\n") + reason));
             return;
         }
@@ -2187,7 +2190,7 @@ bool MainWindow::confirmRexClose(RexSession *session, TerminalTab *tab, bool pan
                     QMessageBox::NoButton, this);
     box.setInformativeText(tr("Detach to keep the session running on %1, so you can attach to it "
                               "again from here or any Rex client.")
-                               .arg(session->server().authority()));
+                               .arg(rexaddress::displayName(session->server())));
     QPushButton *detach = box.addButton(tr("&Detach"), QMessageBox::AcceptRole);
     QPushButton *end = box.addButton(tr("&End Session"), QMessageBox::DestructiveRole);
     box.addButton(QMessageBox::Cancel);
@@ -3681,7 +3684,7 @@ bool MainWindow::restoreSession()
             const QJsonObject session = t.toObject();
             const QUrl server(session.value(QStringLiteral("server")).toString());
             const QString id = session.value(QStringLiteral("session")).toString();
-            if (server.isValid() && !id.isEmpty())
+            if (rexaddress::isValid(server) && !id.isEmpty())
                 openRex(server, id, m_workspaces.at(i).id, true);
         }
 #endif

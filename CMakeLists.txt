@@ -167,6 +167,7 @@ if(TARGET Qt6::WebSockets)
         src-widgets/rexsession.cpp src-widgets/rexsession.h
         src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
         src-widgets/rexclient.cpp src-widgets/rexclient.h
+        src-widgets/rexsocket.cpp src-widgets/rexsocket.h
         src-widgets/rexterminalstream.cpp src-widgets/rexterminalstream.h
         src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
         src-widgets/ghosttyreplay.cpp src-widgets/ghosttyreplay.h)
@@ -396,6 +397,7 @@ if(TARGET Qt6::WebSockets)
     qt_add_executable(test-rexclient
         src-widgets/dev/test_rexclient.cpp
         src-widgets/rexclient.cpp src-widgets/rexclient.h
+        src-widgets/rexsocket.cpp src-widgets/rexsocket.h
         src-widgets/rexterminalstream.cpp src-widgets/rexterminalstream.h
         src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
         src-widgets/ghosttyreplay.cpp src-widgets/ghosttyreplay.h
@@ -410,6 +412,7 @@ if(TARGET Qt6::WebSockets)
         src-widgets/rexsession.cpp src-widgets/rexsession.h
         src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
         src-widgets/rexclient.cpp src-widgets/rexclient.h
+        src-widgets/rexsocket.cpp src-widgets/rexsocket.h
         src-widgets/rexterminalstream.cpp src-widgets/rexterminalstream.h
         src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
         src-widgets/ghosttyreplay.cpp src-widgets/ghosttyreplay.h

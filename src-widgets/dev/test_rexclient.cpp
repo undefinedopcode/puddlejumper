@@ -20,6 +20,7 @@
 #include "ghosttyreplay.h"
 #include "qtermprobe.h"
 #include "rexclient.h"
+#include "rexsocket.h"
 
 #include <QApplication>
 #include <QElapsedTimer>
@@ -173,7 +174,7 @@ int main(int argc, char *argv[])
     }
 
     RexControl control;
-    control.open(QUrl(server));
+    control.open(rexaddress::parse(server));  // http://host:port or unix:///path
     if (!check(waitFor([&] { return control.isReady() || !control.lastError().isEmpty(); }) && control.isReady(),
                QStringLiteral("control connection: ") + control.lastError()))
         return 1;
@@ -192,8 +193,10 @@ int main(int argc, char *argv[])
     if (!check(!sid.isEmpty(), QStringLiteral("a session")))
         return 1;
     const Call attached = call(control, QStringLiteral("session.attach"), QJsonObject{{QStringLiteral("session_id"), sid}});
+    // The view's first window's focused block (Rex has no focused_window,
+    // which older atlantis sent).
     const QString bid = attached.payload.value(QLatin1String("view")).toObject()
-                            .value(QLatin1String("focused_window")).toObject()
+                            .value(QLatin1String("windows")).toArray().first().toObject()
                             .value(QLatin1String("focused_block_id")).toString();
     check(!bid.isEmpty(), QStringLiteral("a block"));
     const QJsonObject target{{QStringLiteral("session_id"), sid}, {QStringLiteral("block_id"), bid}};

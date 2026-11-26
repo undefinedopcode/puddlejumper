@@ -5,15 +5,13 @@
  */
 
 #include "rexclient.h"
+#include "rexsocket.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QJsonDocument>
-#include <QNetworkRequest>
 #include <QSysInfo>
 #include <QTimer>
-#include <QWebSocket>
-#include <QWebSocketHandshakeOptions>
 #include <QtEndian>
 
 namespace {
@@ -26,12 +24,6 @@ QJsonObject errorObject(const QString &code, const QString &message, int status 
     return QJsonObject{{QStringLiteral("code"), code},
                        {QStringLiteral("message"), message},
                        {QStringLiteral("status"), status}};
-}
-
-QWebSocket *newSocket(QObject *parent)
-{
-    // An empty origin: no Origin header.
-    return new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, parent);
 }
 
 } // namespace
@@ -49,14 +41,13 @@ RexControl::~RexControl()
         m_socket->abort();
 }
 
-QUrl RexControl::socketUrl(const QString &path) const
+RexSocket *RexControl::newSocket(const QString &path, const QString &subprotocol, qint64 maxMessage,
+                                 QObject *parent) const
 {
-    QUrl url = m_server;
-    url.setScheme(m_server.scheme() == QLatin1String("https") ? QStringLiteral("wss") : QStringLiteral("ws"));
-    url.setPath(path);
-    url.setQuery(QString());
-    url.setFragment(QString());
-    return url;
+    auto *socket = new RexSocket(parent);
+    socket->setMaxAllowedIncomingMessageSize(maxMessage);
+    socket->open(m_server, path, subprotocol);
+    return socket;
 }
 
 void RexControl::open(const QUrl &server)
@@ -64,9 +55,16 @@ void RexControl::open(const QUrl &server)
     close();
     m_server = server;
     m_error.clear();
-    m_socket = newSocket(this);
-    m_socket->setMaxAllowedIncomingMessageSize(16 << 20);
-    connect(m_socket, &QWebSocket::connected, this, [this]() {
+    // The timer before the socket: a Unix socket can connect at once.
+    m_helloTimer = new QTimer(this);
+    m_helloTimer->setSingleShot(true);
+    m_helloTimer->setInterval(8000);
+    connect(m_helloTimer, &QTimer::timeout, this, [this]() {
+        if (!m_ready)
+            fail(QStringLiteral("the server did not answer"));
+    });
+    m_socket = newSocket(QStringLiteral("/api/control"), kControlProtocol, 16 << 20, this);
+    connect(m_socket, &RexSocket::connected, this, [this]() {
         QJsonObject client{{QStringLiteral("kind"), QStringLiteral("app")},
                            {QStringLiteral("name"), QStringLiteral("PuddleJumper")},
                            {QStringLiteral("version"), QCoreApplication::applicationVersion()},
@@ -80,38 +78,19 @@ void RexControl::open(const QUrl &server)
         send(hello);
         m_helloTimer->start();
     });
-    connect(m_socket, &QWebSocket::textMessageReceived, this, &RexControl::onText);
-    // A connection that never opens reports an error, one that closes a
-    // disconnect; fail() takes the first.
-    auto gone = [this]() {
-        QString reason = m_socket ? m_socket->closeReason() : QString();
-        if (reason.isEmpty() && m_socket && m_socket->error() != QAbstractSocket::UnknownSocketError)
-            reason = m_socket->errorString();
-        fail(reason);
-    };
-    connect(m_socket, &QWebSocket::disconnected, this, gone);
-    connect(m_socket, &QWebSocket::errorOccurred, this, gone);
-
-    // The server gives up on a hello after 5 s; this gives up on a welcome
-    // after 8 (as rexia).
-    m_helloTimer = new QTimer(this);
-    m_helloTimer->setSingleShot(true);
-    m_helloTimer->setInterval(8000);
-    connect(m_helloTimer, &QTimer::timeout, this, [this]() {
-        if (!m_ready)
-            fail(QStringLiteral("the server did not answer"));
+    connect(m_socket, &RexSocket::textMessageReceived, this, &RexControl::onText);
+    connect(m_socket, &RexSocket::disconnected, this, [this]() {
+        fail(m_socket ? m_socket->failureReason() : QString());
     });
-
-    QWebSocketHandshakeOptions options;
-    options.setSubprotocols({kControlProtocol});
-    m_socket->open(QNetworkRequest(socketUrl(QStringLiteral("/api/control"))), options);
+    // (The server gives up on a hello after 5 s; the timer above on a
+    // welcome after 8, as rexia.)
 }
 
 void RexControl::close()
 {
     if (!m_socket)
         return;
-    QWebSocket *s = m_socket;
+    RexSocket *s = m_socket;
     m_socket = nullptr;
     s->disconnect(this);
     s->close();
@@ -238,7 +217,7 @@ void RexTerminalConnection::close()
 {
     m_state = State::Closed;
     if (m_socket) {
-        QWebSocket *s = m_socket;
+        RexSocket *s = m_socket;
         m_socket = nullptr;
         s->disconnect(this);
         s->close();
@@ -303,17 +282,12 @@ void RexTerminalConnection::connectSocket(const QByteArray &hello)
         m_socket->deleteLater();
     }
     m_state = m_resuming ? State::Resuming : State::Handshake;
-    m_socket = newSocket(this);
-    m_socket->setMaxAllowedIncomingMessageSize(64 << 20);
-    connect(m_socket, &QWebSocket::connected, this, [this, hello]() {
+    m_socket = m_control->newSocket(QStringLiteral("/api/data"), kTerminalProtocol, 64 << 20, this);
+    connect(m_socket, &RexSocket::connected, this, [this, hello]() {
         m_socket->sendBinaryMessage(hello);
     });
-    connect(m_socket, &QWebSocket::binaryMessageReceived, this, &RexTerminalConnection::onBinary);
-    connect(m_socket, &QWebSocket::disconnected, this, &RexTerminalConnection::onDisconnected);
-    connect(m_socket, &QWebSocket::errorOccurred, this, &RexTerminalConnection::onDisconnected);
-    QWebSocketHandshakeOptions options;
-    options.setSubprotocols({kTerminalProtocol});
-    m_socket->open(QNetworkRequest(m_control->socketUrl(QStringLiteral("/api/data"))), options);
+    connect(m_socket, &RexSocket::binaryMessageReceived, this, &RexTerminalConnection::onBinary);
+    connect(m_socket, &RexSocket::disconnected, this, &RexTerminalConnection::onDisconnected);
 }
 
 void RexTerminalConnection::onBinary(const QByteArray &data)
@@ -388,8 +362,8 @@ void RexTerminalConnection::onBinary(const QByteArray &data)
 
 void RexTerminalConnection::onDisconnected()
 {
-    // Once per socket, whichever of error and disconnect comes first.
-    QWebSocket *gone = qobject_cast<QWebSocket *>(sender());
+    // Once per socket.
+    RexSocket *gone = qobject_cast<RexSocket *>(sender());
     if (!gone || gone != m_socket)
         return;
     m_socket->disconnect(this);

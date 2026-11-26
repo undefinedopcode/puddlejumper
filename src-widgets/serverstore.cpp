@@ -21,6 +21,8 @@ constexpr auto kKey = "servers/list";
 QString normalRex(const QString &address)
 {
     QString a = address.trimmed();
+    if (a.startsWith(QLatin1String("unix:")) || a.startsWith(QLatin1Char('/')))
+        return a;  // a socket's path is the server
     if (!a.contains(QLatin1String("://")))
         a.prepend(QLatin1String("http://"));
     const QUrl url(a);

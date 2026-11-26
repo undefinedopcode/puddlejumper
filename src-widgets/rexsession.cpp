@@ -12,6 +12,7 @@
 
 #include "ghosttyreplay.h"
 #include "rexclient.h"
+#include "rexsocket.h"
 #include "settings.h"
 
 #include "TerminalDisplay.h"
@@ -1004,7 +1005,7 @@ void RexSession::sendScripts(std::function<void(bool ok, const QString &message)
         scripts << QJsonObject{{QStringLiteral("name"), name},
                                {QStringLiteral("source"), QString::fromUtf8(f.readAll())}};
     }
-    const QString server = m_server.host();
+    const QString server = rexaddress::displayName(m_server);
     setScripts(scripts, [this, name, server, report, sent = !scripts.isEmpty()](const QJsonObject &,
                                                                                 const QJsonObject &error) {
         if (error.isEmpty()) {
@@ -1538,21 +1539,24 @@ void RexSession::newWindow()
 void RexSession::splitPane(TerminalWidget *pane, Qt::Orientation orientation)
 {
     const QString id = blockId(pane);
-    QString windowId;
-    for (const Window &w : std::as_const(m_windows))
-        if (w.tab && w.tab->contains(pane))
-            windowId = w.id;
-    if (id.isEmpty() || windowId.isEmpty())
+    if (id.isEmpty())
         return;
+    // Rex's schema: anchor_id (not the older anchor_block_id), side
+    // required, and no window_id beside an anchor. Its server refuses
+    // anything else; atlantis was lenient.
     m_control->request(QStringLiteral("session.new_split"),
                        QJsonObject{{QStringLiteral("session_id"), m_sessionId},
-                                   {QStringLiteral("window_id"), windowId},
-                                   {QStringLiteral("anchor_block_id"), id},
+                                   {QStringLiteral("anchor_id"), id},
                                    {QStringLiteral("direction"), orientation == Qt::Horizontal
                                                                      ? QStringLiteral("horizontal")
                                                                      : QStringLiteral("vertical")},
+                                   {QStringLiteral("side"), QStringLiteral("after")},
                                    {QStringLiteral("layout"), shellLayout()},
-                                   {QStringLiteral("focus"), true}});
+                                   {QStringLiteral("focus"), true}},
+                       [this](const QJsonObject &, const QJsonObject &error) {
+                           if (!error.isEmpty())
+                               qCWarning(lcRex) << "split refused:" << error;
+                       });
 }
 
 void RexSession::closePane(TerminalWidget *pane)

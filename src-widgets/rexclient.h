@@ -19,7 +19,7 @@
 #include <memory>
 
 class QTimer;
-class QWebSocket;
+class RexSocket;
 
 /*
  * A Rex server's control connection: WebSocket /api/control, subprotocol
@@ -49,7 +49,8 @@ public:
     explicit RexControl(QObject *parent = nullptr);
     ~RexControl() override;
 
-    // http(s)://host:port, the server's address; the WebSocket URLs follow.
+    // The server's address: http(s)://host:port, or unix:///path/to/socket
+    // (rexaddress); the WebSockets follow.
     void open(const QUrl &server);
     void close();
 
@@ -61,8 +62,8 @@ public:
     // Requests sent before ready() wait for it.
     void request(const QString &method, const QJsonObject &payload = {}, Reply reply = {});
 
-    // ws(s)://host:port + path.
-    QUrl socketUrl(const QString &path) const;
+    // A WebSocket to `path` on the server (TCP or its Unix socket).
+    RexSocket *newSocket(const QString &path, const QString &subprotocol, qint64 maxMessage, QObject *parent) const;
 
     static constexpr int kApiRevision = 21;
     static constexpr int kApiMinRevision = 8;
@@ -87,7 +88,7 @@ private:
         Reply reply;
     };
 
-    QWebSocket *m_socket = nullptr;
+    RexSocket *m_socket = nullptr;
     QTimer *m_helloTimer = nullptr;
     QUrl m_server;
     bool m_ready = false;
@@ -163,7 +164,7 @@ private:
 
     QPointer<RexControl> m_control;
     QString m_sessionId, m_blockId;
-    QWebSocket *m_socket = nullptr;
+    RexSocket *m_socket = nullptr;
     State m_state = State::Idle;
     bool m_resuming = false;  // the socket's hello was a resume
     std::unique_ptr<RexTerminalStream> m_stream;

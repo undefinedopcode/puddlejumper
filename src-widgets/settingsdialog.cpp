@@ -1330,7 +1330,9 @@ void SettingsDialog::updateServerFields()
     switch (kind) {
     case SavedServer::Rex:
         m_serverAddress->setPlaceholderText(QStringLiteral("http://127.0.0.1:51433"));
-        m_serverHint->setText(tr("A Rex server. Connecting lists its sessions, or starts a new one."));
+        m_serverHint->setText(tr("A Rex server: http://host:port, or unix: for this computer's own (its "
+                                 "socket), or unix:///path/to/server.sock. Connecting lists its sessions, "
+                                 "or starts a new one."));
         break;
     case SavedServer::Tmux:
         m_serverAddress->setPlaceholderText(tr("user@host"));

@@ -33,6 +33,7 @@
 
 #include "qtermprobe.h"
 #include "rexclient.h"
+#include "rexsocket.h"
 #include "rexsession.h"
 #include "settings.h"
 #include "terminaltab.h"
@@ -590,7 +591,7 @@ int main(int argc, char *argv[])
         QTextStream(stdout) << "usage: test-rexsession http://host:port (or PJ_REX_SERVER); skipped\n";
         return 0;
     }
-    const QUrl url(address);
+    const QUrl url = rexaddress::parse(address);  // http://host:port or unix:///path
     Settings settings;
     // The whole run again with pane cards (their chrome is a different size).
     settings.setPaneCards(qEnvironmentVariableIntValue("PUDDLEJUMPER_TEST_PANE_CARDS") == 1);
@@ -640,7 +641,8 @@ int main(int argc, char *argv[])
     TerminalWidget *first = c.tabs.first()->activePane();
     waitFor([&] { return paneLines(first).join(QLatin1Char('\n')).contains(QLatin1Char('$')); }, 3000);
     type(first, QStringLiteral("i=1; while [ $i -le 40 ]; do echo \"one $i\"; i=$((i+1)); done; echo DONE_ONE\r"));
-    check(waitFor([&] { return shows(first, QStringLiteral("DONE_ONE")); }), QStringLiteral("typed and echoed"));
+    if (!check(waitFor([&] { return shows(first, QStringLiteral("DONE_ONE")); }), QStringLiteral("typed and echoed")))
+        QTextStream(stderr) << "  the pane shows:\n    " << paneLines(first).mid(0, 12).join(QStringLiteral("\n    ")) << "\n";
     agrees(server, c, QStringLiteral("first window"));
 
     // A font change: the cells change size, so the grid does, and the
@@ -667,7 +669,14 @@ int main(int argc, char *argv[])
     c.session->newWindow();
     check(waitFor([&] { return c.tabs.size() == 2; }), QStringLiteral("a second tab"));
     TerminalTab *second = c.tabs.value(1);
-    check(second && c.names.value(second) == QLatin1String("Shell"), QStringLiteral("named as the server says"));
+    {
+        // Whatever the server called it (atlantis: "Shell"; Rex: "Window
+        // 89abcdef").
+        const QString label = server.view(sid).value(QLatin1String("windows")).toArray().last().toObject()
+                                  .value(QLatin1String("label")).toString();
+        check(second && !label.isEmpty() && waitFor([&] { return c.names.value(second) == label; }),
+              QStringLiteral("named as the server says (%1, here %2)").arg(label, second ? c.names.value(second) : QString()));
+    }
 
     // ---- Splits, both ways.
     if (second) {
@@ -711,9 +720,9 @@ int main(int argc, char *argv[])
         agrees(server, c, QStringLiteral("resized elsewhere"));
 
         server.call(QStringLiteral("session.new_split"),
-                    QJsonObject{{QStringLiteral("session_id"), sid}, {QStringLiteral("window_id"), windowId},
-                                {QStringLiteral("anchor_block_id"), left},
+                    QJsonObject{{QStringLiteral("session_id"), sid}, {QStringLiteral("anchor_id"), left},
                                 {QStringLiteral("direction"), QStringLiteral("vertical")},
+                                {QStringLiteral("side"), QStringLiteral("after")},
                                 {QStringLiteral("layout"), QJsonObject{{QStringLiteral("block"),
                                     QJsonObject{{QStringLiteral("flavor"), QStringLiteral("com.superlogical.terminal.shell")}}}}}});
         check(waitFor([&] { return second->panes().size() == 4; }), QStringLiteral("a split elsewhere is followed"));
