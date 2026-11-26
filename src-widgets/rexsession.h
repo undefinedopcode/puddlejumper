@@ -12,6 +12,7 @@
 #include "terminalwidget.h"
 
 #include <QHash>
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QObject>
 #include <QPointer>
@@ -125,6 +126,17 @@ public:
      * (or the session's focused one); actionFinished or actionFailed
      * follows. origin: "key", "palette", "menu" or "api". */
     void runAction(const QString &name, const QJsonObject &args, const TerminalWidget *pane, const QString &origin);
+    /* Give the server this client's own Lua (client.set_script: [{name,
+     * source}], empty to remove them): key handlers, bound to
+     * client.key.forward in the keymap, which is fetched again. `done` gets
+     * the reply ({bindings, diagnostics}) or an error. */
+    void setScripts(const QJsonArray &scripts,
+                    std::function<void(const QJsonObject &reply, const QJsonObject &error)> done = {});
+    /* Send a key to the server (client.key) for a pane's block: one bound
+     * to client.key.forward, after the keys of its sequence before it
+     * (prefix). The server's handler for it runs, or the server types it;
+     * a failure is actionFailed("client.key.forward", …). */
+    void forwardKey(const TerminalWidget *pane, const QJsonObject &key, const QStringList &prefix);
     /* Answer a server's call (performRequested, promptRequested): a result,
      * or an error {code, message}. */
     void replyCall(const QString &callId, const QJsonValue &result, const QJsonObject &error = {});
@@ -247,4 +259,5 @@ private:
     std::function<QJsonObject()> m_keymapRequest;
     RexKeymap m_keymap;
     bool m_keymapPending = false;
+    bool m_keymapAgain = false;  // fetch again once the pending one is in
 };

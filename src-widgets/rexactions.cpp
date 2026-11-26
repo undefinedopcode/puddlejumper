@@ -16,6 +16,9 @@
  * the terminal. Until a keymap arrives, and in other tabs, the app's
  * shortcuts work as ever.
  *
+ * A binding to client.key.forward is a key handler the client's own scripts
+ * (client.set_script) gave the server: the key goes there with client.key.
+ *
  * The server can also ask this client to run one of its actions
  * (client_perform_requested: another client's client.perform, or an action's
  * rex.perform), and an action can ask a question (client_prompt_requested,
@@ -301,7 +304,8 @@ bool MainWindow::routeRexKey(QKeyEvent *event)
 
     const RexKeymap &keymap = rex->keymap();
     const auto available = [this, &keymap](const QString &action) {
-        if (action.startsWith(QLatin1String("client.mode.")) || keymap.action(action))
+        if (action.startsWith(QLatin1String("client.mode.")) || action == QLatin1String("client.key.forward")
+            || keymap.action(action))
             return true;
         for (QAction *a : namedActions())
             if (a->property("rexAction").toString() == action)
@@ -333,6 +337,11 @@ bool MainWindow::routeRexKey(QKeyEvent *event)
             statusBar()->clearMessage();
         const QString action = binding->action;
         const QJsonObject args = binding->args;
+        if (action == QLatin1String("client.key.forward")) {
+            // The server's: its handler runs, or it types the key.
+            rex->forwardKey(pane, RexKeymap::keyEvent(event), binding->keys.mid(0, binding->keys.size() - 1));
+            return true;
+        }
         runRexAction(rex, pane, action, args, QStringLiteral("key"));
         if (!m_rexMode.isEmpty())
             statusBar()->showMessage(tr("Mode: %1 (Esc leaves it)").arg(m_rexMode));

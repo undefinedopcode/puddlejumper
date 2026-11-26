@@ -786,14 +786,21 @@ void RexSession::fetchKeymap()
 {
     if (!m_keymapRequest || m_finished)
         return;
-    if (m_keymapPending)
+    if (m_keymapPending) {
+        m_keymapAgain = true;  // it may be from before a change
         return;
+    }
     m_keymapPending = true;
     m_control->request(QStringLiteral("client.keymap"), m_keymapRequest(),
                        [this](const QJsonObject &payload, const QJsonObject &error) {
                            m_keymapPending = false;
                            if (m_finished)
                                return;
+                           if (m_keymapAgain) {
+                               m_keymapAgain = false;
+                               fetchKeymap();
+                               return;
+                           }
                            if (!error.isEmpty()) {
                                // An older server: no keymap, the app's own shortcuts stand.
                                qCInfo(lcRex) << "no keymap:" << str(error, "message");
@@ -824,6 +831,36 @@ void RexSession::runAction(const QString &name, const QJsonObject &args, const T
                            else
                                emit actionFinished(name, payload.value(QLatin1String("result")));
                        });
+}
+
+void RexSession::setScripts(const QJsonArray &scripts,
+                            std::function<void(const QJsonObject &, const QJsonObject &)> done)
+{
+    if (m_finished)
+        return;
+    m_control->request(QStringLiteral("client.set_script"), QJsonObject{{QStringLiteral("scripts"), scripts}},
+                       [this, done](const QJsonObject &payload, const QJsonObject &error) {
+                           if (error.isEmpty())
+                               fetchKeymap();  // the handlers' bindings
+                           if (done)
+                               done(payload, error);
+                       });
+}
+
+void RexSession::forwardKey(const TerminalWidget *pane, const QJsonObject &key, const QStringList &prefix)
+{
+    const QString block = pane ? blockId(pane) : QString();
+    if (block.isEmpty() || m_finished)
+        return;
+    QJsonObject p{{QStringLiteral("session_id"), m_sessionId}, {QStringLiteral("block_id"), block},
+                  {QStringLiteral("key"), key}};
+    if (!prefix.isEmpty())
+        p.insert(QStringLiteral("prefix"), QJsonArray::fromStringList(prefix));
+    m_control->request(QStringLiteral("client.key"), p, [this](const QJsonObject &, const QJsonObject &error) {
+        if (!error.isEmpty())
+            emit actionFailed(QStringLiteral("client.key.forward"),
+                              str(error, "message").isEmpty() ? str(error, "code") : str(error, "message"));
+    });
 }
 
 void RexSession::replyCall(const QString &callId, const QJsonValue &result, const QJsonObject &error)

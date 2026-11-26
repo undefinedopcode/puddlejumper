@@ -243,6 +243,111 @@ QStringList RexKeymap::spellings(int key, Qt::KeyboardModifiers modifiers)
     return out;
 }
 
+QJsonObject RexKeymap::keyEvent(const QKeyEvent *event)
+{
+    return keyEvent(event->key(), event->modifiers(), event->text(), event->isAutoRepeat());
+}
+
+QJsonObject RexKeymap::keyEvent(int key, Qt::KeyboardModifiers modifiers, const QString &text, bool repeat)
+{
+#ifdef Q_OS_MACOS
+    const bool ctrl = modifiers & Qt::MetaModifier;
+    const bool super = modifiers & Qt::ControlModifier;
+#else
+    const bool ctrl = modifiers & Qt::ControlModifier;
+    const bool super = modifiers & Qt::MetaModifier;
+#endif
+    const bool alt = modifiers & Qt::AltModifier;
+    const bool shift = (modifiers & Qt::ShiftModifier) || key == Qt::Key_Backtab;
+    const bool keypad = modifiers & Qt::KeypadModifier;
+
+    // libghostty's key name (W3C codes in snake case), and the character the
+    // key gives unshifted (US layout).
+    QString name = QStringLiteral("unidentified");
+    QChar base;
+    static const QHash<QChar, QString> symbols{
+        {QLatin1Char('`'), QStringLiteral("backquote")},     {QLatin1Char('-'), QStringLiteral("minus")},
+        {QLatin1Char('='), QStringLiteral("equal")},         {QLatin1Char('['), QStringLiteral("bracket_left")},
+        {QLatin1Char(']'), QStringLiteral("bracket_right")}, {QLatin1Char('\\'), QStringLiteral("backslash")},
+        {QLatin1Char(';'), QStringLiteral("semicolon")},     {QLatin1Char('\''), QStringLiteral("quote")},
+        {QLatin1Char(','), QStringLiteral("comma")},         {QLatin1Char('.'), QStringLiteral("period")},
+        {QLatin1Char('/'), QStringLiteral("slash")},
+    };
+    static const QHash<QChar, QString> keypadSymbols{
+        {QLatin1Char('+'), QStringLiteral("numpad_add")},      {QLatin1Char('-'), QStringLiteral("numpad_subtract")},
+        {QLatin1Char('*'), QStringLiteral("numpad_multiply")}, {QLatin1Char('/'), QStringLiteral("numpad_divide")},
+        {QLatin1Char('.'), QStringLiteral("numpad_decimal")},  {QLatin1Char('='), QStringLiteral("numpad_equal")},
+        {QLatin1Char(','), QStringLiteral("numpad_comma")},
+    };
+    switch (key) {
+    case Qt::Key_Return: name = QStringLiteral("enter"); break;
+    case Qt::Key_Enter: name = keypad ? QStringLiteral("numpad_enter") : QStringLiteral("enter"); break;
+    case Qt::Key_Escape: name = QStringLiteral("escape"); break;
+    case Qt::Key_Tab:
+    case Qt::Key_Backtab: name = QStringLiteral("tab"); break;
+    case Qt::Key_Backspace: name = QStringLiteral("backspace"); break;
+    case Qt::Key_Delete: name = QStringLiteral("delete"); break;
+    case Qt::Key_Insert: name = QStringLiteral("insert"); break;
+    case Qt::Key_Home: name = QStringLiteral("home"); break;
+    case Qt::Key_End: name = QStringLiteral("end"); break;
+    case Qt::Key_PageUp: name = QStringLiteral("page_up"); break;
+    case Qt::Key_PageDown: name = QStringLiteral("page_down"); break;
+    case Qt::Key_Left: name = QStringLiteral("arrow_left"); break;
+    case Qt::Key_Right: name = QStringLiteral("arrow_right"); break;
+    case Qt::Key_Up: name = QStringLiteral("arrow_up"); break;
+    case Qt::Key_Down: name = QStringLiteral("arrow_down"); break;
+    case Qt::Key_Space:
+        name = QStringLiteral("space");
+        base = QLatin1Char(' ');
+        break;
+    default:
+        if (key >= Qt::Key_F1 && key <= Qt::Key_F25) {
+            name = QStringLiteral("f%1").arg(key - Qt::Key_F1 + 1);
+        } else if (key > 0x20 && key < 0x7f) {
+            QChar c = QChar(key).toLower();
+            if (const QChar u = unshifted(c); !u.isNull())
+                c = u;
+            base = c;
+            if (keypad && c.isDigit())
+                name = QStringLiteral("numpad_") + c;
+            else if (keypad && keypadSymbols.contains(QChar(key)))
+                name = keypadSymbols.value(QChar(key));
+            else if (c >= QLatin1Char('a') && c <= QLatin1Char('z'))
+                name = QStringLiteral("key_") + c;
+            else if (c.isDigit())
+                name = QStringLiteral("digit_") + c;
+            else
+                name = symbols.value(c, name);
+        }
+    }
+
+    QStringList mods;
+    if (shift)
+        mods << QStringLiteral("shift");
+    if (ctrl)
+        mods << QStringLiteral("ctrl");
+    if (alt)
+        mods << QStringLiteral("alt");
+    if (super)
+        mods << QStringLiteral("super");
+    // The text the key gives, without control characters (libghostty makes
+    // ctrl+n's from the key); shift is spent on it when it changed it.
+    QString typed;
+    for (const QChar c : text)
+        if (c.unicode() >= 0x20 && c.unicode() != 0x7f)
+            typed += c;
+    const bool shiftSpent = shift && !typed.isEmpty() && !base.isNull() && typed != QString(base);
+    return QJsonObject{
+        {QStringLiteral("key"), name},
+        {QStringLiteral("mods"), mods.join(QLatin1Char('+'))},
+        {QStringLiteral("consumed_mods"), shiftSpent ? QStringLiteral("shift") : QString()},
+        {QStringLiteral("text"), typed},
+        {QStringLiteral("unshifted_codepoint"), base.isNull() ? 0 : int(base.unicode())},
+        {QStringLiteral("composing"), false},
+        {QStringLiteral("action"), repeat ? QStringLiteral("repeat") : QStringLiteral("press")},
+    };
+}
+
 QString RexKeymap::spell(QKeyCombination combination)
 {
     return spellings(combination.key(), combination.keyboardModifiers()).value(0);

@@ -34,6 +34,11 @@ class QKeyEvent;
  * The Command key is "cmd", Control "ctrl", as rexia has them, so one
  * init.lua binds the same keys for both clients. (On macOS Qt reports
  * Command as Control and Control as Meta; elsewhere Meta is the Super key.)
+ *
+ * A binding to client.key.forward is the server's: a key handler in this
+ * client's own scripts (client.set_script). The key goes to the server with
+ * client.key, described as libghostty describes a key event (keyEvent()); the
+ * server runs the handler, or, if none takes the key, types it.
  */
 class RexKeymap
 {
@@ -82,6 +87,11 @@ public:
     /* A key event's spellings; empty for a lone modifier. */
     static QStringList spellings(const QKeyEvent *event);
     static QStringList spellings(int key, Qt::KeyboardModifiers modifiers);
+    /* A key press as client.key sends it, as libghostty describes one:
+     * {key: "key_n", mods: "ctrl", text, unshifted_codepoint, consumed_mods,
+     * composing, action: "press" | "repeat"}. */
+    static QJsonObject keyEvent(const QKeyEvent *event);
+    static QJsonObject keyEvent(int key, Qt::KeyboardModifiers modifiers, const QString &text, bool repeat = false);
     /* One key combination's main spelling (for the app's own shortcuts). */
     static QString spell(QKeyCombination combination);
     /* "ctrl+shift+t", "g" → "Ctrl+Shift+T G", for showing. */

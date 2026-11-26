@@ -131,6 +131,46 @@ int main(int argc, char *argv[])
     check(km.keysFor(QStringLiteral("greet")) == QStringList({"ctrl+a", "c"}), QStringLiteral("keysFor"));
     check(km.keysFor(QStringLiteral("pane.copy")) == QStringList{"ctrl+shift+c"}, QStringLiteral("keysFor, shadowed"));
 
+    // Key events as client.key sends them (libghostty's names).
+    const auto ev = [](int key, Qt::KeyboardModifiers mods, const QString &text) {
+        return RexKeymap::keyEvent(key, mods, text);
+    };
+    const auto is = [](const QJsonObject &e, const char *key, const char *mods, int cp, const char *text) {
+        return e.value("key").toString() == QLatin1String(key) && e.value("mods").toString() == QLatin1String(mods)
+               && e.value("unshifted_codepoint").toInt() == cp && e.value("text").toString() == QString::fromUtf8(text)
+               && e.value("action").toString() == QLatin1String("press");
+    };
+    check(is(ev(Qt::Key_N, Ctrl, QStringLiteral("\x0e")), "key_n", "ctrl", 'n', ""), QStringLiteral("ctrl+n's event"));
+    check(is(ev(Qt::Key_A, Qt::ShiftModifier, QStringLiteral("A")), "key_a", "shift", 'a', "A")
+              && ev(Qt::Key_A, Qt::ShiftModifier, QStringLiteral("A")).value("consumed_mods").toString() == "shift",
+          QStringLiteral("shift+a's event"));
+    check(is(ev(Qt::Key_BraceLeft, Qt::ShiftModifier | Ctrl, QString()), "bracket_left", "shift+ctrl", '[', ""),
+          QStringLiteral("a shifted symbol's event"));
+    check(is(ev(Qt::Key_Exclam, Qt::ShiftModifier, QStringLiteral("!")), "digit_1", "shift", '1', "!"),
+          QStringLiteral("shift+1's event"));
+    check(is(ev(Qt::Key_Tab, Ctrl, QStringLiteral("\t")), "tab", "ctrl", 0, ""), QStringLiteral("ctrl+tab's event"));
+    check(is(ev(Qt::Key_Backtab, Qt::ShiftModifier, QString()), "tab", "shift", 0, ""), QStringLiteral("backtab's event"));
+    check(is(ev(Qt::Key_PageUp, Qt::NoModifier, QString()), "page_up", "", 0, ""), QStringLiteral("pageup's event"));
+    check(is(ev(Qt::Key_Left, Cmd, QString()), "arrow_left", "super", 0, ""), QStringLiteral("cmd+left's event"));
+    check(is(ev(Qt::Key_F5, Qt::NoModifier, QString()), "f5", "", 0, ""), QStringLiteral("f5's event"));
+    check(is(ev(Qt::Key_Escape, Qt::NoModifier, QStringLiteral("\x1b")), "escape", "", 0, ""), QStringLiteral("esc's event"));
+    check(is(ev(Qt::Key_5, Qt::KeypadModifier, QStringLiteral("5")), "numpad_5", "", '5', "5"), QStringLiteral("keypad 5"));
+    check(is(ev(Qt::Key_Space, Qt::NoModifier, QStringLiteral(" ")), "space", "", ' ', " "), QStringLiteral("space's event"));
+    {
+        QKeyEvent e(QEvent::KeyPress, Qt::Key_N, Ctrl, QStringLiteral("\x0e"), true);
+        check(RexKeymap::keyEvent(&e).value("action").toString() == QLatin1String("repeat"), QStringLiteral("a repeat"));
+    }
+
+    // A script's key handler: bound to client.key.forward, a sequence too.
+    RexKeymap scripted;
+    scripted.parse(QJsonDocument::fromJson(R"({"bindings": [
+        {"keys": ["ctrl+n"], "action": "client.key.forward", "source": "keys.lua:1"},
+        {"keys": ["ctrl+b", "x"], "action": "client.key.forward", "source": "keys.lua:2"}]})").object());
+    check(scripted.lookup({}, {{"ctrl+n"}}, all, &b) == RexKeymap::Result::Run && b->action == QLatin1String("client.key.forward"),
+          QStringLiteral("a forwarded key"));
+    check(scripted.lookup({}, {{"ctrl+b"}, {"x"}}, all, &b) == RexKeymap::Result::Run && b->keys.mid(0, 1) == QStringList{"ctrl+b"},
+          QStringLiteral("a forwarded sequence, and its prefix"));
+
     QTextStream(stdout) << checks << " checks, " << failures << " failed\n";
     return failures ? 1 : 0;
 }

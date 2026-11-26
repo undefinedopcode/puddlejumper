@@ -424,6 +424,58 @@ void keymapTests(Server &server, Client &c)
               QStringLiteral("the client's refusal fails the action"));
     }
 
+    // The client's own scripts: key handlers, forwarded keys.
+    if (TerminalWidget *pane = c.panes().value(0)) {
+        QJsonObject reply, err;
+        bool done = false;
+        const int before = keymaps;
+        s->setScripts(QJsonArray{QJsonObject{
+                          {QStringLiteral("name"), QStringLiteral("keys.lua")},
+                          {QStringLiteral("source"), QStringLiteral(
+                               "rex.bind('ctrl+shift+u', function(ctx, key)\n"
+                               "  rex.call('session.set_block_label', {session_id = ctx.session_id,\n"
+                               "    block_id = ctx.block_id, label = 'forwarded ' .. key.key})\n"
+                               "  return true end)\n"
+                               "rex.bind('z', function() return false end)")}}},
+                      [&](const QJsonObject &r, const QJsonObject &e) {
+                          reply = r;
+                          err = e;
+                          done = true;
+                      });
+        waitFor([&] { return done; });
+        if (err.value(QLatin1String("code")).toString() == QLatin1String("method_not_found")) {
+            QTextStream(stdout) << "keymap: the server has no client.set_script; forwarded keys skipped\n";
+        } else if (check(err.isEmpty(), QStringLiteral("client.set_script: ") + err.value(QLatin1String("message")).toString())) {
+            check(reply.value(QLatin1String("bindings")).toArray()
+                      == QJsonArray({QStringLiteral("ctrl+shift+u"), QStringLiteral("z")}),
+                  QStringLiteral("set_script's keys"));
+            check(waitFor([&] {
+                      return keymaps > before && s->keymap().lookup({}, {{"ctrl+shift+u"}}, all, &b) == RexKeymap::Result::Run
+                             && b->action == QLatin1String("client.key.forward");
+                  }),
+                  QStringLiteral("the handler's key in the keymap, forwarded"));
+            const QString bid = s->blockId(pane);
+            const auto label = [&] {
+                return server.call(QStringLiteral("session.describe_block"),
+                                   QJsonObject{{QStringLiteral("session_id"), s->sessionId()}, {QStringLiteral("block_id"), bid}})
+                    .value(QLatin1String("block")).toObject().value(QLatin1String("label")).toString();
+            };
+            s->forwardKey(pane, RexKeymap::keyEvent(Qt::Key_U, Qt::ControlModifier | Qt::ShiftModifier, QString()), {});
+            check(waitFor([&] { return label() == QLatin1String("forwarded key_u"); }),
+                  QStringLiteral("a forwarded key's handler ran, as this client"));
+            // A handler that lets the key by: the server types it.
+            type(pane, QStringLiteral("echo FWD_"));
+            s->forwardKey(pane, RexKeymap::keyEvent(Qt::Key_Z, Qt::NoModifier, QStringLiteral("z")), {});
+            type(pane, QStringLiteral("_END\r"));
+            check(waitFor([&] { return shows(pane, QStringLiteral("FWD_z_END")) || shows(pane, QStringLiteral("FWD__END")); })
+                      && !shows(pane, QStringLiteral("FWD__END")),
+                  QStringLiteral("an unhandled forwarded key reaches the terminal"));
+            s->setScripts({});
+            check(waitFor([&] { return s->keymap().lookup({}, {{"ctrl+shift+u"}}, all) == RexKeymap::Result::Unbound; }),
+                  QStringLiteral("scripts removed: the key unbound"));
+        }
+    }
+
     // The configuration reloaded: a new keymap.
     const QString path = km.configPath();
     if (path.isEmpty() || !path.startsWith(QDir::tempPath())) {
