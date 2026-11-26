@@ -28,6 +28,7 @@
 #include <QPainter>
 #include <QScrollBar>
 #include <QStyle>
+#include <QDir>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -44,6 +45,11 @@
 namespace {
 // Width of the frame round a pane in a split tab.
 constexpr int kPaneBorder = 2;
+// Pane cards: the panel's edge on each side, and its title strip.
+constexpr int kCardSide = 3;
+constexpr int kCardTitle = 22;  // as a float's title strip (kFloatTitle)
+constexpr int kCardRadius = 6;
+bool s_paneCards = false;
 } // namespace
 
 TerminalWidget::TerminalWidget(int id, const Settings &settings,
@@ -74,6 +80,10 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings,
         if (t.isEmpty() || t == m_title)
             return;
         m_title = t;
+        if (isCard()) {
+            refreshCardContext();  // a shell retitles at each prompt: after a cd, a program's end
+            update();              // the card's title strip
+        }
         emit titleChanged(m_title);
     });
 
@@ -217,6 +227,8 @@ void TerminalWidget::onOutput()
 
 void TerminalWidget::applyAppearance()
 {
+    s_paneCards = m_settings.appearance().paneCards;
+    applyFrameMargins();
     if (!m_terminal)
         return;
 
@@ -372,7 +384,7 @@ QSize TerminalWidget::cellSize() const
 
 QSize TerminalWidget::chromeSize() const
 {
-    const int frame = (m_frame == PaneFrame::None) ? 0 : 2 * kPaneBorder;
+    const QSize frame = (m_frame == PaneFrame::None) ? QSize() : frameChrome(!m_floating);
     auto *d = display();
     const int margin = d ? 2 * d->margin() : 0;
     // The scrollbar takes width only where the style doesn't overlay it.
@@ -382,7 +394,7 @@ QSize TerminalWidget::chromeSize() const
             && !bar->style()->styleHint(QStyle::SH_ScrollBar_Transient, nullptr, bar))
             scrollbar = bar->width();
     }
-    return {frame + margin + scrollbar, frame + margin};
+    return {frame.width() + margin + scrollbar, frame.height() + margin};
 }
 
 int TerminalWidget::paneBorder()
@@ -395,8 +407,108 @@ void TerminalWidget::setPaneFrame(PaneFrame frame)
     if (m_frame == frame)
         return;
     m_frame = frame;
-    const int m = (frame == PaneFrame::None) ? 0 : kPaneBorder;
-    layout()->setContentsMargins(m, m, m, m);
+    applyFrameMargins();
+}
+
+void TerminalWidget::setPaneCards(bool on)
+{
+    s_paneCards = on;
+}
+
+bool TerminalWidget::paneCards()
+{
+    return s_paneCards;
+}
+
+void TerminalWidget::setFallbackTitle(const QString &title)
+{
+    if (m_fallbackTitle == title)
+        return;
+    m_fallbackTitle = title;
+    if (isCard())
+        update();
+}
+
+void TerminalWidget::setFloating(bool floating)
+{
+    if (m_floating == floating)
+        return;
+    m_floating = floating;
+    applyFrameMargins();
+}
+
+QSize TerminalWidget::frameChrome(bool tiled)
+{
+    if (s_paneCards && tiled)
+        return {2 * kCardSide, kCardTitle + kCardSide};
+    return {2 * kPaneBorder, 2 * kPaneBorder};
+}
+
+int TerminalWidget::cardTitleHeight()
+{
+    return kCardTitle;
+}
+
+bool TerminalWidget::isCard() const
+{
+    return s_paneCards && !m_floating && m_frame != PaneFrame::None;
+}
+
+void TerminalWidget::applyFrameMargins()
+{
+    if (m_frame == PaneFrame::None)
+        layout()->setContentsMargins(0, 0, 0, 0);
+    else if (isCard())
+        layout()->setContentsMargins(kCardSide, kCardTitle, kCardSide, kCardSide);
+    else
+        layout()->setContentsMargins(kPaneBorder, kPaneBorder, kPaneBorder, kPaneBorder);
+    // A local card names what's running and where, kept up to date while
+    // it's a card (a tmux or Rex pane's server names it instead).
+    const bool watch = isCard() && m_terminal && !isExternal();
+    if (watch && !m_cardWatch) {
+        m_cardWatch = new QTimer(this);
+        m_cardWatch->setInterval(1500);
+        connect(m_cardWatch, &QTimer::timeout, this, &TerminalWidget::refreshCardContext);
+    }
+    if (m_cardWatch) {
+        if (watch) {
+            m_cardWatch->start();
+            refreshCardContext();
+        } else {
+            m_cardWatch->stop();
+        }
+    }
+    placeFollowBadge();
+    update();
+}
+
+QString TerminalWidget::cardTitle() const
+{
+    if (!m_cardProgram.isEmpty() || !m_cardDir.isEmpty()) {
+        QStringList parts;
+        for (const QString &part : {m_cardProgram, m_cardDir})
+            if (!part.isEmpty())
+                parts << part;
+        return parts.join(QStringLiteral("  ·  "));
+    }
+    return !m_title.isEmpty() ? m_title : !m_fallbackTitle.isEmpty() ? m_fallbackTitle : tr("Terminal");
+}
+
+void TerminalWidget::refreshCardContext()
+{
+    if (!isCard() || !m_terminal || isExternal())
+        return;
+    const QString program = foregroundProgramName();
+    QString dir = currentDirectory();
+    const QString home = QDir::homePath();
+    if (dir == home)
+        dir = QStringLiteral("~");
+    else if (dir.startsWith(home + QLatin1Char('/')))
+        dir = QLatin1Char('~') + dir.mid(home.size());
+    if (program == m_cardProgram && dir == m_cardDir)
+        return;
+    m_cardProgram = program;
+    m_cardDir = dir;
     update();
 }
 
@@ -458,7 +570,7 @@ void TerminalWidget::placeFollowBadge()
 {
     if (!m_followBadge)
         return;
-    const int inset = 6 + (m_frame == PaneFrame::None ? 0 : kPaneBorder);
+    const int inset = 6 + (m_frame == PaneFrame::None ? 0 : isCard() ? kCardTitle : kPaneBorder);
     m_followBadge->adjustSize();
     m_followBadge->move(qMax(inset, width() - m_followBadge->width() - inset - 10), inset);
 }
@@ -467,6 +579,60 @@ void TerminalWidget::paintEvent(QPaintEvent *)
 {
     if (m_frame == PaneFrame::None)
         return;
+    if (isCard()) {
+        // As a floating pane's frame, quieter: the terminal's background,
+        // a rounded panel with a faint edge and title strip, the accent
+        // (softened) when active.
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        QColor bg = palette().color(QPalette::Window), fg = palette().color(QPalette::WindowText);
+        if (auto *d = display()) {
+            fg = d->colorTable()[0].color;
+            bg = d->colorTable()[1].color;
+        }
+        const bool active = m_frame == PaneFrame::Active;
+        const QColor edge = active ? cardstyle::mix(bg, cardstyle::accent(), 0.7) : cardstyle::mix(bg, fg, 0.2);
+        // Round corners onto the surface the cards sit on (the sidebar's).
+        p.fillRect(rect(), cardstyle::surface(bg, fg));
+        const QRectF panel = QRectF(rect()).adjusted(0.75, 0.75, -0.75, -0.75);
+        QPainterPath path;
+        path.addRoundedRect(panel, kCardRadius, kCardRadius);
+        p.fillPath(path, bg);
+        p.save();
+        p.setClipPath(path);
+        p.fillRect(QRectF(panel.left(), panel.top(), panel.width(), kCardTitle),
+                   cardstyle::mix(bg, active ? cardstyle::accent() : fg, active ? 0.16 : 0.06));
+        p.restore();
+        p.setPen(QPen(edge, active ? 1.5 : 1.0));
+        p.drawPath(path);
+        const QString title = cardTitle();
+        QFont f = font();
+        f.setPointSizeF(qMax(7.0, f.pointSizeF() * 0.85));  // as a float's title
+        p.setFont(f);
+        const QFontMetrics fm(f);
+        QRect strip(kCardRadius + 2, 0, width() - 2 * (kCardRadius + 2), kCardTitle);
+        const QColor strong = cardstyle::mix(bg, fg, active ? 0.85 : 0.6);
+        const QColor dim = cardstyle::mix(bg, fg, active ? 0.55 : 0.38);
+        if (!m_cardProgram.isEmpty() || !m_cardDir.isEmpty()) {
+            // Local: the program, then (dimmer) where it is.
+            QString program = m_cardProgram;
+            if (!program.isEmpty()) {
+                program = fm.elidedText(program, Qt::ElideRight, strip.width());
+                p.setPen(strong);
+                p.drawText(strip, Qt::AlignVCenter | Qt::AlignLeft, program);
+                strip.setLeft(strip.left() + fm.horizontalAdvance(program));
+            }
+            if (!m_cardDir.isEmpty() && strip.width() > fm.horizontalAdvance(QStringLiteral(" · …"))) {
+                const QString dir = (program.isEmpty() ? QString() : QStringLiteral("  ·  ")) + m_cardDir;
+                p.setPen(dim);
+                p.drawText(strip, Qt::AlignVCenter | Qt::AlignLeft, fm.elidedText(dir, Qt::ElideMiddle, strip.width()));
+            }
+        } else {
+            p.setPen(strong);
+            p.drawText(strip, Qt::AlignVCenter | Qt::AlignLeft, fm.elidedText(title, Qt::ElideRight, strip.width()));
+        }
+        return;
+    }
     // The terminal covers everything but the frame, so filling the whole
     // widget only shows in the border.
     QPainter p(this);

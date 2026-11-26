@@ -6,6 +6,8 @@
 
 #include "rexsession.h"
 
+#include <functional>
+
 #include <QApplication>
 
 #include "ghosttyreplay.h"
@@ -206,6 +208,16 @@ RexSession::RexSession(const QUrl &server, const QString &sessionId, const Setti
 {
     m_control = new RexControl(this);
     connect(m_control, &RexControl::event, this, &RexSession::onEvent);
+    // A margin or pane frame change (pane cards) changes what fits: queued,
+    // after the panes have taken the new appearance.
+    connect(&m_settings, &Settings::appearanceChanged, this, [this]() {
+        for (Window &w : m_windows) {
+            if (!w.tab)
+                continue;
+            w.tab->setPadding(m_settings.appearance().terminalMargin);
+            layoutWindow(w);
+        }
+    }, Qt::QueuedConnection);
     connect(m_control, &RexControl::closed, this, [this](const QString &reason) {
         finish(reason.isEmpty() ? tr("the connection to the server closed") : reason);
     });
@@ -305,9 +317,8 @@ QSize RexSession::cellSize()
 QSize RexSession::paneChrome() const
 {
     // Rex tabs are always framed, like tmux's, so a pane's chrome is the
-    // same split or not.
-    const int frame = 2 * TerminalWidget::paneBorder();
-    return {frame, frame};
+    // same split or not (a tiled pane's: a card's with pane cards on).
+    return TerminalWidget::frameChrome(true);
 }
 
 // ---- Attaching and following the view. -------------------------------------
@@ -387,6 +398,30 @@ void RexSession::applyView(const QJsonObject &view)
     const QString oldLabel = m_label;
     m_label = label.isEmpty() ? shortId(m_sessionId) : label;
     m_activeWindow = str(view, "active_window_id");
+
+    // Block labels, wherever the view has them (tiled or floating): a pane's
+    // title until its program sets one.
+    std::function<void(const QJsonValue &)> labels = [&](const QJsonValue &v) {
+        if (v.isArray()) {
+            for (const QJsonValue &e : v.toArray())
+                labels(e);
+            return;
+        }
+        if (!v.isObject())
+            return;
+        const QJsonObject o = v.toObject();
+        const QString id = str(o, "block_id");
+        if (!id.isEmpty() && o.contains(QLatin1String("label")) && m_blocks.count(id)) {
+            Block *b = block(id);
+            b->label = str(o, "label");
+            if (b->pane)
+                b->pane->setFallbackTitle(b->label);
+        }
+        for (auto it = o.begin(); it != o.end(); ++it)
+            if (it->isObject() || it->isArray())
+                labels(*it);
+    };
+    labels(view.value(QLatin1String("windows")));
 
     // Windows in the server's order, each with the blocks of its tiled layout.
     QList<Window> next;
@@ -489,7 +524,7 @@ QRect RexSession::floatingFrame(const QRectF &bounds, const QSize &area, QSize *
 {
     // The frame is as much of the bounds as whole cells fill.
     const QSize cell = cellSize();
-    const QSize chrome = paneChrome() + TerminalTab::floatingChrome();
+    const QSize chrome = TerminalWidget::frameChrome(false) + TerminalTab::floatingChrome();
     const QRect box(qRound(bounds.x() * area.width()), qRound(bounds.y() * area.height()),
                     qRound(bounds.width() * area.width()), qRound(bounds.height() * area.height()));
     const int columns = qMax(4, (box.width() - chrome.width()) / qMax(1, cell.width()));
@@ -504,14 +539,23 @@ void RexSession::layoutWindow(Window &w)
     const QSize cell = cellSize();
     const QSize chrome = paneChrome();
     const QSize area = windowArea(w);
-    const int columns = qMax(10, (area.width() - chrome.width()) / qMax(1, cell.width()));
-    const int lines = qMax(3, (area.height() - chrome.height()) / qMax(1, cell.height()));
+    int columns = qMax(10, (area.width() - chrome.width()) / qMax(1, cell.width()));
+    int lines = qMax(3, (area.height() - chrome.height()) / qMax(1, cell.height()));
 
     const auto paneId = [this](const QString &id) { return block(id)->paneId; };
     // A window whose blocks all float has no tiled pane (-1: none).
     PaneLayout layout;
-    if (!firstBlock(w.layout).isEmpty())
+    if (!firstBlock(w.layout).isEmpty()) {
         layout = toPaneLayout(w.layout, columns, lines, paneId);
+        // What the panes' frames and gaps take past the separator cells
+        // (pane cards): cells given up to make room, the same shape again.
+        const QSize over = TerminalTab::layoutOverflow(layout, cell, chrome);
+        if (over.width() > 0 || over.height() > 0) {
+            columns = qMax(10, columns - (over.width() + cell.width() - 1) / qMax(1, cell.width()));
+            lines = qMax(3, lines - (over.height() + cell.height() - 1) / qMax(1, cell.height()));
+            layout = toPaneLayout(w.layout, columns, lines, paneId);
+        }
+    }
     QList<FloatingLayout> floating;
     for (const Window::Layer &l : std::as_const(w.floating)) {
         QSize cells;
@@ -612,7 +656,10 @@ void RexSession::layoutWindow(Window &w)
         if (paneId < 0)
             return nullptr;
         Block *b = block(m_paneBlocks.value(paneId));
-        return b->pane ? b->pane.data() : makePane(b);
+        TerminalWidget *pane = b->pane ? b->pane.data() : makePane(b);
+        if (pane)
+            pane->setFallbackTitle(b->label);
+        return pane;
     }, cell, chrome, floating, hidden);
     {
         QList<TerminalWidget *> zoomed;

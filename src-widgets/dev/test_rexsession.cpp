@@ -43,6 +43,8 @@
 #include <QEventLoop>
 #include <QTimer>
 #include <QToolButton>
+#include <QSplitter>
+#include <QLayout>
 #include <QDir>
 #include <QFile>
 #include <QElapsedTimer>
@@ -589,7 +591,36 @@ int main(int argc, char *argv[])
     }
     const QUrl url(address);
     Settings settings;
+    // The whole run again with pane cards (their chrome is a different size).
+    settings.setPaneCards(qEnvironmentVariableIntValue("PUDDLEJUMPER_TEST_PANE_CARDS") == 1);
     const TerminalProfile profile;
+
+    // ---- Local panes as cards: titled with what runs in them, and where.
+    if (settings.appearance().paneCards) {
+        TerminalProfile sh;  // a plain shell: quick to start, no rc files
+        sh.shellProgram = QStringLiteral("/bin/sh");
+        auto *left = new TerminalWidget(9001, settings, sh);
+        left->applyAppearance();
+        auto *local = new TerminalTab(left);
+        auto *right = new TerminalWidget(9002, settings, sh);
+        right->applyAppearance();
+        local->splitPane(left, Qt::Horizontal, right);
+        local->resize(900, 300);
+        local->show();
+        check(waitFor([&] { return !left->foregroundProgramName().isEmpty() && !right->foregroundProgramName().isEmpty(); },
+                      5000),
+              QStringLiteral("local card: a shell runs"));
+        waitFor([] { return false; }, 300);  // its prompt
+        right->sendText(QStringLiteral("cd /tmp && sleep 30\r"));
+        const bool running = waitFor([&] { return right->cardTitle() == QStringLiteral("sleep  ·  /tmp"); }, 6000);
+        check(running, QStringLiteral("local card: the program and its directory (%1)").arg(right->cardTitle()));
+        const QString shell = left->foregroundProgramName();
+        check(left->cardTitle().startsWith(shell + QStringLiteral("  ·  ")),
+              QStringLiteral("local card: an idle shell, by name (%1)").arg(left->cardTitle()));
+        if (const QString shots = qEnvironmentVariable("PUDDLEJUMPER_TEST_SHOTS"); !shots.isEmpty())
+            local->grab().save(shots + QStringLiteral("/local-cards.png"));
+        delete local;
+    }
 
     Server server;
     server.control.open(url);
@@ -1079,9 +1110,26 @@ int main(int argc, char *argv[])
             const auto inCorner = [&]() {
                 QWidget *w = pill();
                 const QPoint right = corner->mapTo(tab, QPoint(corner->width(), 0));
-                return w && qAbs(w->geometry().right() + 1 + 8 - right.x()) <= 2 && qAbs(w->y() - 6 - right.y()) <= 2;
+                // A pill inset from the corner, or with pane cards in the
+                // card's title strip.
+                const int dx = TerminalWidget::paneCards() ? 3 : 8, dy = TerminalWidget::paneCards() ? 0 : 6;
+                return w && qAbs(w->geometry().right() + 1 + dx - right.x()) <= 2 && qAbs(w->y() - dy - right.y()) <= 2;
             };
             check(inCorner(), QStringLiteral("hover buttons in the pane's corner"));
+            // Panes fit the window, and the gaps between them are the same
+            // either way (pane cards: past the separator cells, room made).
+            {
+                bool fit = true;
+                for (TerminalWidget *p : tab->panes())
+                    fit &= tab->rect().contains(QRect(p->mapTo(tab, QPoint(0, 0)), p->size()));
+                QSet<int> gaps;
+                for (QSplitter *sp : tab->findChildren<QSplitter *>())
+                    if (sp->count() > 1)
+                        gaps << sp->handleWidth();
+                check(fit, QStringLiteral("every pane fits the window"));
+                if (settings.appearance().paneCards)
+                    check(gaps.size() == 1, QStringLiteral("pane cards: one gap size across and down (%1)").arg(gaps.size()));
+            }
             const int narrow = corner->width();
             c.session->toggleZoom(corner);
             check(waitFor([&] { return corner->width() > narrow + 50; }), QStringLiteral("zoomed: the pane fills the window"));

@@ -48,7 +48,7 @@ protected:
     void paintEvent(QPaintEvent *) override
     {
         QPainter p(this);
-        p.fillRect(rect(), m_tab->backgroundColour());
+        p.fillRect(rect(), m_tab->containerColour());
     }
 
 private:
@@ -418,6 +418,40 @@ QString TerminalTab::floatingLayerOf(const TerminalWidget *pane) const
     return {};
 }
 
+QSize TerminalTab::paneGap(const QSize &cell, const QSize &chrome)
+{
+    if (TerminalWidget::paneCards() && chrome == TerminalWidget::frameChrome(true))
+        return {kLocalHandleWidth, kLocalHandleWidth};  // as a local tab's
+    return {qMax(1, cell.width() - chrome.width()), qMax(1, cell.height() - chrome.height())};
+}
+
+QSize TerminalTab::layoutOverflow(const PaneLayout &layout, const QSize &cell, const QSize &chrome)
+{
+    if (layout.isLeaf())
+        return {};
+    // Each gap past its separator cell, and below that each child's own.
+    const QSize gap = paneGap(cell, chrome);
+    const QSize extra = gap - (cell - chrome);
+    const bool across = layout.orientation == Qt::Horizontal;
+    QSize out;
+    for (const PaneLayout &child : layout.children) {
+        const QSize o = layoutOverflow(child, cell, chrome);
+        if (across) {
+            out.rwidth() += o.width();
+            out.rheight() = qMax(out.height(), o.height());
+        } else {
+            out.rheight() += o.height();
+            out.rwidth() = qMax(out.width(), o.width());
+        }
+    }
+    const int separators = int(layout.children.size()) - 1;
+    if (across)
+        out.rwidth() += separators * extra.width();
+    else
+        out.rheight() += separators * extra.height();
+    return out.expandedTo(QSize(0, 0));
+}
+
 QSize TerminalTab::floatingChrome()
 {
     return QSize(2 * (kFloatShadow + kFloatBorder), 2 * kFloatShadow + kFloatTitle + kFloatBorder);
@@ -702,6 +736,7 @@ void TerminalTab::updateFrames()
 {
     const QList<TerminalWidget *> all = panes();
     for (TerminalWidget *pane : all) {
+        pane->setFloating(!floatingLayerOf(pane).isEmpty());
         if (all.size() == 1 && !m_alwaysFramed)
             pane->setPaneFrame(TerminalWidget::PaneFrame::None);
         else if (all.size() > 1 && pane == m_active)
@@ -880,7 +915,17 @@ void TerminalTab::paintEvent(QPaintEvent *)
     if (m_padding == 0)
         return;
     QPainter p(this);
-    p.fillRect(rect(), backgroundColour());
+    p.fillRect(rect(), containerColour());
+}
+
+QColor TerminalTab::containerColour() const
+{
+    // Pane cards sit on the sidebar's surface, so the window reads as one
+    // piece; a lone unframed pane keeps the terminal's own background.
+    for (TerminalWidget *pane : panes())
+        if (pane->isCardShown())
+            return cardstyle::surface(backgroundColour(), foregroundColour());
+    return backgroundColour();
 }
 
 // ---- tmux layouts ------------------------------------------------------------
@@ -919,15 +964,18 @@ void TerminalTab::sizeLayout(QWidget *node, const PaneLayout &layout,
 
     // Every node is `cells * cell + chrome` pixels and every handle one cell
     // less the chrome, so a run of siblings adds up to exactly the pixels of
-    // its parent's cells (the separator cell included).
+    // its parent's cells (the separator cell included). With pane cards the
+    // handles are a fixed gap and a node takes its overflow on top, which
+    // the client has kept free by asking for fewer cells.
     const bool across = layout.orientation == Qt::Horizontal;
-    splitter->setHandleWidth(qMax(1, across ? cell.width() - chrome.width()
-                                            : cell.height() - chrome.height()));
+    const QSize gap = paneGap(cell, chrome);
+    splitter->setHandleWidth(across ? gap.width() : gap.height());
     QList<int> sizes;
     for (int i = 0; i < layout.children.size() && i < splitter->count(); ++i) {
         const PaneLayout &child = layout.children.at(i);
-        sizes << (across ? child.columns * cell.width() + chrome.width()
-                         : child.lines * cell.height() + chrome.height());
+        const QSize over = layoutOverflow(child, cell, chrome);
+        sizes << (across ? child.columns * cell.width() + chrome.width() + over.width()
+                         : child.lines * cell.height() + chrome.height() + over.height());
         sizeLayout(splitter->widget(i), child, cell, chrome);
     }
     splitter->setSizes(sizes);
@@ -1032,6 +1080,9 @@ void TerminalTab::applyLayout(const PaneLayout &layout,
     sizeLayout(m_root, layout, cell, chrome);
     const QRect area = layoutRect();
     const QSize extra = floatingChrome();
+    // A floating pane's own frame is the plain one, whatever a tiled pane's
+    // is (pane cards: the float's frame has the title).
+    const QSize floatChrome = chrome == TerminalWidget::frameChrome(true) ? TerminalWidget::frameChrome(false) : chrome;
     for (int i = 0; i < m_floating.size() && i < floating.size(); ++i) {
         m_floating[i].title = floating.at(i).title;
         const Floating &f = m_floating.at(i);
@@ -1040,11 +1091,11 @@ void TerminalTab::applyLayout(const PaneLayout &layout,
         for (TerminalWidget *pane : std::as_const(inLayer))
             connect(pane, &TerminalWidget::titleChanged, this, &TerminalTab::updateFrames, Qt::UniqueConnection);
         const PaneLayout &l = floating.at(i).layout;
-        sizeLayout(f.root, l, cell, chrome);
+        sizeLayout(f.root, l, cell, floatChrome);
         if (!f.frame)
             continue;
-        const QSize size(l.columns * cell.width() + chrome.width() + extra.width(),
-                         l.lines * cell.height() + chrome.height() + extra.height());
+        const QSize size(l.columns * cell.width() + floatChrome.width() + extra.width(),
+                         l.lines * cell.height() + floatChrome.height() + extra.height());
         f.frame->setGeometry(QRect(area.topLeft() + floating.at(i).position, size));
         f.frame->raise();  // bottom to top, in order
     }
@@ -1120,11 +1171,28 @@ public:
         m_close->setToolTip(QObject::tr("Close this pane"));
         m_zoom->setVisible(layoutButtons);
         m_float->setVisible(layoutButtons);
+        setCompact(pane->isCardShown());
         adjustSize();
         place();
         raise();
         show();
         update();
+    }
+
+    /* In a card's title strip (pane cards), as a float's buttons are in
+     * its title: small, flush with the strip. Else a pill over the pane. */
+    void setCompact(bool on)
+    {
+        if (on == m_compact)
+            return;
+        m_compact = on;
+        const int size = on ? TerminalWidget::cardTitleHeight() : 22;
+        for (QToolButton *b : {m_right, m_down, m_zoom, m_float, m_close}) {
+            b->setFixedSize(size, size);
+            b->setIconSize(QSize(size - 8, size - 8));  // as miniButton()
+        }
+        layout()->setContentsMargins(on ? QMargins(4, 0, 4, 0) : QMargins(4, 3, 4, 3));
+        layout()->setSpacing(2);
     }
 
     /* Into the pane's top-right corner, wherever the pane is now. */
@@ -1133,7 +1201,9 @@ public:
         if (!m_pane)
             return;
         const QPoint corner = m_pane->mapTo(m_tab, QPoint(m_pane->width(), 0));
-        QRect box(QPoint(corner.x() - width() - 8, corner.y() + 6), size());
+        QRect box(m_compact ? QPoint(corner.x() - width() - 3, corner.y())
+                            : QPoint(corner.x() - width() - 8, corner.y() + 6),
+                  size());
         // Not under a floating frame (one floated in place covers the
         // corner): left of it, or below it, while still on the pane.
         const QRect pane(m_pane->mapTo(m_tab, QPoint(0, 0)), m_pane->size());
@@ -1174,6 +1244,12 @@ protected:
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
         QPainterPath path;
+        if (m_compact) {
+            // Over the strip's title text, in the strip's own colour.
+            path.addRoundedRect(QRectF(rect()).adjusted(0, 1, 0, -1), 4, 4);
+            p.fillPath(path, cardstyle::mix(m_bg, m_fg, 0.09));
+            return;
+        }
         path.addRoundedRect(QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5), 7, 7);
         p.fillPath(path, cardstyle::mix(m_bg, m_fg, 0.12));
         p.setPen(QPen(cardstyle::mix(m_bg, m_fg, 0.40), 1.0));
@@ -1196,6 +1272,7 @@ private:
     QToolButton *m_zoom = nullptr;
     QToolButton *m_float = nullptr;
     QToolButton *m_close = nullptr;
+    bool m_compact = false;
     QColor m_bg;
     QColor m_fg;
 };

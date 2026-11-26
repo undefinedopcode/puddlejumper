@@ -98,6 +98,18 @@ public:
 
     /* A floating frame's pixels round its layout: border and title strip. */
     static QSize floatingChrome();
+    /*
+     * Laying out a server's cells (tmux, Rex) with panes of `chrome`: the
+     * gaps between panes, across and down. Each is the separator cell less
+     * a pane's chrome, so the panes add up to the cells exactly; with pane
+     * cards a fixed gap instead, the same both ways.
+     */
+    static QSize paneGap(const QSize &cell, const QSize &chrome);
+    /* The pixels a layout needs beyond `cells * cell + chrome`, across and
+     * down: what its gaps and panes' chrome take past the separator cells
+     * (none unless pane cards make that more than a cell). A client sizing
+     * a layout gives up enough cells to cover it. */
+    static QSize layoutOverflow(const PaneLayout &layout, const QSize &cell, const QSize &chrome);
     /* The floating layer a pane is in; empty when it is tiled. */
     QString floatingLayerOf(const TerminalWidget *pane) const;
     /* The layout area within the tab (floating frames are kept inside it). */
@@ -144,6 +156,9 @@ public:
     QColor backgroundColour() const override;
     /* The terminal's default text colour. */
     QColor foregroundColour() const override;
+    /* Behind the panes (padding, splitter gaps): the terminal's background,
+     * or with pane cards the sidebar's surface. */
+    QColor containerColour() const;
 
     /*
      * Zoom and float buttons: on floating frames' title strips, and on tiled

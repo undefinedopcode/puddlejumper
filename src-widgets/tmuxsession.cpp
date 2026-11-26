@@ -463,6 +463,8 @@ void TmuxSession::applyLayout(int windowId)
 
     it->tab->applyLayout(it->layout, [this](int pid) { return paneFor(pid); },
                          cellSize(), paneChrome());
+    // A new shape may need more room for its gaps (pane cards).
+    sendClientSize();
 }
 
 void TmuxSession::relayoutAll()
@@ -540,8 +542,14 @@ void TmuxSession::sendClientSize()
     const QSize chrome = paneChrome();
     if (cell.isEmpty())
         return;
-    const QSize cells(qMax(10, (m_clientArea.width() - chrome.width()) / cell.width()),
-                      qMax(3, (m_clientArea.height() - chrome.height()) / cell.height()));
+    // Room for what panes' frames and gaps take past the separator cells
+    // (pane cards), in the window that needs most: the client size is one
+    // for every window.
+    QSize over;
+    for (const auto &w : std::as_const(m_windows))
+        over = over.expandedTo(TerminalTab::layoutOverflow(w.layout, cell, chrome));
+    const QSize cells(qMax(10, (m_clientArea.width() - chrome.width() - over.width()) / cell.width()),
+                      qMax(3, (m_clientArea.height() - chrome.height() - over.height()) / cell.height()));
     if (cells == m_clientCells)
         return;
     m_clientCells = cells;
@@ -682,6 +690,5 @@ QSize TmuxSession::paneChrome() const
 {
     // tmux panes are always framed and have no margin or scrollbar (see
     // TerminalWidget::applyAppearance()), so this is the same for every pane.
-    const int frame = 2 * TerminalWidget::paneBorder();
-    return {frame, frame};
+    return TerminalWidget::frameChrome(true);
 }

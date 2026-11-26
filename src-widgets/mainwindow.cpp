@@ -196,7 +196,10 @@ protected:
     void paintEvent(QPaintEvent *) override
     {
         QPainter p(this);
-        const QColor bg = m_sidebar->background();
+        // Against the terminals: their background, or with pane cards the
+        // surface they sit on (the sidebar's own), so it reads as one piece.
+        const QColor bg = TerminalWidget::paneCards() ? m_sidebar->palette().color(QPalette::Window)
+                                                      : m_sidebar->background();
         p.fillRect(rect(), bg);
         if (underMouse()) {
             QColor line = m_sidebar->palette().color(QPalette::WindowText);
@@ -2229,6 +2232,14 @@ void MainWindow::applyAppearanceToAll()
     for (TerminalWidget *t : allPanes())
         t->applyAppearance();
     updateTabLayout();
+    // Pane cards change what's behind the panes, and the sidebar's handle.
+    if (m_splitter && m_splitter->count() > 1)
+        m_splitter->handle(1)->update();
+    if (QWidget *page = m_tabs->currentWidget()) {
+        page->update();
+        for (QSplitterHandle *h : page->findChildren<QSplitterHandle *>())
+            h->update();
+    }
 }
 
 void MainWindow::updateTabLayout()
@@ -3831,7 +3842,7 @@ void MainWindow::openWorkspaceFile(const QString &path)
             const QSize cell = pane->cellSize();
             const int m = m_settings.appearance().terminalMargin;
             const QSize area = m_tabs->currentWidget()->size() - QSize(2 * m, 2 * m)
-                               - QSize(2 * TerminalWidget::paneBorder(), 2 * TerminalWidget::paneBorder());
+                               - TerminalWidget::frameChrome(true);
             if (!cell.isEmpty())
                 cells = QSize(qMax(10, area.width() / cell.width()), qMax(3, area.height() / cell.height()));
         }

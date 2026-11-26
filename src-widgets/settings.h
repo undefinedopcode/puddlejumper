@@ -68,6 +68,10 @@ public:
          * correctly mixed RTL/LTR text; harmless to pure-LTR sessions.
          */
         bool    bidi = true;
+
+        /* Experimental: tiled panes drawn as cards, a rounded panel with a
+         * small title strip, as floating panes are (TerminalWidget). */
+        bool    paneCards = false;
     };
 
     struct Scrolling {
@@ -160,6 +164,7 @@ public:
     void setCursorShape(int v);
     void setTerminalMargin(int v);
     void setBidi(bool v);
+    void setPaneCards(bool v);
     void setScrollback(int v);
     void setScrollbarPosition(const QString &v);
     void setFlowControlWarning(bool v);

@@ -123,6 +123,27 @@ public:
     PaneFrame paneFrame() const { return m_frame; }
     /* Width of the frame on each side of a framed pane. */
     static int paneBorder();
+    /*
+     * Pane cards (experimental, Settings: appearance/paneCards): a framed
+     * tiled pane is drawn as floating panes are, a rounded panel with a
+     * soft edge and a small title strip, at low contrast. Panes in floating
+     * layers keep the plain frame (their float has the title).
+     */
+    static void setPaneCards(bool on);
+    static bool paneCards();
+    /* What a card's title strip says: for a local pane the foreground
+     * program and its directory ("micro  ·  ~/src"), else the title. */
+    QString cardTitle() const;
+    /* A card's title until the program sets one (a Rex block's label). */
+    void setFallbackTitle(const QString &title);
+    /* Not a tiled pane: in a floating layer, so never a card. */
+    void setFloating(bool floating);
+    /* The pixels a framed pane's frame takes, across and down: a card's
+     * (tiled) or the plain border's. */
+    static QSize frameChrome(bool tiled = true);
+    /* A card's title strip: its height, and where it is in the pane. */
+    static int cardTitleHeight();
+    bool isCardShown() const { return isCard(); }
 
     /* The shell's current directory, for opening a split there. Local only. */
     QString currentDirectory() const;
@@ -257,6 +278,15 @@ private:
     TerminalProfile m_profile;
     QTermWidget *m_terminal = nullptr;
     QLabel *m_followBadge = nullptr;  // setFollowing()
+    bool m_floating = false;          // setFloating()
+    QString m_fallbackTitle;          // setFallbackTitle()
+    // A local card's title: the foreground program and where it is.
+    QString m_cardProgram;
+    QString m_cardDir;
+    QTimer *m_cardWatch = nullptr;
+    void refreshCardContext();
+    bool isCard() const;
+    void applyFrameMargins();
     void placeFollowBadge();
     QString m_title;
 

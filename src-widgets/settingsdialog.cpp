@@ -368,6 +368,14 @@ QWidget *SettingsDialog::buildAppearancePage()
     });
     rendering->addRow(tr("Direction"), m_bidiBox);
 
+    m_paneCardsBox = new QCheckBox(tr("Pane cards (experimental)"), page);
+    m_paneCardsBox->setToolTip(tr("Draw split panes as floating panes are: a rounded, faint frame "
+                                  "with a small title strip"));
+    connect(m_paneCardsBox, &QCheckBox::toggled, this, [this](bool v) {
+        m_settings.setPaneCards(v);
+    });
+    rendering->addRow(tr("Panes"), m_paneCardsBox);
+
     layout->addStretch(1);
     return page;
 }
@@ -1086,6 +1094,7 @@ void SettingsDialog::syncFromSettings()
     m_antialiasBox->setChecked(a.antialias);
     m_lineCharsBox->setChecked(a.drawLineChars);
     m_bidiBox->setChecked(a.bidi);
+    m_paneCardsBox->setChecked(a.paneCards);
 
     const int cursorIndex = m_cursorShapeBox->findData(QString::number(a.cursorShape));
     if (cursorIndex >= 0)
