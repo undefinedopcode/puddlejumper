@@ -92,6 +92,11 @@ public:
      */
     QString appliedColorScheme() const { return m_appliedColorScheme; }
 
+    /* A colour scheme for this pane alone (a Rex action set it), over its
+     * profile's and the global one; empty for none. Kept with the pane. */
+    QString colorSchemeOverride() const { return m_schemeOverride; }
+    void setColorSchemeOverride(const QString &scheme);
+
     /* Font size actually in force, after profile resolution. */
     double appliedFontSize() const;
 
@@ -336,6 +341,7 @@ private:
     PaneFrame m_frame = PaneFrame::None;
     const Settings &m_settings;
     TerminalProfile m_profile;
+    QString m_schemeOverride;         // setColorSchemeOverride()
     QTermWidget *m_terminal = nullptr;
     std::function<bool(const QStringList &)> m_fileDrop;
     QLabel *m_followBadge = nullptr;  // setFollowing()

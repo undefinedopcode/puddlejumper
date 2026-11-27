@@ -27,6 +27,7 @@
 
 #include "mainwindow.h"
 
+#include "colorscheme.h"
 #include "commandpalette.h"
 #include "notifier.h"
 #include "terminaltab.h"
@@ -56,6 +57,7 @@
 #include <QClipboard>
 #include <QDateTime>
 #include <QDialog>
+#include <QSplitter>
 #include <QTimer>
 #include <QStandardPaths>
 #include <QFileDialog>
@@ -105,7 +107,8 @@ bool argumentAction(const QString &name)
         || name == QLatin1String("client.notify") || name == QLatin1String("client.clipboard.set")
         || name == QLatin1String("client.web.open") || name == QLatin1String("client.vnc.open")
         || name == QLatin1String("client.rdp.open") || name == QLatin1String("client.file.upload")
-        || name == QLatin1String("client.file.download")
+        || name == QLatin1String("client.file.download") || name == QLatin1String("client.colorscheme.set")
+        || name == QLatin1String("client.profile.apply")
         || name == QLatin1String("client.workspace.switch");
 }
 
@@ -294,6 +297,30 @@ QJsonObject MainWindow::rexKeymapRequest() const
                            {QStringLiteral("args"), argsSchema({{QStringLiteral("path"), QStringLiteral("string")},
                                                                 {QStringLiteral("ask"), QStringLiteral("boolean")}},
                                                                {QStringLiteral("path")})}};
+    // Looks: for the pane the action came from (else the current one), or
+    // every pane of its tab.
+    actions << QJsonObject{{QStringLiteral("name"), QStringLiteral("client.colorscheme.set")},
+                           {QStringLiteral("kind"), QStringLiteral("client")},
+                           {QStringLiteral("title"), tr("Set the Colour Scheme")},
+                           {QStringLiteral("description"),
+                            tr("Gives the terminal it came from (else the current one) the colour scheme called "
+                               "name, over its profile's, until set again; no name goes back to the profile's. "
+                               "tab true does every terminal in its tab")},
+                           {QStringLiteral("category"), QStringLiteral("View")},
+                           {QStringLiteral("args"), argsSchema({{QStringLiteral("name"), QStringLiteral("string")},
+                                                                {QStringLiteral("tab"), QStringLiteral("boolean")}})}};
+    actions << QJsonObject{{QStringLiteral("name"), QStringLiteral("client.profile.apply")},
+                           {QStringLiteral("kind"), QStringLiteral("client")},
+                           {QStringLiteral("title"), tr("Apply a Profile")},
+                           {QStringLiteral("description"),
+                            tr("Gives the terminal it came from (else the current one) the profile called name: "
+                               "its colours and font now (the running program is left alone), and the rest when "
+                               "it is next restored. Clears a colour scheme set by client.colorscheme.set. tab "
+                               "true does every terminal in its tab; tmux's follow their session and are skipped")},
+                           {QStringLiteral("category"), QStringLiteral("View")},
+                           {QStringLiteral("args"), argsSchema({{QStringLiteral("name"), QStringLiteral("string")},
+                                                                {QStringLiteral("tab"), QStringLiteral("boolean")}},
+                                                               {QStringLiteral("name")})}};
     // Keymap modes: entered and left by binding these.
     for (const char *name : {"client.mode.enter", "client.mode.exit", "client.mode.exit_all"}) {
         const QString n = QString::fromLatin1(name);
@@ -598,6 +625,87 @@ bool MainWindow::performClientAction(const QString &name, const QJsonObject &arg
             showTab(tab);
             tab->focusContent();
         }
+        return true;
+    }
+    if (name == QLatin1String("client.colorscheme.set") || name == QLatin1String("client.profile.apply")) {
+        const bool scheme = name == QLatin1String("client.colorscheme.set");
+        const QString wanted = args.value(QLatin1String("name")).toString().trimmed();
+        // The panes: the one it came from, else the current one; or its tab's.
+        TerminalWidget *target = pane ? pane : currentTerminal();
+        if (!target) {
+            *error = tr("%1: no terminal to change").arg(name);
+            return false;
+        }
+        QList<TerminalWidget *> panes{target};
+        if (args.value(QLatin1String("tab")).toBool(false)) {
+            for (Tab *page : allPages()) {
+                auto *tab = qobject_cast<TerminalTab *>(page);
+                if (tab && tab->panes().contains(target)) {
+                    panes = tab->panes();
+                    break;
+                }
+            }
+        }
+        if (scheme) {
+            // A known scheme, by its own spelling.
+            QString found;
+            if (!wanted.isEmpty()) {
+                const QStringList names = ColorSchemeFile::allSchemeNames();
+                for (int pass = 0; pass < 2 && found.isEmpty(); ++pass)
+                    for (const QString &n : names)
+                        if (n.compare(wanted, pass ? Qt::CaseInsensitive : Qt::CaseSensitive) == 0) {
+                            found = n;
+                            break;
+                        }
+                if (found.isEmpty()) {
+                    *error = tr("No colour scheme is called “%1”").arg(wanted.left(200));
+                    return false;
+                }
+            }
+            for (TerminalWidget *t : std::as_const(panes))
+                t->setColorSchemeOverride(found);
+        } else {
+            const TerminalProfile *found = nullptr;
+            for (int pass = 0; pass < 2 && !found; ++pass)
+                for (const TerminalProfile &p : m_profiles.profiles())
+                    if (p.name.compare(wanted, pass ? Qt::CaseInsensitive : Qt::CaseSensitive) == 0) {
+                        found = &p;
+                        break;
+                    }
+            if (!found) {
+                *error = tr("No profile is called “%1”").arg(wanted.left(200));
+                return false;
+            }
+            int changed = 0;
+            for (TerminalWidget *t : std::as_const(panes)) {
+#ifdef PUDDLEJUMPER_REX
+                const bool tmux = t->isExternal() && !rexSessionFor(t);
+#else
+                const bool tmux = t->isExternal();
+#endif
+                if (tmux)
+                    continue; // tmux panes follow their session
+                t->setColorSchemeOverride(QString());
+                t->setProfile(*found);
+                ++changed;
+            }
+            if (changed == 0) {
+                *error = tr("%1: a tmux terminal follows its session, not a profile").arg(name);
+                return false;
+            }
+        }
+        // What's behind the panes, and the sidebar, may take another colour.
+        for (QWidget *w = target->parentWidget(); w; w = w->parentWidget()) {
+            if (auto *tab = qobject_cast<TerminalTab *>(w)) {
+                tab->update();
+                for (QSplitterHandle *h : tab->findChildren<QSplitterHandle *>())
+                    h->update();
+                break;
+            }
+        }
+        if (m_splitter && m_splitter->count() > 1)
+            m_splitter->handle(1)->update();
+        updateStatus();
         return true;
     }
 #ifdef PUDDLEJUMPER_REX

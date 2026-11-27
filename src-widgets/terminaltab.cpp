@@ -787,9 +787,23 @@ QColor TerminalTab::backgroundColour() const
 {
     // The scheme's own, not the active pane's focus tint: the sidebar and
     // what's behind the panes don't change as the focus moves.
-    if (TerminalWidget *pane = m_active ? m_active.data() : firstPaneIn(m_root))
+    if (TerminalWidget *pane = colourPane())
         return pane->themeBackground();
     return palette().color(QPalette::Window);
+}
+
+TerminalWidget *TerminalTab::colourPane() const
+{
+    // A pane given a scheme of its own (a Rex action) doesn't colour the
+    // tab: the active pane, else the first, without one; with every pane
+    // given one, the active pane after all.
+    TerminalWidget *fallback = m_active ? m_active.data() : firstPaneIn(m_root);
+    if (fallback && fallback->colorSchemeOverride().isEmpty())
+        return fallback;
+    for (TerminalWidget *pane : panes())
+        if (pane->colorSchemeOverride().isEmpty())
+            return pane;
+    return fallback;
 }
 
 bool TerminalTab::hasNewOutput() const
@@ -815,7 +829,7 @@ void TerminalTab::focusContent()
 
 QColor TerminalTab::foregroundColour() const
 {
-    TerminalWidget *pane = m_active ? m_active.data() : firstPaneIn(m_root);
+    TerminalWidget *pane = colourPane();
     if (pane) {
         if (auto *display = pane->findChild<Konsole::TerminalDisplay *>())
             return display->colorTable()[DEFAULT_FORE_COLOR].color;

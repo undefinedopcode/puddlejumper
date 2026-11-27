@@ -217,6 +217,8 @@ private:
     /* Drop a splitter left with one child, putting the child in its place. */
     void collapse(QSplitter *splitter);
     void collectPanes(QWidget *node, QList<TerminalWidget *> &out) const;
+    /* The pane whose scheme colours the tab (gaps, sidebar, card). */
+    TerminalWidget *colourPane() const;
     TerminalWidget *firstPaneIn(QWidget *node) const;
     TerminalWidget *paneContaining(QWidget *widget) const;
     void updateFrames();

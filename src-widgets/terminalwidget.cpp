@@ -226,6 +226,14 @@ void TerminalWidget::setProfile(const TerminalProfile &profile)
     applyAppearance();
 }
 
+void TerminalWidget::setColorSchemeOverride(const QString &scheme)
+{
+    if (scheme == m_schemeOverride)
+        return;
+    m_schemeOverride = scheme;
+    applyAppearance();
+}
+
 double TerminalWidget::appliedFontSize() const
 {
     return m_profile.fontSize ? *m_profile.fontSize
@@ -262,8 +270,9 @@ void TerminalWidget::applyAppearance()
      * one picks up the new global. That is what makes "themed Dev tab" and
      * "global font size" coexist without fighting.
      */
-    const QString scheme = m_profile.colorScheme ? *m_profile.colorScheme
-                                                 : a.colorScheme;
+    const QString scheme = !m_schemeOverride.isEmpty() ? m_schemeOverride
+                           : m_profile.colorScheme ? *m_profile.colorScheme
+                                                   : a.colorScheme;
 
     /*
      * Settings may hold either a bare scheme name or a full path to a user

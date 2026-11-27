@@ -3629,6 +3629,8 @@ void MainWindow::saveSession()
             {QStringLiteral("dir"), pane->currentDirectory()},
             {QStringLiteral("profile"), pane->profileId()},
         };
+        if (!pane->colorSchemeOverride().isEmpty())
+            saved.insert(QStringLiteral("scheme"), pane->colorSchemeOverride());
         QString cwd;
         if (const resumerules::Verdict v = resume ? pane->resumeVerdict(&cwd) : resumerules::Verdict(); v.trusted)
             saved.insert(QStringLiteral("resume"), QJsonObject{
@@ -3818,6 +3820,8 @@ bool MainWindow::restoreSession()
                 dir = !root.isEmpty() && QDir(root).exists() ? root : QString();
             TerminalWidget *pane =
                 makePane(m_profiles.profileById(p.value(QStringLiteral("profile")).toString()), dir);
+            if (pane)
+                pane->setColorSchemeOverride(p.value(QStringLiteral("scheme")).toString());
             const QJsonObject saved = p.value(QStringLiteral("resume")).toObject();
             const QStringList argv = saved.value(QStringLiteral("argv")).toVariant().toStringList();
             const QString cwd = saved.value(QStringLiteral("cwd")).toString();
