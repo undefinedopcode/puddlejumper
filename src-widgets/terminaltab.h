@@ -122,6 +122,9 @@ public:
     /* Frame panes even when there is only one, so a pane's chrome is the same
      * whether or not its window is split. tmux tabs need that for exact sizing. */
     void setAlwaysFramed(bool on);
+    /* The gap setting (TerminalWidget::paneGap()) on local splits' handles
+     * and round framed panes. */
+    void applyPaneGap();
 
     /*
      * The arrangement, for saving: splits ("split": "right" or "down", with

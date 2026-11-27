@@ -84,6 +84,10 @@ public:
          * the window's edge in a background of its own, the margin around
          * the grid, and a card's panel, take that colour. */
         bool    paddingFollowsApp = true;
+
+        /* The gap between split panes, in pixels, and round the outside of
+         * the panes while they're framed (split, or a tmux or Rex tab). */
+        int     paneGap = 4;
     };
 
     struct Scrolling {
@@ -186,6 +190,7 @@ public:
     void setPaneCards(bool v);
     void setQuietFocus(bool v);
     void setPaddingFollowsApp(bool v);
+    void setPaneGap(int v);
     void setScrollback(int v);
     void setScrollbarPosition(const QString &v);
     void setFlowControlWarning(bool v);

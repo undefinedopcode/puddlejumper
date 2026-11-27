@@ -29,9 +29,9 @@
 
 namespace {
 
-// Handle width between panes in a local split. tmux layouts set their own,
-// one cell wide (see TerminalTab::applyLayout()).
-constexpr int kLocalHandleWidth = 4;
+// Handle width between panes in a local split: the gap setting
+// (TerminalWidget::paneGap()). tmux layouts set their own, one cell wide,
+// unless panes are cards (see TerminalTab::paneGap()).
 
 /*
  * Splitter handles painted in the terminal background, so the gap between
@@ -439,7 +439,7 @@ QString TerminalTab::floatingLayerOf(const TerminalWidget *pane) const
 QSize TerminalTab::paneGap(const QSize &cell, const QSize &chrome)
 {
     if (TerminalWidget::paneCards() && chrome == TerminalWidget::externalChrome(true))
-        return {kLocalHandleWidth, kLocalHandleWidth};  // as a local tab's
+        return {TerminalWidget::paneGap(), TerminalWidget::paneGap()};  // as a local tab's
     return {qMax(1, cell.width() - chrome.width()), qMax(1, cell.height() - chrome.height())};
 }
 
@@ -519,7 +519,7 @@ QSplitter *TerminalTab::makeSplitter(Qt::Orientation orientation)
 {
     auto *splitter = new PaneSplitter(orientation, this);
     splitter->setChildrenCollapsible(false);
-    splitter->setHandleWidth(kLocalHandleWidth);
+    splitter->setHandleWidth(TerminalWidget::paneGap());
     connect(splitter, &QSplitter::splitterMoved, this, [this, splitter](int, int index) {
         if (m_applyingLayout || index < 1)
             return;
@@ -764,6 +764,7 @@ void TerminalTab::updateFrames()
     }
     if (m_hover)
         m_hover->update();  // the hover buttons take the strip's colour
+    applyPaneGap();
     const QString activeLayer = m_active ? floatingLayerOf(m_active) : QString();
     for (const Floating &f : std::as_const(m_floating)) {
         if (auto *frame = static_cast<FloatingFrame *>(f.frame.data())) {
@@ -776,6 +777,25 @@ void TerminalTab::updateFrames()
             frame->setTitle(!title.isEmpty() ? title : !f.title.isEmpty() ? f.title : tr("Terminal"));
         }
     }
+}
+
+void TerminalTab::applyPaneGap()
+{
+    // Framed panes (a split, or a tmux or Rex tab) have the gap between
+    // them round the outside too, so the edge matches the gaps.
+    const int gap = TerminalWidget::paneGap();
+    const bool framed = m_alwaysFramed || panes().size() > 1;
+    const QMargins margins = framed ? QMargins(gap, gap, gap, gap) : QMargins();
+    // A local split's handles; a server's layout sets its own (sizeLayout()).
+    if (!m_alwaysFramed) {
+        for (QSplitter *s : findChildren<QSplitter *>())
+            s->setHandleWidth(gap);
+    }
+    if (m_layout->contentsMargins() == margins)
+        return;
+    m_layout->setContentsMargins(margins);
+    update();
+    emit layoutAreaResized();
 }
 
 QSize TerminalTab::layoutArea() const
@@ -941,7 +961,8 @@ void TerminalTab::paintEvent(QPaintEvent *)
 {
     // A server's layout is whole cells, which rarely fill the tab exactly:
     // what's left over (and the gaps) shows the terminal's background.
-    if (!m_alwaysFramed)
+    // The gap round framed panes too.
+    if (!m_alwaysFramed && m_layout->contentsMargins().isNull())
         return;
     QPainter p(this);
     p.fillRect(rect(), containerColour());

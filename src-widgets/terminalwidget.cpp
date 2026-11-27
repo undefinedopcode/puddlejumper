@@ -59,6 +59,7 @@ constexpr int kCardTitle = 22;  // as a float's title strip (kFloatTitle)
 constexpr int kCardRadius = 6;
 bool s_paneCards = false;
 int s_margin = 0;   // the terminal margin (appearance), for externalChrome()
+int s_paneGap = 4;  // between panes and round them (appearance), for TerminalTab
 bool s_quietFocus = false;
 } // namespace
 
@@ -262,6 +263,7 @@ void TerminalWidget::applyAppearance()
     s_paneCards = m_settings.appearance().paneCards;
     s_quietFocus = m_settings.appearance().quietFocus;
     s_margin = qMax(0, m_settings.appearance().terminalMargin);
+    s_paneGap = qBound(0, m_settings.appearance().paneGap, 32);
     applyFrameMargins();
     if (!m_terminal)
         return;
@@ -503,6 +505,11 @@ void TerminalWidget::setPaneCards(bool on)
 bool TerminalWidget::paneCards()
 {
     return s_paneCards;
+}
+
+int TerminalWidget::paneGap()
+{
+    return s_paneGap;
 }
 
 void TerminalWidget::setFallbackTitle(const QString &title)

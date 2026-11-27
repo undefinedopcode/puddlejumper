@@ -393,6 +393,15 @@ QWidget *SettingsDialog::buildAppearancePage()
     });
     rendering->addRow(QString(), m_paddingFollowsAppBox);
 
+    m_paneGapBox = new QSpinBox(page);
+    m_paneGapBox->setRange(0, 32);
+    m_paneGapBox->setSuffix(tr(" px"));
+    m_paneGapBox->setToolTip(tr("The space between split panes, and round the outside of them"));
+    connect(m_paneGapBox, &QSpinBox::valueChanged, this, [this](int v) {
+        m_settings.setPaneGap(v);
+    });
+    rendering->addRow(tr("Gap between panes"), m_paneGapBox);
+
     layout->addStretch(1);
     return page;
 }
@@ -1129,6 +1138,7 @@ void SettingsDialog::syncFromSettings()
     m_paneCardsBox->setChecked(a.paneCards);
     m_quietFocusBox->setChecked(a.quietFocus);
     m_paddingFollowsAppBox->setChecked(a.paddingFollowsApp);
+    m_paneGapBox->setValue(a.paneGap);
 
     const int cursorIndex = m_cursorShapeBox->findData(QString::number(a.cursorShape));
     if (cursorIndex >= 0)

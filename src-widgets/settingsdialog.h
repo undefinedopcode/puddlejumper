@@ -150,6 +150,7 @@ private:
     QCheckBox *m_paneCardsBox = nullptr;
     QCheckBox *m_quietFocusBox = nullptr;
     QCheckBox *m_paddingFollowsAppBox = nullptr;
+    QSpinBox *m_paneGapBox = nullptr;
 
     // Terminal.
     QComboBox *m_cursorShapeBox = nullptr;

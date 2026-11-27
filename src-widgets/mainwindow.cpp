@@ -2371,6 +2371,8 @@ void MainWindow::applyAppearanceToAll()
 {
     for (TerminalWidget *t : allPanes())
         t->applyAppearance();
+    for (TerminalTab *tab : allTabs())
+        tab->applyPaneGap();
     updateTabLayout();
     // Pane cards change what's behind the panes, and the sidebar's handle.
     if (m_splitter && m_splitter->count() > 1)
@@ -4085,7 +4087,8 @@ void MainWindow::openWorkspaceFile(const QString &path)
         QSize cells;
         if (TerminalWidget *pane = currentTerminal(); pane && m_tabs->currentWidget()) {
             const QSize cell = pane->cellSize();
-            const QSize area = m_tabs->currentWidget()->size() - TerminalWidget::externalChrome(true);
+            const int gap = 2 * TerminalWidget::paneGap();   // round the framed panes
+            const QSize area = m_tabs->currentWidget()->size() - TerminalWidget::externalChrome(true) - QSize(gap, gap);
             if (!cell.isEmpty())
                 cells = QSize(qMax(10, area.width() / cell.width()), qMax(3, area.height() / cell.height()));
         }

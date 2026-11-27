@@ -149,6 +149,8 @@ public:
      */
     static void setPaneCards(bool on);
     static bool paneCards();
+    /* The gap between split panes and round framed ones (appearance). */
+    static int paneGap();
     /* What a card's title strip says: for a local pane the foreground
      * program and its directory ("micro  ·  ~/src"), else the title. */
     QString cardTitle() const;

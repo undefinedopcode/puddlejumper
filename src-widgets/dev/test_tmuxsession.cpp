@@ -103,12 +103,12 @@ bool agrees(TerminalTab *tab, QString *detail)
     return !ours.isEmpty() && ours == theirs;
 }
 
-// Every pane lies inside the tab.
-bool inside(TerminalTab *tab)
+// Every pane lies inside the tab (and `inset` pixels in from its edge).
+bool inside(TerminalTab *tab, int inset = 0)
 {
     for (TerminalWidget *p : tab->panes()) {
         const QRect r(p->mapTo(tab, QPoint(0, 0)), p->size());
-        if (!tab->rect().contains(r))
+        if (!tab->rect().adjusted(inset, inset, -inset, -inset).contains(r))
             return false;
     }
     return true;
@@ -147,7 +147,7 @@ int main(int argc, char *argv[])
         tabs << tab;
         tab->resize(900, 520);
         tab->show();
-        session.setClientArea(tab->size());
+        session.setClientArea(tab->layoutArea());   // as the session does on a resize
     });
     session.start();
     if (!check(waitFor([&] { return !tabs.isEmpty() && !tabs.first()->panes().isEmpty(); }), QStringLiteral("a tab")))
@@ -178,6 +178,20 @@ int main(int argc, char *argv[])
     settings.setTerminalMargin(margin);
     ok = waitFor([&] { return screenSize(pane) == before && agrees(tab, &detail); });
     check(ok, QStringLiteral("margin back: the grid back (%1)").arg(detail));
+
+    // The gap between panes, and round them: a bigger one, fewer cells too.
+    // (MainWindow::applyAppearanceToAll() does this for every tab.)
+    QObject::connect(&settings, &Settings::appearanceChanged, tab, [tab] { tab->applyPaneGap(); });
+    const int gap = settings.appearance().paneGap;
+    settings.setPaneGap(gap + 20);
+    ok = waitFor([&] { return screenSize(pane).width() < before.width() && screenSize(pane).height() < before.height()
+                              && agrees(tab, &detail); });
+    check(ok, QStringLiteral("bigger gap: fewer cells, tmux told (%1; was %2x%3)")
+                  .arg(detail).arg(before.width()).arg(before.height()));
+    check(inside(tab, gap + 20), QStringLiteral("bigger gap: the panes are that far inside the tab"));
+    settings.setPaneGap(gap);
+    ok = waitFor([&] { return screenSize(pane) == before && agrees(tab, &detail); });
+    check(ok, QStringLiteral("gap back: the grid back (%1)").arg(detail));
 
     session.killSession();
     waitFor([] { return false; }, 300);
