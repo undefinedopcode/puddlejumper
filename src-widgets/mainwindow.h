@@ -235,6 +235,11 @@ private:
      * or it can't run now. */
     bool performClientAction(const QString &name, const QJsonObject &args, TerminalWidget *pane, QString *error);
     void showRexPrompt(RexSession *session, const QString &callId, const QJsonObject &prompt);
+    /* Copying files to and from a Rex server (its fs block). Local files
+     * into a pane's directory there (or, `ask`, wherever is typed). */
+    void copyToRex(RexSession *session, TerminalWidget *pane, const QStringList &paths, bool ask);
+    /* A path (or pattern) on the server, asked for, into a local folder. */
+    void copyFromRex(RexSession *session, TerminalWidget *pane);
 #endif
     /* Every action by name; a Rex pane's server actions too. */
     void showCommandPalette();

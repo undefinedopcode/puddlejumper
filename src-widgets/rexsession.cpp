@@ -12,6 +12,7 @@
 
 #include "ghosttyreplay.h"
 #include "rexclient.h"
+#include "rexfilecopy.h"
 #include "rexsocket.h"
 #include "settings.h"
 
@@ -736,10 +737,50 @@ TerminalWidget *RexSession::makePane(Block *b)
         if (it != m_blocks.end())
             takeBlock(it->second.get());
     });
+    if (!isLocal()) {
+        QPointer<TerminalWidget> guard(pane);
+        pane->setFileDropHandler([this, guard](const QStringList &paths) {
+            if (!guard)
+                return false;
+            emit filesDropped(guard, paths);
+            return true;
+        });
+    }
     b->pane = pane;
     sendTheme(b);
     showFollowing(b);
     return pane;
+}
+
+bool RexSession::isLocal() const
+{
+    return rexaddress::isUnix(m_server);
+}
+
+void RexSession::paneDirectory(const TerminalWidget *pane, std::function<void(const QString &)> done)
+{
+    const QString id = blockId(pane);
+    if (id.isEmpty() || !m_control) {
+        done(QString());
+        return;
+    }
+    m_control->request(QStringLiteral("com.superlogical.terminal.pwd"),
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId},
+                                   {QStringLiteral("block_id"), id},
+                                   {QStringLiteral("args"), QJsonObject()}},
+                       [done](const QJsonObject &reply, const QJsonObject &) {
+                           // A file:// URL (OSC 7), or a plain path.
+                           const QString pwd = reply.value(QLatin1String("pwd")).toString();
+                           if (pwd.startsWith(QLatin1String("file:")))
+                               done(QUrl(pwd).path(QUrl::FullyDecoded));
+                           else
+                               done(pwd);
+                       });
+}
+
+RexFileCopy *RexSession::newFileCopy()
+{
+    return new RexFileCopy(m_control, m_sessionId, this);
 }
 
 void RexSession::openStream(Block *b)

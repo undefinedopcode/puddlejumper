@@ -63,6 +63,12 @@ public:
     void close();
     // Why it closed or failed: the server's close reason, else the error.
     QString failureReason() const;
+    // The close code the server sent (1000 normal, ...), or 1006 when the
+    // connection went without one. Meaningful once disconnected.
+    int closeCode() const { return m_closeCode; }
+    // Bytes given to send*Message not yet written to the network: for
+    // sending a lot without holding it all in memory (see bytesWritten).
+    qint64 bytesToWrite() const;
 
 signals:
     void connected();
@@ -70,6 +76,8 @@ signals:
     void binaryMessageReceived(const QByteArray &data);
     // Closed or failed (once, whichever comes first).
     void disconnected();
+    // Some of what was sent has been written (bytesToWrite went down).
+    void bytesWritten();
 
 private:
     // Unix socket.
@@ -93,4 +101,6 @@ private:
     bool m_closing = false;  // our close frame sent
     bool m_done = false;
     QString m_reason;
+    int m_closeCode = 1006;
+    qint64 m_queued = 0;     // QWebSocket: sent, not yet written
 };

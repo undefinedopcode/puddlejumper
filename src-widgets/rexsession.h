@@ -26,6 +26,7 @@
 
 class QTimer;
 class RexControl;
+class RexFileCopy;
 class RexTerminalConnection;
 class Settings;
 
@@ -162,6 +163,19 @@ public:
     /* This connection's client id, as the server knows it. */
     QString clientId() const;
 
+    /* Copying files (the server's fs block, API revision 23). Whether the
+     * server is this machine's own, over its Unix socket: then its files are
+     * these, and a file dropped on a pane is typed as its path as usual;
+     * otherwise a drop is filesDropped(). */
+    bool isLocal() const;
+    /* The directory a pane's program last reported (OSC 7), as a path on
+     * the server; empty if it hasn't said. */
+    void paneDirectory(const TerminalWidget *pane, std::function<void(const QString &dir)> done);
+    /* A copy to or from the server in this session: start it with upload()
+     * or download(). The session owns it (it goes if the session does);
+     * delete it when finished. */
+    RexFileCopy *newFileCopy();
+
     /* The sessions on a server, for a menu: calls back with (id, label)
      * pairs, or an error. */
     static void listSessions(const QUrl &server, QObject *context,
@@ -192,6 +206,8 @@ signals:
     /* The question is no longer wanted; close it without answering. */
     void promptEnded(const QString &callId);
     void actionFinished(const QString &action, const QJsonValue &result);
+    /* Local files were dropped on one of the panes (a server elsewhere). */
+    void filesDropped(TerminalWidget *pane, const QStringList &paths);
     void actionFailed(const QString &action, const QString &message);
 
 private:

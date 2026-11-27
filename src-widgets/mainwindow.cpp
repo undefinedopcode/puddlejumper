@@ -31,6 +31,7 @@
 #endif
 #include "wsl.h"
 #ifdef PUDDLEJUMPER_REX
+#include "rexfilecopy.h"
 #include "rexsession.h"
 #include "rexsocket.h"
 #endif
@@ -1828,6 +1829,23 @@ void MainWindow::rebuildServersMenu()
                 });
             }
         }
+        m_serversMenu->addAction(tr("Copy &Files to Server…"), this, [this, session]() {
+            TerminalWidget *pane = currentTerminal();
+            const QStringList paths = QFileDialog::getOpenFileNames(this, tr("Copy Files to Server"));
+            if (session && !paths.isEmpty())
+                copyToRex(session, pane, paths, true);
+        });
+        m_serversMenu->addAction(tr("Copy F&older to Server…"), this, [this, session]() {
+            TerminalWidget *pane = currentTerminal();
+            const QString dir = QFileDialog::getExistingDirectory(this, tr("Copy Folder to Server"));
+            if (session && !dir.isEmpty())
+                copyToRex(session, pane, {dir}, true);
+        });
+        m_serversMenu->addAction(tr("Copy from Ser&ver…"), this, [this, session]() {
+            if (session)
+                copyFromRex(session, currentTerminal());
+        });
+        m_serversMenu->addSeparator();
         m_serversMenu->addAction(tr("&Detach Rex Session “%1”").arg(rex->label()), this, [session]() {
             if (session)
                 session->detach();
@@ -2153,6 +2171,10 @@ void MainWindow::openRex(const QUrl &server, const QString &sessionId, const QSt
         }
     });
     connect(session, &RexSession::tabRemoved, this, &MainWindow::removeTab);
+    // Files dropped on a pane are copied to the server, into its directory.
+    connect(session, &RexSession::filesDropped, this, [this, session](TerminalWidget *pane, const QStringList &paths) {
+        copyToRex(session, pane, paths, false);
+    });
     wireRexActions(session);
     connect(session, &RexSession::ended, this, [this, session, shownAny, quiet](const QString &reason) {
         m_rexSessions.removeOne(session);
@@ -4226,3 +4248,116 @@ void MainWindow::updateProjectNotice()
     }
     m_projectNotice->show();
 }
+
+#ifdef PUDDLEJUMPER_REX
+namespace {
+
+// A copy's progress, in a dialog that shows only if it takes a while; its
+// end in the status bar, or a warning if it failed.
+void watchRexCopy(MainWindow *window, RexFileCopy *copy, const QString &what,
+                  std::function<QString()> succeeded)
+{
+    auto *dialog = new QProgressDialog(what, MainWindow::tr("Cancel"), 0, 1000, window);
+    dialog->setWindowTitle(MainWindow::tr("Copying Files"));
+    dialog->setWindowModality(Qt::NonModal);
+    dialog->setMinimumDuration(800);
+    dialog->setAutoClose(false);
+    dialog->setAutoReset(false);
+    dialog->setValue(0);
+    QObject::connect(dialog, &QProgressDialog::canceled, copy, &RexFileCopy::cancel);
+    QObject::connect(copy, &RexFileCopy::progress, dialog, [dialog](qint64 done, qint64 total) {
+        dialog->setValue(total > 0 ? int(std::min<qint64>(1000, done * 1000 / total)) : 0);
+    });
+    window->statusBar()->showMessage(what);
+    QPointer<MainWindow> guard(window);
+    QObject::connect(copy, &RexFileCopy::finished, window,
+                     [guard, dialog, copy, what, succeeded = std::move(succeeded)](const QString &error) {
+        dialog->deleteLater();
+        copy->deleteLater();
+        if (!guard)
+            return;
+        if (error.isEmpty()) {
+            guard->statusBar()->showMessage(succeeded(), 8000);
+        } else if (error == RexFileCopy::tr("cancelled")) {
+            guard->statusBar()->showMessage(MainWindow::tr("Copy cancelled"), 4000);
+        } else {
+            guard->statusBar()->clearMessage();
+            QMessageBox::warning(guard, MainWindow::tr("Copy Failed"),
+                                 MainWindow::tr("%1\n\nThe copy failed: %2").arg(what, error));
+        }
+    });
+}
+
+QString itemsText(int n)
+{
+    return MainWindow::tr("%n item(s)", nullptr, n);
+}
+
+} // namespace
+
+void MainWindow::copyToRex(RexSession *session, TerminalWidget *pane, const QStringList &paths, bool ask)
+{
+    QPointer<RexSession> guard(session);
+    QPointer<MainWindow> self(this);
+    // Relative paths there start at the pane's directory (else home).
+    session->paneDirectory(pane, [self, guard, paths, ask](const QString &dir) {
+        if (!self || !guard)
+            return;
+        const QString host = rexaddress::displayName(guard->server());
+        QString dest;
+        if (ask) {
+            bool ok = false;
+            dest = QInputDialog::getText(self, tr("Copy to Server"),
+                                         tr("Copy %1 to this folder on %2 (relative paths start at %3):")
+                                             .arg(itemsText(paths.size()), host,
+                                                  dir.isEmpty() ? tr("the home folder") : dir),
+                                         QLineEdit::Normal, dir.isEmpty() ? QStringLiteral("~/") : dir + QLatin1Char('/'),
+                                         &ok)
+                       .trimmed();
+            if (!ok || !guard)
+                return;
+        }
+        RexFileCopy *copy = guard->newFileCopy();
+        const QString what = paths.size() == 1
+                                 ? tr("Copying %1 to %2…").arg(QFileInfo(paths.first()).fileName(), host)
+                                 : tr("Copying %1 to %2…").arg(itemsText(paths.size()), host);
+        watchRexCopy(self, copy, what, [copy, host, paths]() {
+            return tr("Copied %1 to %2:%3").arg(itemsText(paths.size()), host, copy->destination());
+        });
+        copy->upload(paths, dir, dest);
+    });
+}
+
+void MainWindow::copyFromRex(RexSession *session, TerminalWidget *pane)
+{
+    QPointer<RexSession> guard(session);
+    QPointer<MainWindow> self(this);
+    session->paneDirectory(pane, [self, guard](const QString &dir) {
+        if (!self || !guard)
+            return;
+        const QString host = rexaddress::displayName(guard->server());
+        bool ok = false;
+        const QString remote =
+            QInputDialog::getText(self, tr("Copy from Server"),
+                                  tr("A file or folder on %1 to copy here; * and ? match names, and relative "
+                                     "paths start at %2:")
+                                      .arg(host, dir.isEmpty() ? tr("the home folder") : dir),
+                                  QLineEdit::Normal, QString(), &ok)
+                .trimmed();
+        if (!ok || remote.isEmpty() || !guard)
+            return;
+        const QString local = QFileDialog::getExistingDirectory(
+            self, tr("Copy into Folder"), QStandardPaths::writableLocation(QStandardPaths::DownloadLocation));
+        if (local.isEmpty() || !guard)
+            return;
+        RexFileCopy *copy = guard->newFileCopy();
+        watchRexCopy(self, copy, tr("Copying %1 from %2…").arg(remote, host), [copy, local]() {
+            const QStringList placed = copy->placed();
+            if (placed.size() == 1)
+                return tr("Copied to %1").arg(QDir::toNativeSeparators(placed.first()));
+            return tr("Copied %1 into %2").arg(itemsText(placed.size()), QDir::toNativeSeparators(local));
+        });
+        copy->download({remote}, dir, local);
+    });
+}
+#endif

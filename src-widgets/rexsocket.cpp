@@ -130,14 +130,23 @@ void RexSocket::open(const QUrl &server, const QString &path, const QString &sub
         connect(m_web, &QWebSocket::connected, this, &RexSocket::connected);
         connect(m_web, &QWebSocket::textMessageReceived, this, &RexSocket::textMessageReceived);
         connect(m_web, &QWebSocket::binaryMessageReceived, this, &RexSocket::binaryMessageReceived);
-        auto gone = [this]() {
+        connect(m_web, &QWebSocket::bytesWritten, this, [this](qint64 n) {
+            m_queued = std::max<qint64>(0, m_queued - n);
+            emit bytesWritten();
+        });
+        auto gone = [this](bool error) {
+            if (m_done)
+                return;
             QString reason = m_web->closeReason();
             if (reason.isEmpty() && m_web->error() != QAbstractSocket::UnknownSocketError)
                 reason = m_web->errorString();
+            // A connection lost without a close frame: QWebSocket still
+            // says 1000 then, so the error says so instead.
+            m_closeCode = error ? 1006 : int(m_web->closeCode());
             finish(reason);
         };
-        connect(m_web, &QWebSocket::disconnected, this, gone);
-        connect(m_web, &QWebSocket::errorOccurred, this, gone);
+        connect(m_web, &QWebSocket::disconnected, this, [gone]() { gone(false); });
+        connect(m_web, &QWebSocket::errorOccurred, this, [gone]() { gone(true); });
         QUrl url = server;
         url.setScheme(server.scheme() == QLatin1String("https") ? QStringLiteral("wss") : QStringLiteral("ws"));
         url.setPath(path);
@@ -151,6 +160,7 @@ void RexSocket::open(const QUrl &server, const QString &path, const QString &sub
     m_local = new QLocalSocket(this);
     connect(m_local, &QLocalSocket::connected, this, &RexSocket::onLocalConnected);
     connect(m_local, &QLocalSocket::readyRead, this, &RexSocket::onLocalData);
+    connect(m_local, &QLocalSocket::bytesWritten, this, &RexSocket::bytesWritten);
     connect(m_local, &QLocalSocket::disconnected, this, &RexSocket::onLocalGone);
     connect(m_local, &QLocalSocket::errorOccurred, this, &RexSocket::onLocalGone);
     // From the event loop: a Unix socket can connect inside the call, before
@@ -170,12 +180,21 @@ void RexSocket::sendTextMessage(const QString &text)
         sendFrame(kText, text.toUtf8());
 }
 
-void RexSocket::sendBinaryMessage(const QByteArray &data)
+qint64 RexSocket::bytesToWrite() const
 {
     if (m_web)
+        return m_queued;
+    return m_local ? m_local->bytesToWrite() : 0;
+}
+
+void RexSocket::sendBinaryMessage(const QByteArray &data)
+{
+    if (m_web) {
+        m_queued += data.size();
         m_web->sendBinaryMessage(data);
-    else if (m_upgraded && !m_closing)
+    } else if (m_upgraded && !m_closing) {
         sendFrame(kBinary, data);
+    }
 }
 
 void RexSocket::abort()
@@ -335,6 +354,8 @@ void RexSocket::readFrames()
         case kPong:
             break;
         case kClose:
+            m_closeCode = payload.size() >= 2 ? qFromBigEndian<quint16>(reinterpret_cast<const uchar *>(payload.constData()))
+                                              : 1005;
             if (payload.size() > 2 && m_reason.isEmpty())
                 m_reason = QString::fromUtf8(payload.mid(2));
             if (!m_closing) {

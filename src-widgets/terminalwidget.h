@@ -8,6 +8,8 @@
 
 #include <QWidget>
 
+#include <functional>
+
 #include "profiles.h"
 #include "settings.h"
 
@@ -62,6 +64,13 @@ public:
     int id() const { return m_id; }
 
     QTermWidget *terminal() const { return m_terminal; }
+    /* Local files dropped on the terminal go to `handler` rather than being
+     * typed as their paths; it returns false to have them typed after all.
+     * An empty handler puts things back. */
+    void setFileDropHandler(std::function<bool(const QStringList &paths)> handler)
+    {
+        m_fileDrop = std::move(handler);
+    }
 
     QString sessionTitle() const { return m_title; }
 
@@ -289,6 +298,7 @@ private:
     const Settings &m_settings;
     TerminalProfile m_profile;
     QTermWidget *m_terminal = nullptr;
+    std::function<bool(const QStringList &)> m_fileDrop;
     QLabel *m_followBadge = nullptr;  // setFollowing()
     bool m_floating = false;          // setFloating()
     QString m_fallbackTitle;          // setFallbackTitle()

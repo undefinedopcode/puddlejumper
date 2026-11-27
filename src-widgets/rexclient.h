@@ -65,7 +65,7 @@ public:
     // A WebSocket to `path` on the server (TCP or its Unix socket).
     RexSocket *newSocket(const QString &path, const QString &subprotocol, qint64 maxMessage, QObject *parent) const;
 
-    static constexpr int kApiRevision = 21;
+    static constexpr int kApiRevision = 24;
     static constexpr int kApiMinRevision = 8;
 
 signals:

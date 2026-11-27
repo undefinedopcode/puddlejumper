@@ -25,6 +25,8 @@
 #include <QLabel>
 #include <QMouseEvent>
 #include <QMenu>
+#include <QMimeData>
+#include <QDropEvent>
 #include <QPainter>
 #include <QScrollBar>
 #include <QStyle>
@@ -568,6 +570,17 @@ bool TerminalWidget::eventFilter(QObject *watched, QEvent *event)
 {
     if (event->type() == QEvent::MouseButtonPress && watched == display())
         emit pointerPressed();
+    if (event->type() == QEvent::Drop && watched == display() && m_fileDrop) {
+        auto *drop = static_cast<QDropEvent *>(event);
+        QStringList paths;
+        for (const QUrl &url : drop->mimeData()->urls())
+            if (url.isLocalFile())
+                paths.append(url.toLocalFile());
+        if (!paths.isEmpty() && m_fileDrop(paths)) {
+            drop->acceptProposedAction();
+            return true;
+        }
+    }
     return QWidget::eventFilter(watched, event);
 }
 

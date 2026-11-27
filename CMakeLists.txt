@@ -167,6 +167,7 @@ if(TARGET Qt6::WebSockets)
         src-widgets/rexsession.cpp src-widgets/rexsession.h
         src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
         src-widgets/rexclient.cpp src-widgets/rexclient.h
+        src-widgets/rexfilecopy.cpp src-widgets/rexfilecopy.h
         src-widgets/rexsocket.cpp src-widgets/rexsocket.h
         src-widgets/rexterminalstream.cpp src-widgets/rexterminalstream.h
         src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
@@ -405,6 +406,23 @@ if(TARGET Qt6::WebSockets)
     target_link_libraries(test-rexclient PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets qtermwidget)
     target_include_directories(test-rexclient PRIVATE src-widgets)
 
+    # test-rexfilecopy — copying files with a Rex server's fs block: the tar
+    # offline, then up and down against a server on this machine.
+    # Run: ./build/test-rexfilecopy [http://127.0.0.1:PORT | unix:///path]
+    if(UNIX)  # its trees have links and FIFOs in them
+    qt_add_executable(test-rexfilecopy
+        src-widgets/dev/test_rexfilecopy.cpp
+        src-widgets/rexfilecopy.cpp src-widgets/rexfilecopy.h
+        src-widgets/rexclient.cpp src-widgets/rexclient.h
+        src-widgets/rexsocket.cpp src-widgets/rexsocket.h
+        src-widgets/rexterminalstream.cpp src-widgets/rexterminalstream.h
+        src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
+        src-widgets/ghosttyreplay.cpp src-widgets/ghosttyreplay.h
+    )
+    target_link_libraries(test-rexfilecopy PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets qtermwidget)
+    target_include_directories(test-rexfilecopy PRIVATE src-widgets)
+    endif()
+
     # test-rexsession — RexSession (a Rex tab) with real TerminalWidget panes
     # against a running server. Run: ./build/test-rexsession http://127.0.0.1:51433
     qt_add_executable(test-rexsession
@@ -412,6 +430,7 @@ if(TARGET Qt6::WebSockets)
         src-widgets/rexsession.cpp src-widgets/rexsession.h
         src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
         src-widgets/rexclient.cpp src-widgets/rexclient.h
+        src-widgets/rexfilecopy.cpp src-widgets/rexfilecopy.h
         src-widgets/rexsocket.cpp src-widgets/rexsocket.h
         src-widgets/rexterminalstream.cpp src-widgets/rexterminalstream.h
         src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h

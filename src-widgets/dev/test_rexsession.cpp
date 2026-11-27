@@ -52,6 +52,8 @@
 #include <QJsonArray>
 #include <QTemporaryDir>
 #include <QJsonDocument>
+#include <QDropEvent>
+#include <QMimeData>
 #include <QStandardPaths>
 #include <QTextStream>
 #include <QThread>
@@ -644,6 +646,31 @@ int main(int argc, char *argv[])
     if (!check(waitFor([&] { return shows(first, QStringLiteral("DONE_ONE")); }), QStringLiteral("typed and echoed")))
         QTextStream(stderr) << "  the pane shows:\n    " << paneLines(first).mid(0, 12).join(QStringLiteral("\n    ")) << "\n";
     agrees(server, c, QStringLiteral("first window"));
+
+    // Files dropped on a pane: for a server elsewhere, filesDropped (the
+    // window copies them there); for one on this machine's socket, typed as
+    // their paths, as for a local terminal.
+    {
+        QStringList dropped;
+        auto conn = QObject::connect(c.session, &RexSession::filesDropped,
+                                     [&](TerminalWidget *, const QStringList &paths) { dropped = paths; });
+        QMimeData mime;
+        mime.setUrls({QUrl::fromLocalFile(QStringLiteral("/etc/hostname"))});
+        QDropEvent drop(QPointF(10, 10), Qt::CopyAction, &mime, Qt::LeftButton, Qt::NoModifier);
+        // Qt hands a Drop to a widget only during a real drag, so the pane's
+        // filter (where drops are taken) is given it directly.
+        QObject *paneObject = first;
+        const bool taken = paneObject->eventFilter(first->terminal()->findChild<Konsole::TerminalDisplay *>(), &drop);
+        if (c.session->isLocal())
+            check(!taken && dropped.isEmpty(), QStringLiteral("a drop on a local server's pane is left to the terminal"));
+        else
+            check(taken && dropped == QStringList{QStringLiteral("/etc/hostname")},
+                  QStringLiteral("a drop on a remote server's pane is filesDropped"));
+        QObject::disconnect(conn);
+        bool answered = false;
+        c.session->paneDirectory(first, [&](const QString &) { answered = true; });
+        check(waitFor([&] { return answered; }), QStringLiteral("paneDirectory answers"));
+    }
 
     // A font change: the cells change size, so the grid does, and the
     // server is told (it was left at the old size).
