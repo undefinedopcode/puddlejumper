@@ -31,6 +31,9 @@
 #include "notifier.h"
 #include "terminaltab.h"
 #include "terminalwidget.h"
+#ifdef PUDDLEJUMPER_WEB
+#include "webtab.h"
+#endif
 
 #ifdef PUDDLEJUMPER_REX
 #include "rexkeymap.h"
@@ -91,6 +94,7 @@ bool argumentAction(const QString &name)
 {
     return name.startsWith(QLatin1String("client.mode.")) || name == QLatin1String("client.tab.goto")
         || name == QLatin1String("client.notify") || name == QLatin1String("client.clipboard.set")
+        || name == QLatin1String("client.web.open")
         || name == QLatin1String("client.workspace.switch");
 }
 
@@ -216,6 +220,20 @@ QJsonObject MainWindow::rexKeymapRequest() const
                            {QStringLiteral("category"), QStringLiteral("Edit")},
                            {QStringLiteral("args"), argsSchema({{QStringLiteral("text"), QStringLiteral("string")}},
                                                                {QStringLiteral("text")})}};
+#ifdef PUDDLEJUMPER_WEB
+    actions << QJsonObject{{QStringLiteral("name"), QStringLiteral("client.web.open")},
+                           {QStringLiteral("kind"), QStringLiteral("client")},
+                           {QStringLiteral("title"), tr("Open a Web Tab")},
+                           {QStringLiteral("description"),
+                            tr("Opens url (http or https; host:port will do) in a web tab, in the workspace of the "
+                               "terminal it came from. An open tab already showing it is shown instead, unless reuse "
+                               "is false; focus false leaves the current tab showing")},
+                           {QStringLiteral("category"), QStringLiteral("Tab")},
+                           {QStringLiteral("args"), argsSchema({{QStringLiteral("url"), QStringLiteral("string")},
+                                                                {QStringLiteral("focus"), QStringLiteral("boolean")},
+                                                                {QStringLiteral("reuse"), QStringLiteral("boolean")}},
+                                                               {QStringLiteral("url")})}};
+#endif
     // Keymap modes: entered and left by binding these.
     for (const char *name : {"client.mode.enter", "client.mode.exit", "client.mode.exit_all"}) {
         const QString n = QString::fromLatin1(name);
@@ -390,6 +408,51 @@ bool MainWindow::performClientAction(const QString &name, const QJsonObject &arg
                                      .arg(source()),
                                  8000);
         return true;
+    }
+    if (name == QLatin1String("client.web.open")) {
+#ifdef PUDDLEJUMPER_WEB
+        const QString input = args.value(QLatin1String("url")).toString();
+        const QUrl url = WebTab::urlFromInput(input);
+        // Only web pages: not files, nor anything else a page could be.
+        if (!url.isValid() || (url.scheme() != QLatin1String("http") && url.scheme() != QLatin1String("https"))) {
+            *error = tr("client.web.open needs an http or https address, not “%1”").arg(input.left(200));
+            return false;
+        }
+        const bool focus = args.value(QLatin1String("focus")).toBool(true);
+        // In the workspace of the terminal it came from, else the shown one.
+        source();
+        const int workspace = sourceTab ? workspaceOf(sourceTab) : m_currentWorkspace;
+        if (args.value(QLatin1String("reuse")).toBool(true)) {
+            // The same address, whatever the trailing slash ("host:port" is
+            // "http://host:port/" once loaded).
+            const auto same = [](QUrl u) {
+                u = u.adjusted(QUrl::StripTrailingSlash | QUrl::NormalizePathSegments);
+                if (u.path() == QLatin1String("/"))
+                    u.setPath(QString());
+                return u;
+            };
+            const QUrl wanted = same(url);
+            for (Tab *page : allPages()) {
+                auto *web = qobject_cast<WebTab *>(page);
+                if (web && workspaceOf(web) == workspace && same(web->url()) == wanted) {
+                    if (focus)
+                        showTab(web);
+                    return true;
+                }
+            }
+        }
+        auto *tab = new WebTab(url);
+        addTab(tab, tab->title(), QString(), workspace);
+        syncTabText(tab);
+        if (focus) {
+            showTab(tab);
+            tab->focusContent();
+        }
+        return true;
+#else
+        *error = tr("This build of PuddleJumper has no web tabs");
+        return false;
+#endif
     }
     if (name == QLatin1String("client.mode.enter")) {
         const QString mode = args.value(QLatin1String("mode")).toString();
