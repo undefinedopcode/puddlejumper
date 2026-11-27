@@ -18,11 +18,16 @@ The repository is signed, so pacman has to trust its key. Do this once:
 
 ```sh
 curl -fsSL https://github.com/undefinedopcode/puddlejumper/releases/download/arch-x86_64/puddlejumper.asc | sudo pacman-key --add -
-sudo pacman-key --lsign-key <FINGERPRINT>
+sudo pacman-key --lsign-key 5C92C7FD64DAB8EFD20667A0F456F750ECB36FB4
 sudo pacman -Sy puddlejumper
 ```
 
-atlantis has a repository of its own, set up the same way:
+The key is `undefinedopcode packages`, fingerprint
+`5C92C7FD64DAB8EFD20667A0F456F750ECB36FB4` (ed25519, expires 2029-11-26).
+Check that `pacman-key --add` printed this fingerprint before you sign it.
+
+atlantis has a repository of its own, signed with the same key and set up
+the same way:
 
 ```ini
 [atlantis]
