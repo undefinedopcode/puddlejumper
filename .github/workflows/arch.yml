@@ -1,0 +1,87 @@
+# The Arch Linux package, as a pacman repository on GitHub Releases: each
+# push to main rebuilds it (packaging/arch/build-repo.sh) and replaces the
+# assets of the release "arch-x86_64", which pacman reads as a repository:
+#
+#   [puddlejumper]
+#   Server = https://github.com/undefinedopcode/puddlejumper/releases/download/arch-$arch
+#
+# Signing: put an armored private key (no passphrase, used for nothing else)
+# in the secret ARCH_SIGNING_KEY; without it the repository is unsigned.
+name: Arch Linux
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: arch
+  cancel-in-progress: false   # a half-replaced release is worse than a wait
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    env:
+      ARCH_SIGNING_KEY: ${{ secrets.ARCH_SIGNING_KEY }}
+    steps:
+      - name: Tools
+        run: pacman -Syu --noconfirm --needed git
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # pkgver counts the commits
+
+      - name: Dependencies
+        run: |
+          deps=$(bash -c 'startdir=$PWD/packaging/arch; source packaging/arch/PKGBUILD; echo ${depends[@]} ${makedepends[@]}')
+          pacman -S --noconfirm --needed $deps
+
+      - name: Signing key
+        if: env.ARCH_SIGNING_KEY != ''
+        run: |
+          printf '%s\n' "$ARCH_SIGNING_KEY" | gpg --batch --import
+          echo "GPG_KEY=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/{print $10; exit}')" >> "$GITHUB_ENV"
+
+      - name: Build
+        run: packaging/arch/build-repo.sh repo
+
+      - name: Public key
+        if: env.GPG_KEY != ''
+        run: gpg --armor --export "$GPG_KEY" > repo/puddlejumper.asc
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch-x86_64
+          path: repo/
+          if-no-files-found: error
+
+  publish:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: arch-x86_64
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: arch-x86_64
+          path: repo
+
+      - name: Replace the release's assets
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 || gh release create "$TAG" --target "$GITHUB_SHA" --latest=false \
+            --title "Arch Linux repository (x86_64)" \
+            --notes "A pacman repository, rebuilt from main. See packaging/arch/README.md."
+          # The packages first, then the database that names them; then drop
+          # what's no longer in it (the last package).
+          gh release upload "$TAG" repo/*.pkg.tar.zst* --clobber
+          gh release upload "$TAG" repo/* --clobber
+          new=$(cd repo && ls)
+          gh release view "$TAG" --json assets --jq '.assets[].name' | while read -r a; do
+            grep -qxF "$a" <<<"$new" || gh release delete-asset "$TAG" "$a" --yes
+          done

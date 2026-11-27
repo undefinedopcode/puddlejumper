@@ -1,0 +1,33 @@
+# PuddleJumper for Arch Linux, built from the checkout this file is in
+# (CI and a local `makepkg` alike): packaging/arch/build-repo.sh builds it
+# into a pacman repository.
+#
+#   cd packaging/arch && makepkg -si
+
+pkgname=puddlejumper
+_root=$(cd -- "${startdir:-$PWD}/../.." && pwd)
+# 0.2.0.r123.gabcdef0: the project's version, the commits on this branch,
+# and the commit (so every push is a newer package).
+pkgver=$(sed -n 's/^ *VERSION \([0-9.]*\)$/\1/p' "$_root/CMakeLists.txt" | head -1).r$(git -C "$_root" rev-list --count HEAD).g$(git -C "$_root" rev-parse --short=7 HEAD)
+pkgrel=1
+pkgdesc='A terminal for Linux and macOS: local, tmux and Rex sessions, VNC, RDP and web tabs'
+arch=('x86_64' 'aarch64')
+url='https://github.com/undefinedopcode/puddlejumper'
+license=('GPL-2.0-or-later')
+depends=('qt6-base' 'qt6-svg' 'qt6-websockets' 'qt6-webengine' 'yaml-cpp' 'zlib' 'freerdp' 'hicolor-icon-theme')
+makedepends=('cmake' 'ninja' 'git')
+optdepends=('tmux: tmux tabs'
+            'atlantis: a local Rex server')
+options=('!debug') # a debug package is 25 MB more on every release
+
+build() {
+  cmake -S "$_root" -B build -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DPUDDLEJUMPER_WEB=ON
+  cmake --build build --target puddlejumper
+}
+
+package() {
+  DESTDIR="$pkgdir" cmake --install build
+}
