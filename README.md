@@ -964,6 +964,16 @@ The plain-`Ctrl` bindings that remain (`Ctrl+Tab`, `Ctrl+,`, `Ctrl+=`/`-`/`0`)
 are non-letter keys that produce no control code, so no terminal program wants
 them. Anything else uses `Ctrl+Shift`+letter.
 
+**Rex actions.** A Rex server's `init.lua` can add actions and key bindings
+that PuddleJumper shows in its palette and performs. `examples/rex/init.lua`
+is a starting point: a project launcher, a log beside the shell, run in a
+split (and again), git status and pull, an ssh picker, labelling the tab after
+the folder and branch, focus mode, and a pane mode (`h` `j` `k` `l`, `Esc`),
+all under `Ctrl+Shift+A`. It uses only Rex's own API, so it loads on Rex and
+atlantis alike. `examples/rex/events.lua` reacts to events (renaming a window
+after its folder as you `cd`, a notification when a command fails). Run it with
+`rex do examples/rex/events.lua --all -C PuddleJumper`.
+
 ## Project layout
 
 The application is the Qt Widgets build. The original Qt Quick implementation
