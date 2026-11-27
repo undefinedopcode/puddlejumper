@@ -217,6 +217,8 @@ public:
      * reports nothing.
      */
     void takeScreenshot();
+    /* What takeScreenshot() reports, returned; null without a display. */
+    QPixmap screenshot() const;
     void startRegionScreenshot();
 
     /*

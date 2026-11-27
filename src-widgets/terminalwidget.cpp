@@ -977,15 +977,22 @@ Konsole::TerminalDisplay *TerminalWidget::display() const
 
 void TerminalWidget::takeScreenshot()
 {
+    const QPixmap image = screenshot();
+    if (!image.isNull())
+        emit screenshotTaken(image);
+}
+
+QPixmap TerminalWidget::screenshot() const
+{
     auto *d = display();
     if (!d)
-        return;
+        return QPixmap();
     // The grid plus the display's own margin on every side, so the text isn't
     // flush against the edge. This excludes the scrollbar (which sits outside
     // the margin) and the sliver of a partial cell at the right and bottom.
     const int m = d->margin();
     const QRect area = d->cellArea().adjusted(-m, -m, m, m).intersected(d->rect());
-    emit screenshotTaken(ScreenshotOverlay::crop(d->grab(), area));
+    return ScreenshotOverlay::crop(d->grab(), area);
 }
 
 void TerminalWidget::startRegionScreenshot()

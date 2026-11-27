@@ -57,6 +57,8 @@
 #include <QClipboard>
 #include <QDateTime>
 #include <QDialog>
+#include <QDir>
+#include <QSaveFile>
 #include <QSplitter>
 #include <QTimer>
 #include <QStandardPaths>
@@ -108,7 +110,7 @@ bool argumentAction(const QString &name)
         || name == QLatin1String("client.web.open") || name == QLatin1String("client.vnc.open")
         || name == QLatin1String("client.rdp.open") || name == QLatin1String("client.file.upload")
         || name == QLatin1String("client.file.download") || name == QLatin1String("client.colorscheme.set")
-        || name == QLatin1String("client.profile.apply")
+        || name == QLatin1String("client.profile.apply") || name == QLatin1String("client.screenshot.save")
         || name == QLatin1String("client.workspace.switch");
 }
 
@@ -321,6 +323,18 @@ QJsonObject MainWindow::rexKeymapRequest() const
                            {QStringLiteral("args"), argsSchema({{QStringLiteral("name"), QStringLiteral("string")},
                                                                 {QStringLiteral("tab"), QStringLiteral("boolean")}},
                                                                {QStringLiteral("name")})}};
+    // A screenshot with no prompt: only ever a new file in Pictures.
+    actions << QJsonObject{{QStringLiteral("name"), QStringLiteral("client.screenshot.save")},
+                           {QStringLiteral("kind"), QStringLiteral("client")},
+                           {QStringLiteral("title"), tr("Save a Screenshot")},
+                           {QStringLiteral("description"),
+                            tr("Saves a picture of the terminal it came from (else the current one), or of its "
+                               "whole tab with tab true, in the Pictures folder on this computer: as name (a file "
+                               "name, .png or .jpg, no folders), else puddlejumper-<date and time>.png. Never over "
+                               "a file: a name already there is refused")},
+                           {QStringLiteral("category"), QStringLiteral("Pane")},
+                           {QStringLiteral("args"), argsSchema({{QStringLiteral("name"), QStringLiteral("string")},
+                                                                {QStringLiteral("tab"), QStringLiteral("boolean")}})}};
     // Keymap modes: entered and left by binding these.
     for (const char *name : {"client.mode.enter", "client.mode.exit", "client.mode.exit_all"}) {
         const QString n = QString::fromLatin1(name);
@@ -625,6 +639,71 @@ bool MainWindow::performClientAction(const QString &name, const QJsonObject &arg
             showTab(tab);
             tab->focusContent();
         }
+        return true;
+    }
+    if (name == QLatin1String("client.screenshot.save")) {
+        const QString where = source();
+        TerminalWidget *target = pane ? pane : currentTerminal();
+        if (!target) {
+            *error = tr("%1: no terminal to take").arg(name);
+            return false;
+        }
+        // The file: a plain name in Pictures, never one there already.
+        QString file = args.value(QLatin1String("name")).toString().trimmed();
+        const bool named = !file.isEmpty();
+        if (named) {
+            if (file.contains(QLatin1Char('/')) || file.contains(QLatin1Char('\\')) || file.startsWith(QLatin1Char('.'))
+                || file.size() > 200 || file.contains(QChar(0))) {
+                *error = tr("%1: name is a file name, with no folders").arg(name);
+                return false;
+            }
+            const QString suffix = QFileInfo(file).suffix().toLower();
+            if (suffix.isEmpty())
+                file += QStringLiteral(".png");
+            else if (suffix != QLatin1String("png") && suffix != QLatin1String("jpg") && suffix != QLatin1String("jpeg")) {
+                *error = tr("%1: a .png or .jpg name").arg(name);
+                return false;
+            }
+        }
+        QString dir = QStandardPaths::writableLocation(QStandardPaths::PicturesLocation);
+        if (dir.isEmpty() || !QDir().mkpath(dir))
+            dir = QDir::homePath();
+        const QDir pictures(dir);
+        if (!named) {
+            const QString stem = QStringLiteral("puddlejumper-")
+                                 + QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+            file = stem + QStringLiteral(".png");
+            for (int n = 2; pictures.exists(file); ++n)
+                file = QStringLiteral("%1-%2.png").arg(stem).arg(n);
+        }
+        const QString path = pictures.filePath(file);
+        // The picture: the pane's screen, or the whole tab as it shows.
+        QPixmap image;
+        if (args.value(QLatin1String("tab")).toBool(false)) {
+            for (QWidget *w = target->parentWidget(); w; w = w->parentWidget())
+                if (auto *tab = qobject_cast<TerminalTab *>(w)) {
+                    image = tab->grab();
+                    break;
+                }
+        } else {
+            image = target->screenshot();
+        }
+        if (image.isNull() || image.size().isEmpty()) {
+            *error = tr("%1: the terminal isn't showing anything to take").arg(name);
+            return false;
+        }
+        // Written beside it first, then moved in only if nothing took the name.
+        QSaveFile out(path);
+        if (QFileInfo::exists(path)) {
+            *error = tr("%1: %2 is already there").arg(name, QDir::toNativeSeparators(path));
+            return false;
+        }
+        if (!out.open(QIODevice::WriteOnly) || !image.save(&out, named && !file.endsWith(QLatin1String(".png"), Qt::CaseInsensitive) ? "JPG" : "PNG")
+            || QFileInfo::exists(path) || !out.commit()) {
+            *error = tr("%1: couldn't save %2").arg(name, QDir::toNativeSeparators(path));
+            return false;
+        }
+        statusBar()->showMessage(tr("Screenshot saved to %1 by %2").arg(QDir::toNativeSeparators(path), where), 8000);
         return true;
     }
     if (name == QLatin1String("client.colorscheme.set") || name == QLatin1String("client.profile.apply")) {
