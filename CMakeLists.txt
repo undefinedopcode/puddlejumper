@@ -419,6 +419,12 @@ qt_add_executable(test-clipboard src-widgets/dev/test_clipboard.cpp)
 target_link_libraries(test-clipboard PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets qtermwidget)
 target_include_directories(test-clipboard PRIVATE src-widgets)
 
+# test-graphics — kitty's graphics protocol (TerminalGraphics): chunks as the
+# spec and as kitten icat send them, files and shared memory. Dev tool only.
+# Run: ./build/test-graphics
+qt_add_executable(test-graphics src-widgets/dev/test_graphics.cpp)
+target_link_libraries(test-graphics PRIVATE Qt6::Core Qt6::Gui qtermwidget)
+
 # test-rexterminalstream — the Rex terminal stream (snapshot, markers,
 # output) on a capture from a Rex-compatible server, and the client path from
 # it into qtermwidget. Dev tool only; never installed.

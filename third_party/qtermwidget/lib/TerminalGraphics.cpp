@@ -58,12 +58,16 @@ bool isSensitive(const QString &path)
     return false;
 }
 
-// Bytes [offset, offset + size) of something `total` long (size 0: the rest).
+// Bytes [offset, offset + size) of something `total` long (size 0: the
+// rest), or as many as there are: kitty reads what it can and finds out
+// when decoding whether it was enough (kitten icat's queries give S as the
+// path's length, not the file's).
 bool span(qint64 total, qint64 offset, qint64 size, qint64 &wanted)
 {
-    wanted = size > 0 ? size : total - offset;
-    return offset >= 0 && offset <= total && wanted >= 0 && offset + wanted <= total
-        && wanted <= Konsole::TerminalGraphics::kQuota;
+    if (offset < 0 || offset > total || size < 0)
+        return false;
+    wanted = size > 0 ? qMin(size, total - offset) : total - offset;
+    return wanted <= Konsole::TerminalGraphics::kQuota;
 }
 
 bool readFile(const QString &real, qint64 offset, qint64 size, QByteArray &out)
@@ -292,11 +296,15 @@ TerminalGraphics::Result TerminalGraphics::command(const QByteArray &body, const
         return r;
     }
 
-    // The rest of an image coming in chunks: only m (and q) after the first,
-    // and a=f for a frame's.
+    // The rest of an image coming in chunks. The spec has only m (and q)
+    // after the first, and a=f for a frame's; kitty takes any direct
+    // transmission while one is coming in as more of it, its other keys
+    // ignored, and kitten icat repeats a=T (and q) on every chunk.
     if (m_loading) {
-        const bool sameAction = !cmd.hasAction || (cmd.action == 'f' && m_load.action == 'f');
-        if (sameAction && !cmd.hasId && !cmd.hasNumber) {
+        const bool continues = m_load.action == 'f'
+            ? !cmd.hasAction || cmd.action == 'f'
+            : (!cmd.hasAction || cmd.action == 't' || cmd.action == 'T' || cmd.action == 'q') && cmd.medium == 'd';
+        if (continues) {
             if (m_loadData.size() + base64.decoded.size() > kQuota) {
                 m_loading = false;
                 m_loadData.clear();
