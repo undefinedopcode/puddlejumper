@@ -3,6 +3,8 @@
 --
 --   rex do ~/.config/rex/events.lua --all -C PuddleJumper
 --
+-- (or atlantis do, the same way).
+--
 -- --all hears every session; -C names the app that shows notifications.
 --
 --   * A window takes the name of its terminal's folder (and git branch) as
