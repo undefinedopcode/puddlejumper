@@ -31,6 +31,11 @@
 #include "notifier.h"
 #include "terminaltab.h"
 #include "terminalwidget.h"
+#include "vnctab.h"
+#include "vncview.h"
+#ifdef PUDDLEJUMPER_RDP
+#include "rdpclient.h"
+#endif
 #ifdef PUDDLEJUMPER_WEB
 #include "webtab.h"
 #endif
@@ -94,7 +99,8 @@ bool argumentAction(const QString &name)
 {
     return name.startsWith(QLatin1String("client.mode.")) || name == QLatin1String("client.tab.goto")
         || name == QLatin1String("client.notify") || name == QLatin1String("client.clipboard.set")
-        || name == QLatin1String("client.web.open")
+        || name == QLatin1String("client.web.open") || name == QLatin1String("client.vnc.open")
+        || name == QLatin1String("client.rdp.open")
         || name == QLatin1String("client.workspace.switch");
 }
 
@@ -234,6 +240,32 @@ QJsonObject MainWindow::rexKeymapRequest() const
                                                                 {QStringLiteral("reuse"), QStringLiteral("boolean")}},
                                                                {QStringLiteral("url")})}};
 #endif
+    // Remote desktops: an address or a saved server's name. No password:
+    // the tab asks for one when it connects, so none passes through Lua.
+    {
+        QStringList kinds{QStringLiteral("vnc")};
+#ifdef PUDDLEJUMPER_RDP
+        kinds << QStringLiteral("rdp");
+#endif
+        for (const QString &kind : std::as_const(kinds)) {
+            const bool rdp = kind == QLatin1String("rdp");
+            actions << QJsonObject{
+                {QStringLiteral("name"), QStringLiteral("client.%1.open").arg(kind)},
+                {QStringLiteral("kind"), QStringLiteral("client")},
+                {QStringLiteral("title"), rdp ? tr("Open an RDP Tab") : tr("Open a VNC Tab")},
+                {QStringLiteral("description"),
+                 tr("Opens a remote desktop at address (host[:port]), or the saved server called name, in the "
+                    "workspace of the terminal it came from; user for its login. The password is asked for when "
+                    "it connects. A tab already showing it is shown instead unless reuse is false; focus false "
+                    "leaves the current tab showing")},
+                {QStringLiteral("category"), QStringLiteral("Tab")},
+                {QStringLiteral("args"), argsSchema({{QStringLiteral("address"), QStringLiteral("string")},
+                                                     {QStringLiteral("name"), QStringLiteral("string")},
+                                                     {QStringLiteral("user"), QStringLiteral("string")},
+                                                     {QStringLiteral("focus"), QStringLiteral("boolean")},
+                                                     {QStringLiteral("reuse"), QStringLiteral("boolean")}})}};
+        }
+    }
     // Keymap modes: entered and left by binding these.
     for (const char *name : {"client.mode.enter", "client.mode.exit", "client.mode.exit_all"}) {
         const QString n = QString::fromLatin1(name);
@@ -453,6 +485,92 @@ bool MainWindow::performClientAction(const QString &name, const QJsonObject &arg
         *error = tr("This build of PuddleJumper has no web tabs");
         return false;
 #endif
+    }
+    if (name == QLatin1String("client.vnc.open") || name == QLatin1String("client.rdp.open")) {
+        const bool rdp = name == QLatin1String("client.rdp.open");
+#ifndef PUDDLEJUMPER_RDP
+        if (rdp) {
+            *error = tr("This build of PuddleJumper has no RDP support");
+            return false;
+        }
+#endif
+        QString address = args.value(QLatin1String("address")).toString().trimmed();
+        const QString savedName = args.value(QLatin1String("name")).toString().trimmed();
+        QString user = args.value(QLatin1String("user")).toString().trimmed();
+        bool reducedColour = false, adaptive = false;
+        if (address.isEmpty() == savedName.isEmpty()) {
+            *error = tr("%1 needs an address or a saved server's name (one of them)").arg(name);
+            return false;
+        }
+        if (!savedName.isEmpty()) {
+            // The saved server of that kind called so: exactly, else ignoring case.
+            const SavedServer::Kind kind = rdp ? SavedServer::Rdp : SavedServer::Vnc;
+            const QList<SavedServer> servers = m_servers.servers();
+            const SavedServer *found = nullptr;
+            for (int pass = 0; pass < 2 && !found; ++pass) {
+                for (const SavedServer &sv : servers) {
+                    if (sv.kind == kind && sv.title().compare(savedName, pass ? Qt::CaseInsensitive
+                                                                               : Qt::CaseSensitive) == 0) {
+                        found = &sv;
+                        break;
+                    }
+                }
+            }
+            if (!found) {
+                *error = tr("No saved %1 server is called “%2”").arg(rdp ? tr("RDP") : tr("VNC"), savedName.left(200));
+                return false;
+            }
+            address = found->address;
+            if (user.isEmpty())
+                user = found->user;
+            reducedColour = found->reducedColour;
+            adaptive = found->adaptive;
+        }
+        QString host;
+        quint16 port = 0;
+        bool parsed = false;
+#ifdef PUDDLEJUMPER_RDP
+        if (rdp)
+            parsed = RdpClient::parseAddress(address, &host, &port);
+#endif
+        if (!rdp)
+            parsed = VncView::parseAddress(address, &host, &port);
+        if (!parsed) {
+            *error = tr("“%1” isn't an address").arg(address.left(200));
+            return false;
+        }
+        const bool focus = args.value(QLatin1String("focus")).toBool(true);
+        source();
+        const int workspace = sourceTab ? workspaceOf(sourceTab) : m_currentWorkspace;
+        const QString scheme = rdp ? QStringLiteral("rdp") : QStringLiteral("vnc");
+        const QString wanted = QStringLiteral("%1:%2").arg(host).arg(port);
+        if (args.value(QLatin1String("reuse")).toBool(true)) {
+            for (Tab *page : allPages()) {
+                auto *vnc = qobject_cast<VncTab *>(page);
+                if (vnc && workspaceOf(vnc) == workspace && vnc->view()->client()->scheme() == scheme
+                    && vnc->address().compare(wanted, Qt::CaseInsensitive) == 0) {
+                    if (focus)
+                        showTab(vnc);
+                    return true;
+                }
+            }
+        }
+        RemoteClient *client = nullptr;
+#ifdef PUDDLEJUMPER_RDP
+        if (rdp)
+            client = new RdpClient;
+#endif
+        auto *tab = new VncTab(host, port, reducedColour, nullptr, client);
+        tab->setAdaptiveQuality(adaptive);
+        if (!user.isEmpty())
+            tab->setUsername(user);
+        addTab(tab, tab->title(), QString(), workspace);
+        syncTabText(tab);
+        if (focus) {
+            showTab(tab);
+            tab->focusContent();
+        }
+        return true;
     }
     if (name == QLatin1String("client.mode.enter")) {
         const QString mode = args.value(QLatin1String("mode")).toString();
