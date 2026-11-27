@@ -9,9 +9,13 @@
 #include <QWidget>
 
 #include <functional>
+#include <memory>
 
 #include "profiles.h"
+#include "programresume.h"
+#include "resumerules.h"
 #include "settings.h"
+
 
 class ProgramStatus;
 class QLabel;
@@ -235,6 +239,24 @@ public:
      * query itself (tmux 3.9 does), so that it isn't answered twice. */
     void setSourceAnswersProgramStatus(bool answers);
 
+    /*
+     * Program resume (OSC 7577, see ProgramResume). A local pane gives its
+     * shell a token (OSC7577_TOKEN) and keeps what the programs here report.
+     * resumeVerdict() is what the rules in force (resumerules.h) make of the
+     * newest record, and the directory it would resume in; not trusted, with
+     * no reason, when there is none.
+     */
+    resumerules::Verdict resumeVerdict(QString *cwd = nullptr);
+    /*
+     * After a restore: start `command` in `cwd` once the shell is ready for
+     * input (its first prompt, or quiet), by typing the helper
+     * ("puddlejumper --resume-helper FILE"), which runs it from a file only
+     * the user can read, never as shell source.
+     */
+    void resumeProgram(const QStringList &command, const QString &cwd);
+    /* Where those files go; the restore clears what's left there. */
+    static QString resumeDirectory();
+
 signals:
     void titleChanged(const QString &title);
     void sessionFinished();
@@ -319,6 +341,7 @@ private:
      */
     QString m_appliedColorScheme;
 
+    std::unique_ptr<ProgramResume> m_resume;   // local panes
     ProgramStatus *m_status = nullptr;
     // The foreground process group when a record was last reported, and a
     // look every so often while one is held that its going ends.

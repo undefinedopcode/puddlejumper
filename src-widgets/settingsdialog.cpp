@@ -518,6 +518,13 @@ QWidget *SettingsDialog::buildWindowPage()
         m_settings.setTabLayout(m_tabLayoutBox->itemData(i).toString());
     });
     tabs->addRow(tr("Layout"), m_tabLayoutBox);
+    m_sidebarCompactBox = new QCheckBox(tr("Compact cards: a small thumbnail, details beside it"), page);
+    connect(m_sidebarCompactBox, &QCheckBox::toggled, this, [this](bool on) { m_settings.setSidebarCompact(on); });
+    // Only the sidebar has cards.
+    connect(m_tabLayoutBox, &QComboBox::currentIndexChanged, this, [this](int i) {
+        m_sidebarCompactBox->setEnabled(m_tabLayoutBox->itemData(i).toString() == QLatin1String("thumbnails"));
+    });
+    tabs->addRow(QString(), m_sidebarCompactBox);
 
     // ---- watching ------------------------------------------------------------
     QFormLayout *watch = addGroup(layout, tr("Watch a Terminal"));
@@ -581,13 +588,21 @@ QWidget *SettingsDialog::buildWindowPage()
                                             "An idle shell prompt never asks."), page));
 
     m_restoreSessionBox = new QCheckBox(tr("Reopen workspaces and tabs at startup"), page);
+    m_resumeProgramsBox = new QCheckBox(tr("Start programs again that said how"), page);
     connect(m_restoreSessionBox, &QCheckBox::toggled, this, [this](bool v) {
         m_settings.setRestoreSession(v);
+        m_resumeProgramsBox->setEnabled(v);
+    });
+    connect(m_resumeProgramsBox, &QCheckBox::toggled, this, [this](bool v) {
+        m_settings.setResumePrograms(v);
     });
     quitting->addRow(tr("Next start"), m_restoreSessionBox);
-    quitting->addRow(QString(), makeHint(tr("Layouts, directories and names; programs "
-                                            "aren't restarted. Running tmux sessions "
-                                            "are reattached."), page));
+    quitting->addRow(QString(), makeHint(tr("Layouts, directories and names. Running tmux "
+                                            "sessions are reattached."), page));
+    quitting->addRow(QString(), m_resumeProgramsBox);
+    quitting->addRow(QString(), makeHint(tr("Local tabs' programs that report how (OSC 7577), such as\n"
+                                            "Claude Code with the hook from \"atlantis skill setup\".\n"
+                                            "Rules: ~/.config/puddlejumper/resume-rules.json"), page));
 
     layout->addStretch(1);
     return page;
@@ -1123,6 +1138,8 @@ void SettingsDialog::syncFromSettings()
     const int layoutIndex = m_tabLayoutBox->findData(a.tabLayout);
     if (layoutIndex >= 0)
         m_tabLayoutBox->setCurrentIndex(layoutIndex);
+    m_sidebarCompactBox->setChecked(a.sidebarCompact);
+    m_sidebarCompactBox->setEnabled(a.tabLayout == QLatin1String("thumbnails"));
     m_monitorActivityBox->setChecked(s.monitorActivity);
     m_notifyProgramStatusBox->setChecked(s.notifyProgramStatus);
     m_tintBlockedTabsBox->setChecked(s.tintBlockedTabs);
@@ -1132,6 +1149,8 @@ void SettingsDialog::syncFromSettings()
     m_silenceTimeoutBox->setEnabled(s.monitorSilence);
     m_confirmCloseBox->setChecked(s.confirmCloseWithRunningProcesses);
     m_restoreSessionBox->setChecked(s.restoreSession);
+    m_resumeProgramsBox->setChecked(s.resumePrograms);
+    m_resumeProgramsBox->setEnabled(s.restoreSession);
 }
 
 // ---- Servers ------------------------------------------------------------------

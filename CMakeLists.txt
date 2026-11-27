@@ -61,6 +61,8 @@ qt_add_executable(puddlejumper
     src-widgets/notifier.h
     src-widgets/programstatus.cpp
     src-widgets/programstatus.h
+    src-widgets/programresume.cpp src-widgets/programresume.h
+    src-widgets/resumerules.cpp src-widgets/resumerules.h
     src-widgets/settingsdialog.cpp
     src-widgets/settingsdialog.h
     src-widgets/tab.h
@@ -165,6 +167,7 @@ if(TARGET Qt6::WebSockets)
     message(STATUS "Rex tabs: on")
     target_sources(puddlejumper PRIVATE
         src-widgets/rexsession.cpp src-widgets/rexsession.h
+        src-widgets/rexoffline.cpp src-widgets/rexoffline.h
         src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
         src-widgets/rexclient.cpp src-widgets/rexclient.h
         src-widgets/rexfilecopy.cpp src-widgets/rexfilecopy.h
@@ -308,6 +311,20 @@ set_target_properties(test-programstatus PROPERTIES AUTOMOC ON)
 target_include_directories(test-programstatus PRIVATE src-widgets)
 
 # ---------------------------------------------------------------------------
+# test-programresume — the OSC 7577 parser and the trust rules, against
+# atlantis's cases. Dev tool only; never installed. Run:
+# ./build/test-programresume
+# ---------------------------------------------------------------------------
+qt_add_executable(test-programresume
+    src-widgets/dev/test_programresume.cpp
+    src-widgets/programresume.cpp src-widgets/programresume.h
+    src-widgets/resumerules.cpp src-widgets/resumerules.h
+    src-widgets/procinfo.cpp src-widgets/procinfo.h
+)
+target_link_libraries(test-programresume PRIVATE Qt6::Core)
+target_include_directories(test-programresume PRIVATE src-widgets)
+
+# ---------------------------------------------------------------------------
 # test-serverstore — saved servers through QSettings and back. Dev tool only;
 # never installed. Run: ./build/test-serverstore
 # ---------------------------------------------------------------------------
@@ -428,6 +445,7 @@ if(TARGET Qt6::WebSockets)
     qt_add_executable(test-rexsession
         src-widgets/dev/test_rexsession.cpp
         src-widgets/rexsession.cpp src-widgets/rexsession.h
+        src-widgets/rexoffline.cpp src-widgets/rexoffline.h
         src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
         src-widgets/rexclient.cpp src-widgets/rexclient.h
         src-widgets/rexfilecopy.cpp src-widgets/rexfilecopy.h
@@ -445,6 +463,8 @@ if(TARGET Qt6::WebSockets)
         src-widgets/formername.cpp src-widgets/formername.h
         src-widgets/procinfo.cpp src-widgets/procinfo.h
         src-widgets/programstatus.cpp src-widgets/programstatus.h
+        src-widgets/programresume.cpp src-widgets/programresume.h
+        src-widgets/resumerules.cpp src-widgets/resumerules.h
         src-widgets/screenshotoverlay.cpp src-widgets/screenshotoverlay.h
     )
     target_link_libraries(test-rexsession PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::WebSockets qtermwidget)
@@ -454,6 +474,69 @@ if(TARGET Qt6::WebSockets)
         FILES ${LUCIDE_ICONS}
     )
     target_include_directories(test-rexsession PRIVATE src-widgets)
+
+    # test-rexreconnect — a Rex tab whose server stops and starts again (it
+    # runs an atlantis of its own on 127.0.0.1:51499). Run:
+    # ./build/test-rexreconnect /path/to/atlantis
+    qt_add_executable(test-rexreconnect
+        src-widgets/dev/test_rexreconnect.cpp
+        src-widgets/rexsession.cpp src-widgets/rexsession.h
+        src-widgets/rexoffline.cpp src-widgets/rexoffline.h
+        src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
+        src-widgets/rexclient.cpp src-widgets/rexclient.h
+        src-widgets/rexfilecopy.cpp src-widgets/rexfilecopy.h
+        src-widgets/rexsocket.cpp src-widgets/rexsocket.h
+        src-widgets/rexterminalstream.cpp src-widgets/rexterminalstream.h
+        src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
+        src-widgets/ghosttyreplay.cpp src-widgets/ghosttyreplay.h
+        src-widgets/terminalwidget.cpp src-widgets/terminalwidget.h
+        src-widgets/terminaltab.cpp src-widgets/terminaltab.h
+        src-widgets/appicon.cpp src-widgets/appicon.h
+        src-widgets/tab.h
+        src-widgets/settings.cpp src-widgets/settings.h
+        src-widgets/profiles.cpp src-widgets/profiles.h
+        src-widgets/colorscheme.cpp src-widgets/colorscheme.h
+        src-widgets/formername.cpp src-widgets/formername.h
+        src-widgets/procinfo.cpp src-widgets/procinfo.h
+        src-widgets/programstatus.cpp src-widgets/programstatus.h
+        src-widgets/programresume.cpp src-widgets/programresume.h
+        src-widgets/resumerules.cpp src-widgets/resumerules.h
+        src-widgets/screenshotoverlay.cpp src-widgets/screenshotoverlay.h
+    )
+    target_link_libraries(test-rexreconnect PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::WebSockets qtermwidget)
+    qt_add_resources(test-rexreconnect "lucide_icons"
+        PREFIX "/lucide"
+        BASE icons/lucide
+        FILES ${LUCIDE_ICONS}
+    )
+    target_include_directories(test-rexreconnect PRIVATE src-widgets)
+
+    # test-localresume — program resume (OSC 7577) in real local panes: a
+    # report, the rules, and a restore through the helper. Run:
+    # ./build/test-localresume
+    if(UNIX)
+    qt_add_executable(test-localresume
+        src-widgets/dev/test_localresume.cpp
+        src-widgets/terminalwidget.cpp src-widgets/terminalwidget.h
+        src-widgets/appicon.cpp src-widgets/appicon.h
+        src-widgets/settings.cpp src-widgets/settings.h
+        src-widgets/profiles.cpp src-widgets/profiles.h
+        src-widgets/colorscheme.cpp src-widgets/colorscheme.h
+        src-widgets/formername.cpp src-widgets/formername.h
+        src-widgets/procinfo.cpp src-widgets/procinfo.h
+        src-widgets/programstatus.cpp src-widgets/programstatus.h
+        src-widgets/programresume.cpp src-widgets/programresume.h
+        src-widgets/resumerules.cpp src-widgets/resumerules.h
+        src-widgets/screenshotoverlay.cpp src-widgets/screenshotoverlay.h
+    )
+    target_link_libraries(test-localresume PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg qtermwidget)
+    qt_add_resources(test-localresume "lucide_icons"
+        PREFIX "/lucide"
+        BASE icons/lucide
+        FILES ${LUCIDE_ICONS}
+    )
+    target_include_directories(test-localresume PRIVATE src-widgets)
+    endif()
 endif()
 
 # With a libghostty-vt build (in a Ghostty checkout: zig build -Demit-lib-vt,

@@ -11,8 +11,10 @@
 #include <QColor>
 #include <QWidget>
 
+class QIcon;
 class QListWidget;
 class QListWidgetItem;
+class QMenu;
 class QMouseEvent;
 class QPoint;
 class QToolButton;
@@ -48,6 +50,11 @@ public:
     /* Move one tab, keeping its marks (the tab moved elsewhere). */
     void moveTab(int from, int to);
 
+    /* The workspace, first in the row: its name and colour, its menu
+     * (switch, add, edit), shown only while there is more than one; as the
+     * sidebar's header has it (ThumbnailSidebar::setWorkspace()). */
+    void setWorkspace(const QString &name, const QIcon &icon, QMenu *menu, bool show);
+
     /* Colours from the terminal scheme; see ThumbnailSidebar::setColours(). */
     void setColours(const QColor &background, const QColor &foreground);
 
@@ -76,6 +83,7 @@ private:
     void updateOverflow();
     void showAllTabsMenu();
 
+    QToolButton *m_workspace = nullptr;
     QListWidget *m_list = nullptr;
     QToolButton *m_allTabs = nullptr;
     QToolButton *m_newTab = nullptr;

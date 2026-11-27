@@ -42,6 +42,9 @@ public:
         bool    drawLineChars = true;
         int     lineSpacing = 0;                // extra pixels between rows
         QString tabLayout = QStringLiteral("standard"); // |thumbnails
+        /* The sidebar's cards turned sideways: a small thumbnail with the
+         * title and details beside it (docs/compact-sidebar.md). */
+        bool    sidebarCompact = false;
 
         /*
          * Terminal background opacity, 0.3..1.0. Revives the QML build's
@@ -133,10 +136,16 @@ public:
 
         /*
          * Reopen the workspaces and tabs that were open at quit: their
-         * layouts, directories and names (programs are not restarted), and
-         * tmux sessions on this machine that are still running.
+         * layouts, directories and names, and tmux sessions on this machine
+         * that are still running.
          */
         bool    restoreSession = true;
+        /*
+         * With it, start again the programs in local tabs that said how
+         * (OSC 7577: Claude Code through its hook) and that a trust rule
+         * trusts (resumerules.h). Never as root.
+         */
+        bool    resumePrograms = true;
 
         /*
          * Paste handling (QTermWidget's own options). Both off by default,
@@ -164,6 +173,7 @@ public:
     void setDrawLineChars(bool v);
     void setLineSpacing(int v);
     void setTabLayout(const QString &v);
+    void setSidebarCompact(bool v);
     void setOpacity(double v);
     void setCursorShape(int v);
     void setTerminalMargin(int v);
@@ -175,6 +185,7 @@ public:
     void setFlowControlWarning(bool v);
     void setConfirmCloseWithRunningProcesses(bool v);
     void setRestoreSession(bool v);
+    void setResumePrograms(bool v);
     void setMonitorActivity(bool v);
     void setNotifyProgramStatus(bool v);
     void setTintBlockedTabs(bool v);

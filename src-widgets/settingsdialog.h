@@ -162,6 +162,7 @@ private:
 
     // Tabs & Window.
     QComboBox *m_tabLayoutBox = nullptr;
+    QCheckBox *m_sidebarCompactBox = nullptr;
     QCheckBox *m_monitorActivityBox = nullptr;
     QCheckBox *m_notifyProgramStatusBox = nullptr;
     QCheckBox *m_tintBlockedTabsBox = nullptr;
@@ -170,6 +171,7 @@ private:
     QSpinBox *m_silenceTimeoutBox = nullptr;
     QCheckBox *m_confirmCloseBox = nullptr;
     QCheckBox *m_restoreSessionBox = nullptr;
+    QCheckBox *m_resumeProgramsBox = nullptr;
 
     // Profiles page.
     QListWidget *m_profileList = nullptr;

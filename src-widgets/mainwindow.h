@@ -162,6 +162,9 @@ private:
     /* Workspaces and their tabs at quit, reopened at the next start. */
     void saveSession();
     bool restoreSession();
+    /* Whether programs in local tabs are saved and started again (program
+     * resume: the settings, and never as root). */
+    bool resumeAllowed() const;
 
     /* A new local pane; `directory` overrides the profile's start directory. */
     TerminalWidget *makePane(const TerminalProfile &profile,
@@ -216,9 +219,12 @@ private:
     void chooseRexSession(const QUrl &server);
     /* Attach to a session (or make one, sessionId empty). Its tabs go to the
      * workspace with id `workspaceId` (the shown one if empty). `quiet`: a
-     * restore, where a session that has gone is skipped without a word. */
+     * restore, where a session that has gone is skipped without a word;
+     * `saved` is what was saved of it ({label, windows: [{id, label}]}),
+     * for its tabs to wait in if the server isn't there yet. */
     void openRex(const QUrl &server, const QString &sessionId,
-                 const QString &workspaceId = QString(), bool quiet = false);
+                 const QString &workspaceId = QString(), bool quiet = false,
+                 const QJsonObject &saved = QJsonObject());
     /* Before closing a Rex tab or pane: false to leave it open (cancelled,
      * or detached instead because it would end the session). */
     bool confirmRexClose(RexSession *session, TerminalTab *tab, bool pane);
@@ -385,7 +391,6 @@ private:
     QMenu *m_inboxMenu = nullptr;
     QAction *m_nextNeedingYouAct = nullptr;
     QMenu *m_workspaceMenu = nullptr;
-    QToolButton *m_workspaceButton = nullptr;
     QAction *m_newWorkspaceAct = nullptr;
     QMenu *m_openWorkspaceMenu = nullptr;
     QMenu *m_startWindowMenu = nullptr;

@@ -10,6 +10,7 @@
 #include "colorscheme.h"
 #include "formername.h"
 #include "procinfo.h"
+#include "programresume.h"
 #include "programstatus.h"
 #include "screenshotoverlay.h"
 
@@ -22,6 +23,10 @@
 #include <QFileInfo>
 #include <QFont>
 #include <QHash>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QStandardPaths>
 #include <QLabel>
 #include <QMouseEvent>
 #include <QMenu>
@@ -31,6 +36,7 @@
 #include <QScrollBar>
 #include <QStyle>
 #include <QDir>
+#include <QRandomGenerator>
 #include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
@@ -108,6 +114,10 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings,
     connect(m_terminal, &QTermWidget::promptStarted, this, [this]() {
         m_promptMarks = true;
         programEnded();
+    });
+    connect(m_terminal, &QTermWidget::programResumeReport, this, [this](const QString &body) {
+        if (m_resume)
+            m_resume->apply(body, m_terminal->getShellPID());
     });
     // Back at this terminal: what finished here has been seen.
     connect(m_terminal, &QTermWidget::termKeyPressed, m_status, &ProgramStatus::markSeen);
@@ -197,8 +207,11 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings,
 
     if (m_profile.workingDirectory && !m_profile.workingDirectory->isEmpty())
         m_terminal->setWorkingDirectory(*m_profile.workingDirectory);
-    if (!m_profile.environment.isEmpty())
-        m_terminal->setEnvironment(m_profile.environment);   // added to puddlejumper's own
+    // Added to puddlejumper's own: the profile's, and a token for programs
+    // to sign how to resume them with (OSC 7577).
+    m_resume = std::make_unique<ProgramResume>();
+    m_terminal->setEnvironment(m_profile.environment
+                               + QStringList{QStringLiteral("OSC7577_TOKEN=") + m_resume->token()});
 
     m_terminal->startShellProgram();
 }
@@ -768,6 +781,75 @@ void TerminalWidget::setSourceAnswersProgramStatus(bool answers)
 {
     if (isExternal())
         m_terminal->setAnswerProgramStatusQuery(!answers);
+}
+
+resumerules::Verdict TerminalWidget::resumeVerdict(QString *cwd)
+{
+    if (!m_resume || !m_terminal)
+        return {};
+    const int shell = m_terminal->getShellPID();
+    const auto records = m_resume->records(shell);
+    if (records.isEmpty())
+        return {};
+    const ProgramResume::Record &r = records.first();
+    const QString dir = !r.cwd.isEmpty() ? r.cwd : procinfo::workingDirectory(r.pid);
+    if (cwd)
+        *cwd = dir;
+    return resumerules::current().check(r.argv, dir, resumerules::Process::live(r.pid, shell));
+}
+
+QString TerminalWidget::resumeDirectory()
+{
+    return QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + QStringLiteral("/resume");
+}
+
+void TerminalWidget::resumeProgram(const QStringList &command, const QString &cwd)
+{
+    if (command.isEmpty() || !m_terminal || isExternal())
+        return;
+    const QString dir = resumeDirectory();
+    QDir().mkpath(dir);
+    QFile::setPermissions(dir, QFileDevice::ReadOwner | QFileDevice::WriteOwner | QFileDevice::ExeOwner);
+    QByteArray name(12, Qt::Uninitialized);
+    for (char &c : name)
+        c = "0123456789abcdef"[QRandomGenerator::system()->bounded(16)];
+    const QString file = dir + QLatin1Char('/') + QString::fromLatin1(name) + QStringLiteral(".json");
+    QFile f(file);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::NewOnly))
+        return;
+    f.setPermissions(QFileDevice::ReadOwner | QFileDevice::WriteOwner);
+    f.write(QJsonDocument(QJsonObject{{QStringLiteral("argv"), QJsonArray::fromStringList(command)},
+                                      {QStringLiteral("cwd"), cwd}}).toJson(QJsonDocument::Compact));
+    f.close();
+
+    const auto quote = [](QString w) {
+        return QLatin1Char('\'') + w.replace(QLatin1Char('\''), QStringLiteral("'\\''")) + QLatin1Char('\'');
+    };
+    // A leading space keeps it out of history, in shells that do that.
+    const QString line = QLatin1Char(' ') + quote(QCoreApplication::applicationFilePath())
+                         + QStringLiteral(" --resume-helper ") + quote(file) + QLatin1Char('\r');
+    // Ready: a prompt (OSC 133), or output that has gone quiet, or 5 s.
+    auto *poll = new QTimer(this);
+    auto prompted = std::make_shared<bool>(false);
+    auto lastSeq = std::make_shared<quint64>(m_outputSeq);
+    auto quietFor = std::make_shared<int>(0);
+    auto waited = std::make_shared<int>(0);
+    connect(m_terminal, &QTermWidget::promptStarted, poll, [prompted]() { *prompted = true; });
+    connect(poll, &QTimer::timeout, this, [=]() {
+        *waited += 50;
+        if (m_outputSeq != *lastSeq) {
+            *lastSeq = m_outputSeq;
+            *quietFor = 0;
+        } else if (m_outputSeq > 0) {
+            *quietFor += 50;
+        }
+        if (*prompted || *quietFor >= 400 || *waited >= 5000) {
+            poll->stop();
+            poll->deleteLater();
+            sendText(line);
+        }
+    });
+    poll->start(50);
 }
 
 void TerminalWidget::programEnded()

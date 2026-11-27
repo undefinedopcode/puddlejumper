@@ -318,6 +318,9 @@ signals:
      * "7501;"; and a full reset (RIS) of the terminal. */
     void programStatusReport(const QString &body);
     void fullReset();
+    /* puddlejumper: an OSC 7577 (program resume) report, its body after
+     * "7577;". */
+    void programResumeReport(const QString &body);
     /* puddlejumper: OSC 9;4 progress, and OSC 133;A (a prompt starts). */
     void progressReport(int state, int progress);
     void promptStarted();

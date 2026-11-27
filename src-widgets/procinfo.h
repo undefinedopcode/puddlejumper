@@ -27,4 +27,11 @@ QStringList arguments(int pid);
 // or -1 if it has none or it can't be read.
 int terminalForegroundGroup(int pid);
 
+// Its parent, or 0 if it can't be read.
+int parent(int pid);
+
+// The program file it runs, and its working directory ("" if unknown).
+QString executable(int pid);
+QString workingDirectory(int pid);
+
 } // namespace procinfo

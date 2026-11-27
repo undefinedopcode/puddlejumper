@@ -217,6 +217,18 @@ TabStrip::TabStrip(QWidget *parent)
     row->setContentsMargins(kSide - kGapH, 0, kSide, 0);
     row->setSpacing(2);
 
+    m_workspace = new QToolButton(this);
+    m_workspace->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_workspace->setPopupMode(QToolButton::InstantPopup);
+    m_workspace->setAutoRaise(true);
+    m_workspace->setFocusPolicy(Qt::NoFocus);
+    m_workspace->setToolTip(tr("Switch workspace"));
+    QFont workspaceFont = m_workspace->font();
+    workspaceFont.setWeight(QFont::DemiBold);
+    m_workspace->setFont(workspaceFont);
+    m_workspace->hide();
+    row->addWidget(m_workspace);
+
     m_list = new TabList(this);
     m_list->setItemDelegate(new TabDelegate(m_list));
     m_list->setFlow(QListView::LeftToRight);
@@ -439,6 +451,15 @@ void TabStrip::moveTab(int from, int to)
     m_syncing = false;
 }
 
+void TabStrip::setWorkspace(const QString &name, const QIcon &icon, QMenu *menu, bool show)
+{
+    m_workspace->setText(name);
+    m_workspace->setIcon(icon);
+    if (m_workspace->menu() != menu)
+        m_workspace->setMenu(menu);
+    m_workspace->setVisible(show);
+}
+
 void TabStrip::setColours(const QColor &background, const QColor &foreground)
 {
     if (background == m_background && foreground == m_foreground)
@@ -457,6 +478,7 @@ void TabStrip::setColours(const QColor &background, const QColor &foreground)
     setPalette(pal);
     m_list->setPalette(pal);
     m_newTab->setPalette(pal);
+    m_workspace->setPalette(pal);
     m_newTab->setIcon(cardstyle::plusIcon(foreground, devicePixelRatioF()));
     m_allTabs->setPalette(pal);
     m_allTabs->setIcon(cardstyle::chevronIcon(foreground, devicePixelRatioF()));

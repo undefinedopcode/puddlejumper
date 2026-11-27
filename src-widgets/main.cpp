@@ -9,6 +9,7 @@
 #include "colorscheme.h"
 #include "disclaim.h"
 #include "formername.h"
+#include "programresume.h"
 #include "settings.h"
 
 #include <QApplication>
@@ -25,6 +26,8 @@
 #include <QUrl>
 
 #include <qtermwidget.h>
+
+#include <cstring>
 
 #ifdef Q_OS_UNIX
 #include <QSocketNotifier>
@@ -72,6 +75,10 @@ void quitOnSignals(MainWindow *window)
 
 int main(int argc, char *argv[])
 {
+#ifdef Q_OS_UNIX
+    if (argc == 3 && strcmp(argv[1], "--resume-helper") == 0)
+        return ProgramResume::runHelper(argv[2]);
+#endif
     runDisclaimedIfAsked(argc, argv);   // macOS: started to become a command (see disclaim.h)
 
 #ifdef PUDDLEJUMPER_WEB
@@ -98,6 +105,9 @@ int main(int argc, char *argv[])
                              "KONSOLE_DBUS_SESSION", "KONSOLE_VERSION", "VTE_VERSION",
                              "WT_SESSION"})
         qunsetenv(name);
+    // A resume token is the terminal's for its own first process, never
+    // passed on (OSC 7577): each local tab gets its own.
+    qunsetenv("OSC7577_TOKEN");
     qputenv("TERM_PROGRAM", "puddlejumper");
     qputenv("TERM_PROGRAM_VERSION", app.applicationVersion().toUtf8());
 

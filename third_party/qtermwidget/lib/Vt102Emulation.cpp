@@ -635,6 +635,15 @@ void Vt102Emulation::processWindowAttributeChange()
     return;
   }
 
+  // puddlejumper: OSC 7577, program resume. Every report, as it comes; none
+  // that didn't fit (the protocol discards it whole).
+  if (attributeToChange == 7577)
+  {
+    if (!tokenOverflow)
+      emit programResumeReport(newValue);
+    return;
+  }
+
   // puddlejumper: OSC 9;4 (ConEmu's progress: 4;state;percent), as it comes.
   if (attributeToChange == 9 && newValue.startsWith(QLatin1String("4;")))
   {

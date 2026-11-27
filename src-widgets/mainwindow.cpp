@@ -14,6 +14,7 @@
 #include "programstatus.h"
 #include "settingsdialog.h"
 #include "tabstrip.h"
+#include "resumerules.h"
 #include "terminaltab.h"
 #include "terminalwidget.h"
 #include "thumbnailsidebar.h"
@@ -86,6 +87,10 @@
 
 #include <Emulation.h>
 #include <qtermwidget.h>
+
+#ifdef Q_OS_UNIX
+#include <unistd.h>   // geteuid
+#endif
 
 namespace {
 
@@ -912,6 +917,19 @@ void MainWindow::buildMenus()
     syncLayoutCheck();
     connect(&m_settings, &Settings::appearanceChanged, this, syncLayoutCheck);
 
+    // The sidebar's cards, sideways and small. Remembered with tabs along
+    // the top too, for when the sidebar comes back.
+    auto *compactAct = view->addAction(tr("&Compact Sidebar"));
+    tagRexAction(compactAct, "client.sidebar.compact", "View");
+    compactAct->setCheckable(true);
+    compactAct->setStatusTip(tr("Small thumbnails in the sidebar, with each tab's details beside them"));
+    connect(compactAct, &QAction::triggered, this, [this](bool on) { m_settings.setSidebarCompact(on); });
+    const auto syncCompactCheck = [this, compactAct]() {
+        compactAct->setChecked(m_settings.appearance().sidebarCompact);
+    };
+    syncCompactCheck();
+    connect(&m_settings, &Settings::appearanceChanged, this, syncCompactCheck);
+
     /*
      * Toolbar.
      *
@@ -945,15 +963,6 @@ void MainWindow::buildMenus()
     // The same size everywhere: styles disagree (macOS asks for 32px, Breeze
     // 22px), and the Lucide set is drawn for small sizes.
     bar->setIconSize(QSize(22, 22));
-
-    // The workspace first: everything else acts within it.
-    m_workspaceButton = new QToolButton(bar);
-    m_workspaceButton->setMenu(m_workspaceMenu);
-    m_workspaceButton->setPopupMode(QToolButton::InstantPopup);
-    m_workspaceButton->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    m_workspaceButton->setToolTip(tr("Workspace: switch, add or edit"));
-    bar->addWidget(m_workspaceButton);
-    bar->addSeparator();
 
     // New Tab with the profile list as a drop-down, rather than a second
     // button: clicking opens the default profile, the arrow picks another.
@@ -2136,7 +2145,7 @@ void MainWindow::chooseRexSession(const QUrl &server)
 }
 
 void MainWindow::openRex(const QUrl &server, const QString &sessionId, const QString &workspaceId,
-                         bool quiet)
+                         bool quiet, const QJsonObject &saved)
 {
     for (RexSession *s : std::as_const(m_rexSessions)) {
         if (!sessionId.isEmpty() && s->sessionId() == sessionId && s->server() == server) {
@@ -2146,6 +2155,13 @@ void MainWindow::openRex(const QUrl &server, const QString &sessionId, const QSt
         }
     }
     auto *session = new RexSession(server, sessionId, m_settings, m_profiles.defaultProfile(), this);
+    if (quiet && !sessionId.isEmpty()) {
+        QList<RexSession::SavedWindow> windows;
+        for (const QJsonValue &v : saved.value(QStringLiteral("windows")).toArray())
+            windows.append({v.toObject().value(QStringLiteral("id")).toString(),
+                            v.toObject().value(QStringLiteral("label")).toString()});
+        session->setRestoring(windows, saved.value(QStringLiteral("label")).toString());
+    }
     m_rexSessions << session;
     m_rexWorkspace.insert(session, workspaceId.isEmpty() ? m_workspaces.value(m_currentWorkspace).id
                                                          : workspaceId);
@@ -2272,6 +2288,7 @@ void MainWindow::updateTabLayout()
     const bool thumbs =
         m_settings.appearance().tabLayout == QStringLiteral("thumbnails");
 
+    m_sidebar->setCompact(m_settings.appearance().sidebarCompact);
     m_sidebar->setVisible(thumbs);
     // In thumbnail mode the cards carry the titles, so the strip is noise.
     m_tabStrip->setVisible(!thumbs);
@@ -3428,17 +3445,16 @@ void MainWindow::rebuildWorkspaceMenu()
 void MainWindow::updateWorkspaceChrome()
 {
     const Workspace &w = m_workspaces.at(m_currentWorkspace);
-    const QIcon icon = w.icon(palette().color(QPalette::WindowText));
     const bool unseenElsewhere = std::any_of(m_workspaces.cbegin(), m_workspaces.cend(),
                                              [](const Workspace &ws) { return ws.unseenOutput; });
     const QString text = unseenElsewhere ? tr("%1  •").arg(w.name) : w.name;
-    if (m_workspaceButton) {
-        m_workspaceButton->setText(text);
-        m_workspaceButton->setIcon(icon);
-    }
-    // The sidebar has the terminal's colours, so its dot is outlined in those.
+    // At the head of the tabs, whichever way they run (the sidebar's header,
+    // or the start of the strip along the top). Both have the terminal's
+    // colours, so the dot is outlined in those.
     m_sidebar->setWorkspace(text, w.icon(m_sidebar->palette().color(QPalette::WindowText)),
                             m_workspaceMenu, m_workspaces.size() > 1);
+    m_tabStrip->setWorkspace(text, w.icon(m_tabStrip->palette().color(QPalette::WindowText)),
+                             m_workspaceMenu, m_workspaces.size() > 1);
     if (m_workspaceMenu)
         rebuildWorkspaceMenu();   // a global menu shows a copy: keep it current
 }
@@ -3468,11 +3484,22 @@ void MainWindow::saveSession()
 {
     // Local tabs as layouts of directories and profiles; tmux sessions on
     // this machine by how they were attached (over ssh, they are left be).
-    const auto describe = [](TerminalWidget *pane) {
-        return QJsonObject{
+    // A pane's program goes too, if it said how to resume it and a rule
+    // trusts it (one no rule trusts now is never saved).
+    const bool resume = resumeAllowed();
+    const auto describe = [resume](TerminalWidget *pane) {
+        QJsonObject saved{
             {QStringLiteral("dir"), pane->currentDirectory()},
             {QStringLiteral("profile"), pane->profileId()},
         };
+        QString cwd;
+        if (const resumerules::Verdict v = resume ? pane->resumeVerdict(&cwd) : resumerules::Verdict(); v.trusted)
+            saved.insert(QStringLiteral("resume"), QJsonObject{
+                {QStringLiteral("argv"), QJsonArray::fromStringList(v.command)},
+                {QStringLiteral("cwd"), cwd},
+                {QStringLiteral("rule"), v.rule},
+            });
+        return saved;
     };
     QJsonArray workspaces;
     for (int i = 0; i < m_workspaces.size(); ++i) {
@@ -3551,11 +3578,18 @@ void MainWindow::saveSession()
         QJsonArray rex;
 #ifdef PUDDLEJUMPER_REX
         for (RexSession *session : std::as_const(m_rexSessions)) {
-            if (m_rexWorkspace.value(session) != w.id || !session->isAttached())
+            // Waiting for its server counts: it comes back at the next start
+            // (and waits again there if the server is still away).
+            if (m_rexWorkspace.value(session) != w.id || !session->shouldRestore())
                 continue;
+            QJsonArray windows;
+            for (const RexSession::SavedWindow &sw : session->savedWindows())
+                windows.append(QJsonObject{{QStringLiteral("id"), sw.id}, {QStringLiteral("label"), sw.label}});
             rex.append(QJsonObject{
                 {QStringLiteral("server"), session->server().toString()},
                 {QStringLiteral("session"), session->sessionId()},
+                {QStringLiteral("label"), session->label()},
+                {QStringLiteral("windows"), windows},
             });
         }
 #endif
@@ -3626,15 +3660,44 @@ bool MainWindow::restoreSession()
             running = QString::fromUtf8(list.readAllStandardOutput()).split(QLatin1Char('\n'));
     }
 
+    // Programs to start again: the helper's files left from before go, and
+    // the rules are read afresh.
+    const bool resume = resumeAllowed();
+    bool resumed = false;
+    if (resume) {
+        QDir files(TerminalWidget::resumeDirectory());
+        for (const QString &f : files.entryList({QStringLiteral("*.json")}, QDir::Files))
+            files.remove(f);
+        resumerules::reload();
+    }
+
     for (int i = 0; i < saved.size(); ++i) {
         const QJsonObject o = saved.at(i).toObject();
         const QString root = m_workspaces.at(i).root;
-        const auto makeSavedPane = [this, &root](const QJsonObject &p) {
+        const auto makeSavedPane = [this, &root, resume, &resumed](const QJsonObject &p) {
             // Where it was; failing that the workspace's folder, or the profile's.
             QString dir = p.value(QStringLiteral("dir")).toString();
             if (dir.isEmpty() || !QDir(dir).exists())
                 dir = !root.isEmpty() && QDir(root).exists() ? root : QString();
-            return makePane(m_profiles.profileById(p.value(QStringLiteral("profile")).toString()), dir);
+            TerminalWidget *pane =
+                makePane(m_profiles.profileById(p.value(QStringLiteral("profile")).toString()), dir);
+            const QJsonObject saved = p.value(QStringLiteral("resume")).toObject();
+            const QStringList argv = saved.value(QStringLiteral("argv")).toVariant().toStringList();
+            const QString cwd = saved.value(QStringLiteral("cwd")).toString();
+            if (pane && resume && !argv.isEmpty()) {
+                // The rules in force now decide, as at the save; a directory
+                // that has gone means a plain shell.
+                const resumerules::Verdict v = resumerules::current().checkSaved(argv, cwd);
+                if (!v.trusted)
+                    qInfo("not resuming %s: no rule trusts it (%s)", qPrintable(argv.first()), qPrintable(v.reason));
+                else if (!cwd.isEmpty() && !QDir(cwd).exists())
+                    qInfo("not resuming %s: %s has gone", qPrintable(argv.first()), qPrintable(cwd));
+                else {
+                    pane->resumeProgram(argv, cwd);
+                    resumed = true;
+                }
+            }
+            return pane;
         };
         for (const QJsonValue &t : o.value(QStringLiteral("tabs")).toArray()) {
             const QJsonObject savedTab = t.toObject();
@@ -3707,7 +3770,7 @@ bool MainWindow::restoreSession()
             const QUrl server(session.value(QStringLiteral("server")).toString());
             const QString id = session.value(QStringLiteral("session")).toString();
             if (rexaddress::isValid(server) && !id.isEmpty())
-                openRex(server, id, m_workspaces.at(i).id, true);
+                openRex(server, id, m_workspaces.at(i).id, true, session);
         }
 #endif
     }
@@ -3720,7 +3783,21 @@ bool MainWindow::restoreSession()
         m_tabs->setCurrentIndex(current);
         onCurrentTabChanged(current);
     }
+    // A saved program is tried once: saved again now, the session holds
+    // only what reports again (a crash before the next save doesn't start
+    // the same thing twice).
+    if (resumed)
+        saveSession();
     return true;
+}
+
+bool MainWindow::resumeAllowed() const
+{
+#ifdef Q_OS_UNIX
+    if (::geteuid() == 0)
+        return false;   // never as root
+#endif
+    return m_settings.scrolling().restoreSession && m_settings.scrolling().resumePrograms;
 }
 
 // ---- workspace files ----------------------------------------------------------

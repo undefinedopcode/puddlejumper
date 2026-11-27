@@ -24,6 +24,7 @@ constexpr auto kAntialias   = "appearance/antialias";
 constexpr auto kDrawLineChars = "appearance/drawLineChars";
 constexpr auto kLineSpacing = "appearance/lineSpacing";
 constexpr auto kTabLayout   = "appearance/tabLayout";
+constexpr auto kSidebarCompact = "appearance/sidebarCompact";
 constexpr auto kOpacity        = "appearance/opacity";
 constexpr auto kCursorShape    = "appearance/cursorShape";
 constexpr auto kTerminalMargin = "appearance/terminalMargin";
@@ -35,6 +36,7 @@ constexpr auto kScrollbarPos   = "scrolling/scrollbarPosition";
 constexpr auto kFlowCtrlWarn   = "scrolling/flowControlWarning";
 constexpr auto kConfirmCloseRunning = "scrolling/confirmCloseWithRunningProcesses";
 constexpr auto kRestoreSession = "window/restoreSession";
+constexpr auto kResumePrograms = "window/resumePrograms";
 constexpr auto kMonitorActivity = "scrolling/monitorActivity";
 constexpr auto kNotifyProgramStatus = "scrolling/notifyProgramStatus";
 constexpr auto kTintBlockedTabs = "scrolling/tintBlockedTabs";
@@ -106,6 +108,8 @@ void Settings::load()
         m_settings.value(kLineSpacing, m_appearance.lineSpacing).toInt();
     m_appearance.tabLayout =
         m_settings.value(kTabLayout, m_appearance.tabLayout).toString();
+    m_appearance.sidebarCompact =
+        m_settings.value(kSidebarCompact, m_appearance.sidebarCompact).toBool();
     m_appearance.cursorShape =
         m_settings.value(kCursorShape, m_appearance.cursorShape).toInt();
     m_appearance.terminalMargin =
@@ -130,6 +134,8 @@ void Settings::load()
                          m_scrolling.confirmCloseWithRunningProcesses).toBool();
     m_scrolling.restoreSession =
         m_settings.value(kRestoreSession, m_scrolling.restoreSession).toBool();
+    m_scrolling.resumePrograms =
+        m_settings.value(kResumePrograms, m_scrolling.resumePrograms).toBool();
     m_scrolling.monitorActivity =
         m_settings.value(kMonitorActivity, m_scrolling.monitorActivity).toBool();
     m_scrolling.notifyProgramStatus =
@@ -305,6 +311,15 @@ void Settings::setTabLayout(const QString &v)
     emit appearanceChanged();
 }
 
+void Settings::setSidebarCompact(bool v)
+{
+    if (m_appearance.sidebarCompact == v) return;
+    m_appearance.sidebarCompact = v;
+    m_settings.setValue(kSidebarCompact, v);
+    m_settings.sync();
+    emit appearanceChanged();
+}
+
 void Settings::setCursorShape(int v)
 {
     v = qBound(0, v, 2);
@@ -431,6 +446,15 @@ void Settings::setRestoreSession(bool v)
     if (m_scrolling.restoreSession == v) return;
     m_scrolling.restoreSession = v;
     m_settings.setValue(kRestoreSession, v);
+    m_settings.sync();
+    emit scrollingChanged();
+}
+
+void Settings::setResumePrograms(bool v)
+{
+    if (m_scrolling.resumePrograms == v) return;
+    m_scrolling.resumePrograms = v;
+    m_settings.setValue(kResumePrograms, v);
     m_settings.sync();
     emit scrollingChanged();
 }

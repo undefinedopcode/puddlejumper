@@ -530,6 +530,8 @@ void QTermWidget::init(int startnow)
     connect(m_impl->m_session->emulation(), &Emulation::programStatusReport,
             this, &QTermWidget::programStatusReport);
     connect(m_impl->m_session->emulation(), &Emulation::fullReset, this, &QTermWidget::fullReset);
+    connect(m_impl->m_session->emulation(), &Emulation::programResumeReport,
+            this, &QTermWidget::programResumeReport);
     connect(m_impl->m_session->emulation(), &Emulation::progressReport, this, &QTermWidget::progressReport);
     connect(m_impl->m_session->emulation(), &Emulation::promptStarted, this, &QTermWidget::promptStarted);
     connect(m_impl->m_session, &Session::currentDirectoryChanged, this, &QTermWidget::currentDirectoryChanged);

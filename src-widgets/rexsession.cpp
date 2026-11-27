@@ -13,11 +13,13 @@
 #include "ghosttyreplay.h"
 #include "rexclient.h"
 #include "rexfilecopy.h"
+#include "rexoffline.h"
 #include "rexsocket.h"
 #include "settings.h"
 
 #include "TerminalDisplay.h"
 
+#include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -38,8 +40,19 @@ int nextPaneId = 0;
 // A write request's data is a JSON string; keystrokes are a few bytes, a
 // paste may be large.
 constexpr qsizetype kWriteChunk = 32 * 1024;
+// Seconds between reconnects once the server is lost (about three minutes
+// in all); then the tabs wait for Reconnect.
+constexpr int kRetryDelays[] = {1, 2, 4, 8, 15, 30, 30, 30, 30, 30};
+constexpr int kRetries = int(std::size(kRetryDelays));
 
 const QString kShellFlavor = QStringLiteral("com.superlogical.terminal.shell");
+
+// A session the server doesn't have: Rex's code, and a plain one.
+bool sessionGone(const QJsonObject &error)
+{
+    const QString code = error.value(QLatin1String("code")).toString();
+    return code == QLatin1String("session_not_found") || code == QLatin1String("not_found");
+}
 
 QString shortId(const QString &id)
 {
@@ -226,8 +239,22 @@ RexSession::RexSession(const QUrl &server, const QString &sessionId, const Setti
         }
     }, Qt::QueuedConnection);
     connect(m_control, &RexControl::closed, this, [this](const QString &reason) {
-        finish(reason.isEmpty() ? tr("the connection to the server closed") : reason);
+        if (m_finished)
+            return;
+        const QString why = reason.isEmpty() ? tr("the connection to the server closed") : reason;
+        // Never attached, and nothing to keep: opening it failed.
+        if (!m_attached && !m_offline && !m_restoring && m_windows.isEmpty()) {
+            finish(why);
+            return;
+        }
+        goOffline(why);
     });
+    m_retryTimer = new QTimer(this);
+    m_retryTimer->setSingleShot(true);
+    connect(m_retryTimer, &QTimer::timeout, this, &RexSession::tryReconnect);
+    m_tickTimer = new QTimer(this);
+    m_tickTimer->setInterval(1000);
+    connect(m_tickTimer, &QTimer::timeout, this, &RexSession::showOffline);
     m_viewTimer = new QTimer(this);
     m_viewTimer->setSingleShot(true);
     m_viewTimer->setInterval(20);
@@ -356,9 +383,28 @@ void RexSession::attach()
     m_control->request(QStringLiteral("session.attach"), QJsonObject{{QStringLiteral("session_id"), m_sessionId}},
                        [this](const QJsonObject &payload, const QJsonObject &error) {
                            if (!error.isEmpty()) {
-                               finish(tr("could not attach: %1").arg(str(error, "message")));
+                               // A lost connection: closed() says so next.
+                               if (str(error, "code") == QLatin1String("disconnected"))
+                                   return;
+                               if ((m_offline || m_restoring) && sessionGone(error))
+                                   finish(tr("the session is no longer on %1").arg(rexaddress::displayName(m_server)));
+                               else
+                                   finish(tr("could not attach: %1").arg(str(error, "message")));
                                return;
                            }
+                           if (std::exchange(m_offline, false)) {
+                               // Back. A restarted server counts its view
+                               // revisions from the start again.
+                               m_connecting = false;
+                               m_retryTimer->stop();
+                               m_tickTimer->stop();
+                               m_retryAt = 0;
+                               m_attempt = 0;
+                               m_revision = -1;
+                               hideOffline();
+                               qCInfo(lcRex) << "reconnected to" << m_server;
+                           }
+                           m_restoring = false;
                            m_attached = true;
                            qCInfo(lcRex) << "attached" << m_sessionId << "on" << m_server;
                            applyView(payload.value(QLatin1String("view")).toObject());
@@ -382,7 +428,7 @@ void RexSession::fetchView()
                            if (m_finished)
                                return;
                            if (!error.isEmpty()) {
-                               if (str(error, "code") == QLatin1String("not_found"))
+                               if (sessionGone(error))
                                    finish(tr("the session was ended"));
                                return;
                            }
@@ -623,7 +669,7 @@ void RexSession::layoutWindow(Window &w)
             const Window *win = windowOf(tab);
             if (m_followingFocus || (win && win->focusedBlock == id))
                 return;  // the server's already
-            if (!id.isEmpty() && !m_finished)
+            if (!id.isEmpty() && !m_finished && !m_offline)
                 m_control->request(QStringLiteral("session.focus_block"),
                                    QJsonObject{{QStringLiteral("session_id"), m_sessionId},
                                                {QStringLiteral("block_id"), id}});
@@ -1103,7 +1149,7 @@ void RexSession::sendInput(Block *b, const QByteArray &bytes)
 {
     // Raw bytes to the block's pty, as the emulator encoded them (the
     // snapshot gave it the modes: bracketed paste, mouse, keypad).
-    if (b->exited || m_finished)
+    if (b->exited || m_finished || m_offline)
         return;
     takeBlock(b);
     for (qsizetype i = 0; i < bytes.size(); i += kWriteChunk) {
@@ -1116,7 +1162,7 @@ void RexSession::sendInput(Block *b, const QByteArray &bytes)
 
 void RexSession::sendSize(Block *b, const QSize &cells, bool again)
 {
-    if (m_finished)
+    if (m_finished || m_offline)
         return;
     const QSize cell = cellSize();
     // The same cells at a new cell size (a font change) is news too: the
@@ -1224,7 +1270,7 @@ void RexSession::takeBlock(Block *b)
 {
     // Using a pane makes this client the block's owner: the block takes this
     // pane's size (session.own_block, take).
-    if (!following(b) || b->taking || m_finished)
+    if (!following(b) || b->taking || m_finished || m_offline)
         return;
     b->taking = true;
     const QString id = b->id;
@@ -1689,11 +1735,171 @@ void RexSession::endIfEmpty()
                        });
 }
 
+// ---- Lost connections. ---------------------------------------------------
+
+QList<RexSession::SavedWindow> RexSession::savedWindows() const
+{
+    QList<SavedWindow> out;
+    for (const Window &w : m_windows)
+        out.append({w.id, w.label});
+    return out;
+}
+
+void RexSession::setRestoring(const QList<SavedWindow> &windows, const QString &label)
+{
+    m_restoring = true;
+    m_restoreWindows = windows;
+    if (!label.isEmpty())
+        m_label = label;
+}
+
+void RexSession::goOffline(const QString &reason)
+{
+    if (m_finished)
+        return;
+    if (m_offline) {   // a reconnect that failed
+        m_connecting = false;
+        scheduleReconnect();
+        return;
+    }
+    qCInfo(lcRex) << "session" << m_sessionId << "lost its server:" << reason;
+    m_offline = true;
+    m_attached = false;
+    m_offlineReason = reason;
+    m_attempt = 0;
+    m_connecting = false;
+    m_viewTimer->stop();
+    m_viewPending = m_viewAgain = false;
+    m_keymapPending = m_keymapAgain = false;
+    // The streams went with the server; the panes keep what they showed.
+    // Sizes are sent again on reattaching (a restarted server has its own).
+    for (auto &[id, b] : m_blocks) {
+        if (b->stream) {
+            b->stream->close();
+            b->stream->deleteLater();
+            b->stream = nullptr;
+        }
+        b->sent = b->sentCell = QSize();
+        b->resizing = b->retries = 0;
+        b->taking = false;
+    }
+    // A restore with the server away: the windows it had, to wait in.
+    if (m_windows.isEmpty()) {
+        if (m_label.isEmpty())
+            m_label = shortId(m_sessionId);
+        QList<SavedWindow> windows = m_restoreWindows;
+        if (windows.isEmpty())
+            windows.append({QString(), m_label});
+        for (const SavedWindow &s : std::as_const(windows)) {
+            Window w;
+            w.id = s.id;
+            w.label = s.label.isEmpty() ? m_label : s.label;
+            m_windows << w;
+        }
+        for (Window &w : m_windows)
+            layoutWindow(w);
+    }
+    scheduleReconnect();
+}
+
+void RexSession::scheduleReconnect()
+{
+    if (m_finished || !m_offline)
+        return;
+    if (m_attempt >= kRetries) {   // given up: Reconnect starts again
+        m_retryAt = 0;
+        m_tickTimer->stop();
+        qCInfo(lcRex) << "session" << m_sessionId << "gave up reconnecting after" << m_attempt << "tries";
+        showOffline();
+        return;
+    }
+    const int delay = kRetryDelays[m_attempt] * 1000;
+    m_retryAt = QDateTime::currentMSecsSinceEpoch() + delay;
+    m_retryTimer->start(delay);
+    m_tickTimer->start();
+    showOffline();
+}
+
+void RexSession::tryReconnect()
+{
+    if (m_finished || !m_offline)
+        return;
+    m_retryTimer->stop();
+    m_tickTimer->stop();
+    m_retryAt = 0;
+    m_connecting = true;
+    ++m_attempt;
+    qCInfo(lcRex) << "session" << m_sessionId << "reconnecting, try" << m_attempt;
+    showOffline();
+    m_control->open(m_server);   // a reconnect under way is dropped first
+    attach();
+}
+
+void RexSession::reconnectNow()
+{
+    if (!m_offline)
+        return;
+    if (m_attempt >= kRetries)
+        m_attempt = 0;   // a new round
+    tryReconnect();
+}
+
+void RexSession::showOffline()
+{
+    if (!m_offline)
+        return;
+    const QString title = tr("Not connected to %1").arg(rexaddress::displayName(m_server));
+    QString reason = m_offlineReason;
+    if (!reason.isEmpty())
+        reason[0] = reason.at(0).toUpper();
+    QString detail, button = tr("Reconnect Now");
+    if (m_connecting) {
+        detail = tr("%1. Reconnecting (try %2 of %3)…").arg(reason).arg(m_attempt).arg(kRetries);
+    } else if (m_retryAt > 0) {
+        const qint64 left = qMax<qint64>(1, (m_retryAt - QDateTime::currentMSecsSinceEpoch() + 999) / 1000);
+        detail = tr("%1. Reconnecting in %2 s (try %3 of %4).").arg(reason).arg(left).arg(m_attempt + 1).arg(kRetries);
+    } else {
+        detail = tr("%1. Stopped trying after %2 tries; the session is kept on the server while it runs.")
+                     .arg(reason).arg(m_attempt);
+        button = tr("Reconnect");
+    }
+    for (const Window &w : std::as_const(m_windows)) {
+        if (!w.tab)
+            continue;
+        auto *overlay = w.tab->findChild<RexOfflineOverlay *>(QString(), Qt::FindDirectChildrenOnly);
+        if (!overlay) {
+            overlay = new RexOfflineOverlay(w.tab);
+            connect(overlay, &RexOfflineOverlay::reconnectRequested, this, &RexSession::reconnectNow);
+            connect(overlay, &RexOfflineOverlay::closeRequested, this,
+                    [this]() { finish(tr("closed while not connected")); });
+            if (w.tab->isAncestorOf(QApplication::focusWidget()))
+                overlay->setFocus();
+        }
+        overlay->setState(title, detail, button);
+    }
+}
+
+void RexSession::hideOffline()
+{
+    for (const Window &w : std::as_const(m_windows))
+        if (w.tab)
+            for (auto *overlay : w.tab->findChildren<RexOfflineOverlay *>(QString(), Qt::FindDirectChildrenOnly)) {
+                const bool hadFocus = overlay->hasFocus();
+                overlay->hide();
+                overlay->deleteLater();
+                if (hadFocus && w.tab->activePane())
+                    w.tab->activePane()->setFocus();
+            }
+}
+
 void RexSession::finish(const QString &reason)
 {
     if (m_finished)
         return;
     m_finished = true;
+    m_offline = false;
+    m_retryTimer->stop();
+    m_tickTimer->stop();
     qCInfo(lcRex) << "session" << m_sessionId << "ended:" << reason;
     for (auto &[id, b] : m_blocks)
         if (b->stream)

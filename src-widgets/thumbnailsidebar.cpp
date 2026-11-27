@@ -39,6 +39,21 @@ constexpr int kPreviewRadius = 3;
 constexpr int kClose = 18;      // the close button on a hovered card
 constexpr int kScrollBar = 6;   // thin, and always reserved (see itemWidth())
 
+// Compact cards (docs/compact-sidebar.md): a thumbnail at the left, the
+// details beside it.
+constexpr int kThumbHeight = 40;
+constexpr int kThumbMinWidth = 48;
+constexpr int kThumbMaxWidth = 80;
+constexpr int kNarrow = 220;         // a sidebar narrower crops its thumbnails
+constexpr int kMinWidth = 140;
+constexpr int kCompactMinWidth = 180;
+
+// A compact thumbnail's natural size, for the terminal area's shape.
+QSize thumbSize(qreal aspect)
+{
+    return QSize(qBound(kThumbMinWidth, qRound(kThumbHeight / aspect), kThumbMaxWidth), kThumbHeight);
+}
+
 using cardstyle::kDot;
 using cardstyle::mix;
 
@@ -62,6 +77,7 @@ public:
     QColor foreground;
     qreal aspect = 0.6;
     bool tintBlocked = false;
+    bool compact = false;
 
     static QRect cardRect(const QRect &row)
     {
@@ -71,20 +87,118 @@ public:
     QRect previewRect(const QRect &row) const
     {
         const QRect card = cardRect(row);
+        if (compact) {
+            // In a narrow sidebar the thumbnail is cropped to its least
+            // width (its preview is still drawn at its natural size).
+            QSize size = thumbSize(aspect);
+            if (row.width() + kScrollBar < kNarrow)
+                size.setWidth(kThumbMinWidth);
+            return QRect(QPoint(card.left() + kPad, card.center().y() - size.height() / 2 + 1), size);
+        }
         const int w = card.width() - 2 * kPad;
         return QRect(card.left() + kPad, card.top() + kPad, w, qRound(w * aspect));
     }
 
     QRect closeRect(const QRect &row) const
     {
+        if (compact) {
+            // At the card's end, clear of the thumbnail.
+            const QRect card = cardRect(row);
+            return QRect(card.right() - kPad - kClose + 1, card.center().y() - kClose / 2 + 1, kClose, kClose);
+        }
         const QRect preview = previewRect(row);
         return QRect(preview.right() - 4 - kClose, preview.top() + 4, kClose, kClose);
     }
 
     int rowHeight(int previewHeight, const QFont &font) const
     {
+        if (compact) {
+            const int text = QFontMetrics(font).height() + 2 + QFontMetrics(smallFont(font)).height();
+            return std::max(kThumbHeight, text) + 2 * kPad + 2 * kGap;
+        }
         return 2 * kGap + kPad + previewHeight + 6 + QFontMetrics(font).height() + 1
                + QFontMetrics(smallFont(font)).height() + kPad;
+    }
+
+    void paintClose(QPainter *p, const QRect &close) const
+    {
+        p->setPen(Qt::NoPen);
+        p->setBrush(QColor(0, 0, 0, 160));
+        p->drawEllipse(close);
+        p->setPen(QPen(Qt::white, 1.5, Qt::SolidLine, Qt::RoundCap));
+        const QRectF x = QRectF(close).adjusted(5.5, 5.5, -5.5, -5.5);
+        p->drawLine(x.topLeft(), x.bottomRight());
+        p->drawLine(x.topRight(), x.bottomLeft());
+    }
+
+    // A compact card's details, beside its thumbnail: the title (with the
+    // new-output dot), then the badge as a chip, and the program's status,
+    // if it has one, ahead of the subtitle.
+    void paintCompactDetails(QPainter *p, const QStyleOptionViewItem &option, const QModelIndex &index,
+                             const QRect &preview, const QColor &fill, const QColor &accent, bool selected,
+                             bool hovered) const
+    {
+        const QRect card = cardRect(option.rect);
+        const QFont small = smallFont(option.font);
+        QFont titleFont = option.font;
+        titleFont.setWeight(selected ? QFont::DemiBold : QFont::Normal);
+        const QFontMetrics tm(titleFont), sm(small);
+        int right = card.right() - kPad;
+        if (hovered) {
+            const QRect close = closeRect(option.rect);
+            paintClose(p, close);
+            right = close.left() - 6;
+        }
+        const int left = preview.right() + 9;
+        if (right - left < 8)
+            return;
+        p->save();
+        p->setClipRect(QRect(left, card.top(), right - left + 1, card.height()));
+
+        const int block = tm.height() + 2 + sm.height();
+        QRect title(left, card.center().y() - block / 2 + 1, right - left + 1, tm.height());
+        if (index.data(kBusyRole).toBool()) {
+            cardstyle::paintDot(p, QPointF(title.right() - kDot / 2.0, title.center().y() + 0.5), accent);
+            title.setRight(title.right() - kDot - 6);
+        }
+        p->setFont(titleFont);
+        p->setPen(foreground);
+        p->drawText(title, Qt::AlignLeft | Qt::AlignVCenter,
+                    tm.elidedText(index.data(kTitleRole).toString(), Qt::ElideRight, title.width()));
+
+        QRect sub(left, title.bottom() + 3, right - left + 1, sm.height());
+        p->setFont(small);
+        const QString badge = index.data(kBadgeRole).toString();
+        if (!badge.isEmpty()) {
+            const QString text = sm.elidedText(badge, Qt::ElideRight, sub.width() / 2);
+            const QRect chip(sub.left(), sub.top(), sm.horizontalAdvance(text) + 10, sm.height());
+            p->setPen(Qt::NoPen);
+            p->setBrush(mix(fill, foreground, 0.18));
+            p->drawRoundedRect(chip, chip.height() / 2.0, chip.height() / 2.0);
+            p->setPen(foreground);
+            p->drawText(chip, Qt::AlignCenter, text);
+            sub.setLeft(chip.right() + 5);
+        }
+        QString rest = index.data(kSubtitleRole).toString();
+        const auto kind = cardstyle::Status::Kind(index.data(kStatusKindRole).toInt());
+        if (kind != cardstyle::Status::None) {
+            const QColor colour = cardstyle::statusColour(kind);
+            p->setPen(Qt::NoPen);
+            p->setBrush(colour);
+            p->drawEllipse(QPointF(sub.left() + 3, sub.center().y() + 0.5), 3, 3);
+            sub.setLeft(sub.left() + 10);
+            const QString label = sm.elidedText(index.data(kStatusLabelRole).toString(), Qt::ElideRight, sub.width());
+            p->setPen(colour);
+            p->drawText(sub, Qt::AlignLeft | Qt::AlignVCenter, label);
+            sub.setLeft(sub.left() + sm.horizontalAdvance(label));
+            if (!rest.isEmpty())
+                rest = QStringLiteral(" · ") + rest;
+        }
+        if (!rest.isEmpty() && sub.width() > sm.horizontalAdvance(QStringLiteral(" · …")) + 6) {
+            p->setPen(mix(foreground, fill, 0.45));
+            p->drawText(sub, Qt::AlignLeft | Qt::AlignVCenter, sm.elidedText(rest, Qt::ElideMiddle, sub.width()));
+        }
+        p->restore();
     }
 
     void paint(QPainter *p, const QStyleOptionViewItem &option,
@@ -115,10 +229,26 @@ public:
             p->fillRect(preview, background);
         else
             p->drawPixmap(preview.topLeft(), pm);
+        const int progress = index.data(kStatusProgressRole).toInt();
+        if (compact && kind != cardstyle::Status::None && progress >= 0) {
+            // Along the thumbnail's bottom edge, inside its corners.
+            const QRectF track(preview.left(), preview.bottom() - 2, preview.width(), 3);
+            p->setPen(Qt::NoPen);
+            p->setBrush(QColor(0, 0, 0, 120));
+            p->drawRect(track);
+            p->setBrush(cardstyle::statusColour(kind));
+            p->drawRect(QRectF(track.topLeft(), QSizeF(track.width() * progress / 100.0, track.height())));
+        }
         p->restore();
         p->setPen(QPen(mix(fill, foreground, 0.15), 1));
         p->setBrush(Qt::NoBrush);
         p->drawPath(previewPath);
+
+        if (compact) {
+            paintCompactDetails(p, option, index, preview, fill, accent, selected, hovered);
+            p->restore();
+            return;
+        }
 
         // A badge on the preview (the tmux session).
         const QString badge = index.data(kBadgeRole).toString();
@@ -144,7 +274,6 @@ public:
             status.label = index.data(kStatusLabelRole).toString();
             cardstyle::paintStatusPill(p, preview.topLeft() + QPoint(4, 4), status, small,
                                        preview.width() - 2 * kClose);
-            const int progress = index.data(kStatusProgressRole).toInt();
             if (progress >= 0) {
                 const QRectF track(preview.left() + 1, preview.bottom() - 3, preview.width() - 2, 3);
                 p->setPen(Qt::NoPen);
@@ -156,16 +285,8 @@ public:
         }
 
         // Close button, only while hovered.
-        if (hovered) {
-            const QRect close = closeRect(option.rect);
-            p->setPen(Qt::NoPen);
-            p->setBrush(QColor(0, 0, 0, 160));
-            p->drawEllipse(close);
-            p->setPen(QPen(Qt::white, 1.5, Qt::SolidLine, Qt::RoundCap));
-            const QRectF x = QRectF(close).adjusted(5.5, 5.5, -5.5, -5.5);
-            p->drawLine(x.topLeft(), x.bottomRight());
-            p->drawLine(x.topRight(), x.bottomLeft());
-        }
+        if (hovered)
+            paintClose(p, closeRect(option.rect));
 
         // Title, with the new-output dot at its end.
         const bool busy = index.data(kBusyRole).toBool();
@@ -210,7 +331,7 @@ ThumbnailSidebar::ThumbnailSidebar(QWidget *parent)
     : QWidget(parent)
 {
     // No fixed width: the main window's splitter sets it, and remembers it.
-    setMinimumWidth(140);
+    setMinimumWidth(kMinWidth);
     setMaximumWidth(520);
     setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     setAutoFillBackground(true);
@@ -413,8 +534,24 @@ void ThumbnailSidebar::setPreviewAspect(qreal aspect)
     updateItemSizes();
 }
 
+void ThumbnailSidebar::setCompact(bool compact)
+{
+    if (compact == m_compact)
+        return;
+    m_compact = compact;
+    delegateOf(m_list)->compact = compact;
+    // Compact cards need room beside the thumbnail for their details.
+    setMinimumWidth(compact ? kCompactMinWidth : kMinWidth);
+    updateItemSizes();
+    m_list->viewport()->update();
+}
+
 QSize ThumbnailSidebar::previewSize() const
 {
+    // A compact thumbnail is drawn at its natural size whatever the width
+    // (a narrow sidebar crops it), so resizing doesn't redraw previews.
+    if (m_compact)
+        return thumbSize(m_aspect);
     // Cards span the list, less the margins and a thin scroll bar. The scroll
     // bar's room is kept whether or not it shows, so cards don't change size
     // (and previews needn't be redrawn) as tabs come and go.

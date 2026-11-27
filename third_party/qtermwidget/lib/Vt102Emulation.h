@@ -133,9 +133,10 @@ private:
   void resetModes();
 
   void resetTokenizer();
-  // puddlejumper: 4096, not 256, for OSC 7501 (program status) reports,
-  // which may be that long; tokenOverflow marks one that was longer.
-  #define MAX_TOKEN_LENGTH 4096 // Max length of tokens (e.g. window title)
+  // puddlejumper: 16384, not 256, for OSC 7501 (program status) and 7577
+  // (program resume) reports, which may be long (a resume command with a
+  // system prompt in it); tokenOverflow marks one that was longer.
+  #define MAX_TOKEN_LENGTH 16384 // Max length of tokens (e.g. window title)
   void addToCurrentToken(char32_t cc);
   char32_t tokenBuffer[MAX_TOKEN_LENGTH]; //FIXME: overflow?
   int tokenBufferPos;

@@ -63,6 +63,14 @@ public:
     QSize previewSize() const;
 
     /*
+     * Compact cards: a small thumbnail at the left with the title and
+     * details beside it, a card about a third as tall (docs/
+     * compact-sidebar.md). Changes previewSize() and the minimum width.
+     */
+    void setCompact(bool compact);
+    bool isCompact() const { return m_compact; }
+
+    /*
      * Colours from the terminal scheme, so the sidebar reads as part of the
      * terminal rather than window chrome: a slightly lifted background, cards
      * a little lighter again, text in the scheme's own colour.
@@ -100,6 +108,7 @@ private:
     QToolButton *m_newTab = nullptr;
     QToolButton *m_workspace = nullptr;
     qreal m_aspect = 0.6;
+    bool m_compact = false;
     QSize m_lastPreviewSize;
     QColor m_background;
     QColor m_foreground;

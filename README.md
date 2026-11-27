@@ -135,7 +135,7 @@ with four sections:
 | --- | --- |
 | Appearance | **Colours:** scheme (and its editor), background opacity · **Font:** family, size (8–32pt in 0.5pt steps), line spacing, margin · **Rendering:** bright colours in bold, italic, antialiasing, own box drawing, bidirectional text |
 | Terminal | **Cursor:** shape, blinking · **Scrollback:** lines kept, scrollbar position · **Input:** confirm multi-line paste, trim trailing newlines, Ctrl+S notice |
-| Tabs & Window | **Tabs:** layout · **Watch a Terminal:** activity, silence (with idle time) · **Quitting:** warn while programs are running, reopen workspaces and tabs at startup |
+| Tabs & Window | **Tabs:** layout · **Watch a Terminal:** activity, silence (with idle time) · **Quitting:** warn while programs are running, reopen workspaces and tabs at startup, start programs again that said how |
 | Profiles | create, duplicate, rename, delete and edit terminal profiles, and choose which one New Tab opens |
 
 Every page uses the same structure, titled groups whose label column is the
@@ -561,11 +561,24 @@ Workspace** are `Ctrl+Shift+PgDown` and `Ctrl+Shift+PgUp`.
 
 **Reopening.** At the next start, puddlejumper reopens the workspaces and tabs
 that were open when it quit: each tab's split layout, every pane's directory
-and profile, and tab names you gave. Programs aren't restarted; each pane
-gets a fresh shell where the old one was. tmux sessions on this machine that
+and profile, and tab names you gave. Each pane gets a fresh shell where the
+old one was, and a program that said how to start it again comes back in it
+(see [Program resume](#program-resume)). tmux sessions on this machine that
 are still running are reattached in their workspaces; sessions over ssh
-aren't. **Settings → Tabs & Window → Reopen workspaces and tabs at startup**
-turns this off.
+aren't. Rex sessions are attached again too, including any that were still
+waiting for their server (below); if the server isn't there yet, their tabs
+wait for it under the same name. **Settings → Tabs & Window → Reopen
+workspaces and tabs at startup** turns this off.
+
+**A Rex server going away.** If the connection to a Rex server drops (it
+restarts, the network goes), the session's tabs stay. Each shows the last
+screen under a notice saying what happened, and it reconnects on its own:
+after 1, 2, 4, 8 and 15 seconds, then every 30 seconds, ten tries in about
+three minutes. Then it waits for **Reconnect**. Once back, it attaches to the
+same session (atlantis and Rex both keep sessions over a restart) and the
+panes pick up where the server is. **Close Tabs** stops showing the session
+and leaves it on the server. A session the server no longer has closes its
+tabs.
 
 ### Workspace files
 
@@ -785,6 +798,58 @@ back at its prompt); done and failed stay until you press a key in the pane.
 It works in tmux tabs too, sent plainly or through tmux's passthrough
 (`ESC P tmux; …`), and ConEmu's progress (OSC 9;4) shows as working until a
 program reports with OSC 7501 itself.
+
+## Program resume
+
+A program can tell the terminal how to start it again where it left off,
+with the [Program Resume Protocol (OSC
+7577)](https://www.superlogical.com/rex/docs/build/program-resume). When
+puddlejumper reopens its tabs, a local pane whose program did that runs it
+again, in the same directory, once the pane's shell is ready. Quit the
+program and you're at that shell.
+
+Each local pane's shell gets its own `OSC7577_TOKEN`, and a report counts
+only when it is signed with it and comes from a process in that pane. Claude
+Code doesn't report for itself; its `SessionStart` hook from `atlantis skill
+setup` (or Rex's, from `rex skill setup`) does, as `claude --resume
+<session>` with the flags it was started with. Rex tabs resume on the server
+instead (atlantis and Rex both do).
+
+**Rules decide what runs**, as Rex's `resume.trust` settings do. The
+built-in ones trust Claude Code (`claude --resume <uuid>`, keeping the flags
+that shape a session, such as `--model`, and dropping ones such as
+`--continue`; a `claude -p` run isn't resumed), Codex (`codex resume
+<uuid>`) and OpenCode (`opencode --session <id>`). The command that runs is
+the rule's: the command part the program reported, then the flags the rule
+keeps from the process's own command line. The process has to be the
+program itself (`node /path/to/claude` counts), with nothing but shells
+between it and the pane's shell. Change the rules in
+`~/.config/puddlejumper/resume-rules.json`, a list of Rex's `rex.set` calls
+as `[key, value]` pairs, applied in order:
+
+```json
+[
+  ["resume.trust.claude.dir", "~/code"],
+  ["resume.trust.claude.flags.--dangerously-skip-permissions", false],
+  ["resume.trust.codex", false],
+  ["resume.trust.nvim", {"command": ["nvim", "-S",
+                         {"under": "~/.local/state/nvim/sessions"}]}],
+  ["resume.trust.lazygit", {"command": ["lazygit"], "dir": "~/code"}]
+]
+```
+
+`{"match": "uuid"}`, `{"match": "id"}` and `{"under": dir}` stand for
+`rex.match.uuid`, `rex.match.id` and `rex.match.under(dir)`; a flag is
+`"keep"`, `"drop"`, `false` (not trusted at all) or `{"action": "keep",
+"values": 1}` (or `"optional"`, `"many"`), and `["resume.defaults", false]`
+turns off the built-in rules. A mistake leaves its rule out, with a warning
+in the log; a file that isn't such a list trusts nothing. The rules are
+checked when puddlejumper saves its tabs at quit (one no rule trusts isn't
+saved) and again at the next start, then read again from the file.
+
+A saved program is started once: if puddlejumper stops before it next saves
+its tabs, it isn't started again. **Settings → Tabs & Window → Start
+programs again that said how** turns resuming off; it is always off as root.
 
 ## Images
 

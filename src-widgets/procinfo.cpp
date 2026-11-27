@@ -8,6 +8,7 @@
 
 #include <QByteArray>
 #include <QFile>
+#include <QFileInfo>
 
 #if defined(Q_OS_MACOS)
 #include <libproc.h>
@@ -60,6 +61,26 @@ int terminalForegroundGroup(int pid)
     bool ok = false;
     const int tpgid = line.mid(close + 2).split(' ').value(5).toInt(&ok);
     return ok ? tpgid : -1;
+}
+
+int parent(int pid)
+{
+    const QByteArray line = readProc(pid, "stat");
+    const int close = line.lastIndexOf(')');
+    if (close < 0)
+        return 0;
+    // After the name: state, then the parent.
+    return line.mid(close + 2).split(' ').value(1).toInt();
+}
+
+QString executable(int pid)
+{
+    return pid > 0 ? QFileInfo(QStringLiteral("/proc/%1/exe").arg(pid)).symLinkTarget() : QString();
+}
+
+QString workingDirectory(int pid)
+{
+    return pid > 0 ? QFileInfo(QStringLiteral("/proc/%1/cwd").arg(pid)).symLinkTarget() : QString();
 }
 
 #elif defined(Q_OS_MACOS)
@@ -126,11 +147,42 @@ int terminalForegroundGroup(int pid)
     return tpgid > 0 ? tpgid : -1;
 }
 
+int parent(int pid)
+{
+    if (pid <= 0)
+        return 0;
+    struct kinfo_proc info;
+    size_t size = sizeof(info);
+    int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_PID, pid};
+    if (sysctl(mib, 4, &info, &size, nullptr, 0) != 0 || size == 0)
+        return 0;
+    return info.kp_eproc.e_ppid;
+}
+
+QString executable(int pid)
+{
+    char buf[PROC_PIDPATHINFO_MAXSIZE];
+    if (pid <= 0 || proc_pidpath(pid, buf, sizeof(buf)) <= 0)
+        return QString();
+    return QString::fromUtf8(buf);
+}
+
+QString workingDirectory(int pid)
+{
+    struct proc_vnodepathinfo info;
+    if (pid <= 0 || proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, sizeof(info)) != sizeof(info))
+        return QString();
+    return QString::fromUtf8(info.pvi_cdir.vip_path);
+}
+
 #else
 
 QString name(int) { return QString(); }
 QStringList arguments(int) { return {}; }
 int terminalForegroundGroup(int) { return -1; }
+int parent(int) { return 0; }
+QString executable(int) { return QString(); }
+QString workingDirectory(int) { return QString(); }
 
 #endif
 

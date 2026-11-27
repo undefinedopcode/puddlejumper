@@ -83,6 +83,29 @@ public:
     QString label() const { return m_label; }
     bool isAttached() const { return m_attached; }
 
+    /*
+     * A lost connection doesn't end the session here: its tabs stay, under
+     * an overlay, while it reconnects (kRetryDelays, then it waits for
+     * Reconnect), and attaches again when the server is back. A session
+     * that is attached, or waiting like that, is saved with the window.
+     */
+    bool isOffline() const { return m_offline; }
+    bool shouldRestore() const { return m_attached || m_offline; }
+    /* Try now (the overlay's Reconnect). */
+    void reconnectNow();
+
+    /* Its windows as last seen, saved so that a restore while the server
+     * is away can show them (as placeholders) until it is back. */
+    struct SavedWindow
+    {
+        QString id;
+        QString label;
+    };
+    QList<SavedWindow> savedWindows() const;
+    /* Before start(): this is a restore; if the server can't be reached,
+     * these windows (or one, named `label`) wait for it. */
+    void setRestoring(const QList<SavedWindow> &windows, const QString &label);
+
     QList<TerminalTab *> tabs() const;
     bool ownsTab(const Tab *tab) const;
     bool ownsPane(const TerminalWidget *pane) const;
@@ -285,6 +308,13 @@ private:
     QRect floatingFrame(const QRectF &bounds, const QSize &area, QSize *cells);
     void finish(const QString &reason);
     void endIfEmpty();
+    /* The connection is gone: keep the tabs, and try again. */
+    void goOffline(const QString &reason);
+    void scheduleReconnect();
+    void tryReconnect();
+    /* The overlays' text, on every window's tab (none: removed). */
+    void showOffline();
+    void hideOffline();
     Window *windowOf(const TerminalTab *tab);
     const Window *windowOf(const TerminalTab *tab) const;
     QJsonObject target(const Block *b) const;
@@ -315,4 +345,14 @@ private:
     bool m_keymapPending = false;
     bool m_keymapAgain = false;  // fetch again once the pending one is in
     bool m_scriptsSent = false;  // scripts given to the server, to remove
+    // Offline: the connection lost, the tabs kept.
+    bool m_offline = false;
+    QString m_offlineReason;
+    int m_attempt = 0;          // reconnects tried since it was lost
+    bool m_connecting = false;  // one of them under way
+    qint64 m_retryAt = 0;       // ms since epoch; 0: not waiting
+    QTimer *m_retryTimer = nullptr;
+    QTimer *m_tickTimer = nullptr;  // the overlays' countdown
+    bool m_restoring = false;
+    QList<SavedWindow> m_restoreWindows;
 };
