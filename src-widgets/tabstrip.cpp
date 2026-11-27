@@ -8,6 +8,7 @@
 
 #include "appicon.h"
 #include "cardstyle.h"
+#include "flattoolbutton.h"
 
 #include <QAbstractItemModel>
 #include <QHBoxLayout>
@@ -230,7 +231,7 @@ TabStrip::TabStrip(QWidget *parent)
     row->setContentsMargins(kSide - kGapH, 0, kSide, 0);
     row->setSpacing(2);
 
-    m_workspace = new QToolButton(this);
+    m_workspace = new FlatToolButton(this);
     m_workspace->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     m_workspace->setPopupMode(QToolButton::InstantPopup);
     m_workspace->setAutoRaise(true);
@@ -264,13 +265,13 @@ TabStrip::TabStrip(QWidget *parent)
     m_list->setContextMenuPolicy(Qt::CustomContextMenu);
     row->addWidget(m_list);
 
-    m_allTabs = new QToolButton(this);
+    m_allTabs = new FlatToolButton(this);
     m_allTabs->setAutoRaise(true);
     m_allTabs->setToolTip(tr("All tabs"));
     m_allTabs->hide();
     row->addWidget(m_allTabs);
 
-    m_newTab = new QToolButton(this);
+    m_newTab = new FlatToolButton(this);
     m_newTab->setAutoRaise(true);
     m_newTab->setToolTip(tr("Open a new tab"));
     row->addWidget(m_newTab);

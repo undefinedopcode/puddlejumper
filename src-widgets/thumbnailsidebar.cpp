@@ -9,6 +9,7 @@
 #include "appicon.h"
 
 #include "cardstyle.h"
+#include "flattoolbutton.h"
 
 #include <QAbstractItemModel>
 #include <QListWidget>
@@ -363,7 +364,7 @@ ThumbnailSidebar::ThumbnailSidebar(QWidget *parent)
     outer->setContentsMargins(0, kGap, 0, kGap);
     outer->setSpacing(0);
 
-    m_workspace = new QToolButton(this);
+    m_workspace = new FlatToolButton(this);
     m_workspace->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     m_workspace->setPopupMode(QToolButton::InstantPopup);
     m_workspace->setAutoRaise(true);
@@ -396,7 +397,7 @@ ThumbnailSidebar::ThumbnailSidebar(QWidget *parent)
     m_list->setContextMenuPolicy(Qt::CustomContextMenu);
     outer->addWidget(m_list, 1);
 
-    m_newTab = new QToolButton(this);
+    m_newTab = new FlatToolButton(this);
     m_newTab->setText(tr("New Tab"));
     m_newTab->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
     m_newTab->setAutoRaise(true);

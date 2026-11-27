@@ -86,6 +86,8 @@ qt_add_executable(puddlejumper
     src-widgets/screenshotoverlay.cpp
     src-widgets/screenshotoverlay.h
     src-widgets/tabstrip.cpp
+    src-widgets/flattoolbutton.cpp
+    src-widgets/flattoolbutton.h
     src-widgets/tabstrip.h
     src-widgets/procinfo.cpp
     src-widgets/procinfo.h
@@ -322,6 +324,28 @@ set_target_properties(probe-settingsdialog PROPERTIES AUTOMOC ON)
 # headers without "../..".
 target_include_directories(probe-settingsdialog PRIVATE src-widgets)
 target_compile_definitions(probe-settingsdialog PRIVATE PUDDLEJUMPER_REX)  # its Rex settings too
+
+# ---------------------------------------------------------------------------
+# probe-tabbars — draws the tab strip and the sidebar's header (workspace and
+# new-tab buttons at rest, hovered, pressed) in the platform's style. Dev tool
+# only; never installed. Run: ./build/probe-tabbars OUTDIR [STYLE]
+# ---------------------------------------------------------------------------
+qt_add_executable(probe-tabbars
+    src-widgets/dev/probe_tabbars.cpp
+    src-widgets/tabstrip.cpp src-widgets/tabstrip.h
+    src-widgets/flattoolbutton.cpp src-widgets/flattoolbutton.h
+    src-widgets/thumbnailsidebar.cpp src-widgets/thumbnailsidebar.h
+    src-widgets/appicon.cpp src-widgets/appicon.h
+    src-widgets/cardstyle.h
+)
+target_link_libraries(probe-tabbars PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg)
+qt_add_resources(probe-tabbars "lucide_icons"
+    PREFIX "/lucide"
+    BASE icons/lucide
+    FILES ${LUCIDE_ICONS}
+)
+set_target_properties(probe-tabbars PROPERTIES AUTOMOC ON)
+target_include_directories(probe-tabbars PRIVATE src-widgets)
 
 # ---------------------------------------------------------------------------
 # test-programstatus — the OSC 7501 parser and records against the spec's
