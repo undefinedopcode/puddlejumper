@@ -1565,7 +1565,6 @@ void RexSession::closePane(TerminalWidget *pane)
     if (id.isEmpty())
         return;
     // Undoable (API revision 20): undoClose() brings it back for a while.
-    m_lastUndoable.start();
     m_control->request(QStringLiteral("block.close"),
                        QJsonObject{{QStringLiteral("session_id"), m_sessionId}, {QStringLiteral("block_id"), id},
                                    {QStringLiteral("undoable"), true}});
@@ -1585,7 +1584,6 @@ void RexSession::closeWindow(TerminalTab *tab)
     const Window *w = windowOf(tab);
     if (!w)
         return;
-    m_lastUndoable.start();
     m_control->request(QStringLiteral("session.close_window"),
                        QJsonObject{{QStringLiteral("session_id"), m_sessionId}, {QStringLiteral("window_id"), w->id},
                                    {QStringLiteral("undoable"), true}});
@@ -1630,16 +1628,15 @@ void RexSession::destroySession()
 
 void RexSession::endIfEmpty()
 {
-    // Nothing left to show. A session with no blocks at all (a server may
-    // keep one) is ended rather than left behind; one with floating blocks
-    // is left be.
+    // Nothing left to show. A session with no blocks at all is destroyed
+    // rather than left behind: Rex keeps an emptied session, windowless,
+    // until someone destroys it, even once an undoable close of its last
+    // pane can no longer be undone (and that close is ours to undo, over
+    // this connection, which ends with the session here). One with floating
+    // blocks is left be.
     m_control->request(QStringLiteral("session.view"), QJsonObject{{QStringLiteral("session_id"), m_sessionId}},
                        [this](const QJsonObject &view, const QJsonObject &error) {
-                           // After an undoable close the server holds what
-                           // closed for a while, and ends the session itself
-                           // when the hold runs out unless it is undone.
-                           const bool held = m_lastUndoable.isValid() && m_lastUndoable.elapsed() < 60000;
-                           if (!error.isEmpty() || hasBlocks(view) || held) {
+                           if (!error.isEmpty() || hasBlocks(view)) {
                                finish(error.isEmpty() ? tr("nothing left to show") : tr("the session ended"));
                                return;
                            }

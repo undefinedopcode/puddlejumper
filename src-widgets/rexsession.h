@@ -11,7 +11,6 @@
 #include "terminaltab.h"
 #include "terminalwidget.h"
 
-#include <QElapsedTimer>
 #include <QHash>
 #include <QJsonArray>
 #include <QJsonObject>
@@ -269,7 +268,6 @@ private:
     /* Where a floating layer's frame goes in `area`, and its layout's cells. */
     QRect floatingFrame(const QRectF &bounds, const QSize &area, QSize *cells);
     void finish(const QString &reason);
-    QElapsedTimer m_lastUndoable;  // since the last undoable close
     void endIfEmpty();
     Window *windowOf(const TerminalTab *tab);
     const Window *windowOf(const TerminalTab *tab) const;

@@ -1269,6 +1269,16 @@ int main(int argc, char *argv[])
         c.close();
     }
     check(waitFor([&] { return server.sessionIds() == before; }, 5000), QStringLiteral("and its session goes"));
+
+    // ---- Closing the last pane (undoably, as the UI does) ends it too, and
+    // its session goes: the server keeps an emptied session until destroyed.
+    c.open(url, QString(), settings, profile);
+    if (check(waitFor([&] { return c.tabs.size() == 1; }), QStringLiteral("a tab for the last close"))) {
+        c.session->closePane(c.tabs.first()->activePane());
+        check(waitFor([&] { return c.hasEnded; }) && c.tabs.isEmpty(), QStringLiteral("closing the last pane ends it"));
+        c.close();
+    }
+    check(waitFor([&] { return server.sessionIds() == before; }, 5000), QStringLiteral("and no empty session is left"));
     for (const QString &id : server.sessionIds())
         if (!before.contains(id)) {
             server.attach(id);
