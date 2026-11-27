@@ -82,6 +82,8 @@ public:
     /* Whether to answer the program status query (OSC 7501 ; ?) even so:
      * tmux answers it itself from 3.9. */
     void setAnswerProgramStatusQuery(bool answer);
+    // puddlejumper: whether programs' clipboard writes (OSC 52, 5522) land here.
+    void setClipboardWrites(bool on);
 
     /**
      * puddlejumper: a picture of the screen (its visible lines, not scrollback),
@@ -324,6 +326,8 @@ signals:
     /* puddlejumper: OSC 9;4 progress, and OSC 133;A (a prompt starts). */
     void progressReport(int state, int progress);
     void promptStarted();
+    /* puddlejumper: a program wrote the clipboard (see Emulation). */
+    void clipboardWritten(bool primary, qint64 characters, const QStringList &types);
 
     /**
      * Emitted when the current working directory of the active session

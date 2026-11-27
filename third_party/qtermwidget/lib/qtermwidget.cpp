@@ -293,6 +293,11 @@ void QTermWidget::setAnswerTerminalQueries(bool answer)
     m_impl->m_session->emulation()->setAnswerQueries(answer);
 }
 
+void QTermWidget::setClipboardWrites(bool on)
+{
+    m_impl->m_session->emulation()->setClipboardWrites(on);
+}
+
 void QTermWidget::setAnswerProgramStatusQuery(bool answer)
 {
     m_impl->m_session->emulation()->setAnswerProgramStatusQuery(answer);
@@ -534,6 +539,7 @@ void QTermWidget::init(int startnow)
             this, &QTermWidget::programResumeReport);
     connect(m_impl->m_session->emulation(), &Emulation::progressReport, this, &QTermWidget::progressReport);
     connect(m_impl->m_session->emulation(), &Emulation::promptStarted, this, &QTermWidget::promptStarted);
+    connect(m_impl->m_session->emulation(), &Emulation::clipboardWritten, this, &QTermWidget::clipboardWritten);
     connect(m_impl->m_session, &Session::currentDirectoryChanged, this, &QTermWidget::currentDirectoryChanged);
     connect(m_impl->m_session, &Session::cursorChanged, this, &QTermWidget::cursorChanged);
 }

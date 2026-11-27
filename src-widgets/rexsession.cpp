@@ -9,6 +9,7 @@
 #include <functional>
 
 #include <QApplication>
+#include <QClipboard>
 
 #include "ghosttyreplay.h"
 #include "rexclient.h"
@@ -769,6 +770,9 @@ RexSession::Block *RexSession::block(const QString &id)
 TerminalWidget *RexSession::makePane(Block *b)
 {
     auto *pane = new TerminalWidget(b->paneId, m_settings, m_profile, nullptr, TerminalWidget::Backend::External);
+    // The server decodes programs' clipboard writes (clipboard_written) and
+    // answers them.
+    pane->setSourceHandlesClipboard(true);
     pane->applyAppearance();
     pane->applyScrolling();
     const QString id = b->id;
@@ -986,6 +990,9 @@ void RexSession::onEvent(const QJsonObject &message)
         if (it != m_blocks.end())
             setOwner(it->second.get(), str(payload, "owner"));
     } else if (type == QLatin1String("block_event")
+               && str(payload, "name") == QLatin1String("clipboard_written")) {
+        takeClipboardWrite(str(payload, "block_id"), payload.value(QLatin1String("payload")).toObject());
+    } else if (type == QLatin1String("block_event")
                && str(payload, "name") == QLatin1String("child_exited")) {
         auto it = m_blocks.find(str(payload, "block_id"));
         if (it != m_blocks.end()) {
@@ -994,6 +1001,60 @@ void RexSession::onEvent(const QJsonObject &message)
                                        .value(QLatin1String("exit_code")).toInt();
         }
     }
+}
+
+// ---- Clipboard writes. -------------------------------------------------------
+
+// What a program in a block copied (OSC 52, decoded by the server). Taken
+// only while this app is in use: another client attached elsewhere, on a
+// computer nobody is at, leaves its clipboard alone.
+void RexSession::takeClipboardWrite(const QString &blockId, const QJsonObject &event)
+{
+    auto it = m_blocks.find(blockId);
+    qCDebug(lcRex) << "clipboard write" << blockId.right(8) << event.value(QLatin1String("bytes")).toInteger()
+                   << "pane" << (it != m_blocks.end() && it->second->pane) << "app"
+                   << QGuiApplication::applicationState();
+    if (it == m_blocks.end() || !it->second->pane || QGuiApplication::applicationState() != Qt::ApplicationActive)
+        return;
+    if (event.contains(QLatin1String("text"))) {
+        applyClipboardWrite(blockId, event.value(QLatin1String("text")).toString());
+        return;
+    }
+    // An empty write stores nothing (and has no bytes).
+    if (event.value(QLatin1String("bytes")).toInteger() > 0)
+        readClipboardWrite(blockId, event.value(QLatin1String("id")).toInteger(), 0, QString());
+}
+
+void RexSession::readClipboardWrite(const QString &blockId, qint64 id, qint64 offset, const QString &sofar)
+{
+    // The server keeps a write for a minute, 16 MiB at most.
+    constexpr int kChunk = 0xf0000;
+    QPointer<RexSession> self(this);
+    m_control->request(QStringLiteral("com.superlogical.terminal.clipboard_read"),
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId},
+                                   {QStringLiteral("block_id"), blockId},
+                                   {QStringLiteral("args"), QJsonObject{{QStringLiteral("id"), id},
+                                                                       {QStringLiteral("offset"), offset},
+                                                                       {QStringLiteral("max_bytes"), kChunk}}}},
+                       [self, blockId, id, offset, sofar](const QJsonObject &reply, const QJsonObject &error) {
+                           if (!self || !error.isEmpty())
+                               return;
+                           const QString data = reply.value(QLatin1String("data")).toString();
+                           const QString text = sofar + data;
+                           if (reply.value(QLatin1String("eof")).toBool() || data.isEmpty())
+                               self->applyClipboardWrite(blockId, text);
+                           else
+                               self->readClipboardWrite(blockId, id, offset + data.toUtf8().size(), text);
+                       });
+}
+
+void RexSession::applyClipboardWrite(const QString &blockId, const QString &text)
+{
+    auto it = m_blocks.find(blockId);
+    if (it == m_blocks.end() || !it->second->pane || text.isEmpty())
+        return;
+    QGuiApplication::clipboard()->setText(text);
+    it->second->pane->reportClipboardWrite(false, text.size(), {QStringLiteral("text/plain")});
 }
 
 // ---- Keymaps and actions. ---------------------------------------------------

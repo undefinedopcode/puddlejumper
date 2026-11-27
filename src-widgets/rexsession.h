@@ -295,6 +295,11 @@ private:
     bool following(const Block *b) const;
     void setOwner(Block *b, const QString &owner);
     void showFollowing(Block *b);
+    // A program's clipboard write (clipboard_written), put on this
+    // computer's clipboard; read in chunks when the event didn't carry it.
+    void takeClipboardWrite(const QString &blockId, const QJsonObject &event);
+    void readClipboardWrite(const QString &blockId, qint64 id, qint64 offset, const QString &sofar);
+    void applyClipboardWrite(const QString &blockId, const QString &text);
     void takeBlock(Block *b);
     void requestBlocks();
     void splitterDragged(Window &w, TerminalWidget *before, Qt::Orientation orientation, int pixels);

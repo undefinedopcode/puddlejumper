@@ -1566,6 +1566,28 @@ void MainWindow::wirePane(TerminalWidget *term)
 {
     connect(term, &TerminalWidget::linkOpened, this, &MainWindow::openLink);
 
+    // A program here put something on the clipboard (OSC 52 or 5522): said,
+    // always, naming the tab: what's pasted next is no longer what was copied.
+    connect(term, &TerminalWidget::clipboardWritten, this,
+            [this, term](bool primary, qint64 characters, const QStringList &types) {
+        TerminalTab *tab = nullptr;
+        for (Tab *page : allPages()) {
+            if (auto *t = qobject_cast<TerminalTab *>(page); t && t->contains(term))
+                tab = t;
+        }
+        const QString where = tab ? describeTab(tab) : tr("a terminal");
+        const QString target = primary ? tr("the selection") : tr("the clipboard");
+        QString message;
+        if (characters == 0 && types.isEmpty())
+            message = tr("%1 cleared %2").arg(where, target);
+        else if (characters >= 0)
+            message = tr("Copied to %1 by %2: %n character(s)", nullptr, int(qMin<qint64>(characters, INT_MAX)))
+                          .arg(target, where);
+        else
+            message = tr("Copied to %1 by %2: %3").arg(target, where, types.join(QStringLiteral(", ")));
+        statusBar()->showMessage(message, 8000);
+    });
+
     // A pane's title names its tab while it is the tab's active pane.
     connect(term, &TerminalWidget::titleChanged, this, [this, term]() {
         auto *tab = tabOf(term);

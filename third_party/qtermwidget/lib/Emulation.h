@@ -288,6 +288,14 @@ public:
   void setAnswerProgramStatusQuery(bool answer) { _answerProgramStatusQuery = answer; }
   bool answerProgramStatusQuery() const { return _answerProgramStatusQuery; }
   /**
+   * puddlejumper: whether programs' clipboard writes (OSC 52, and kitty's
+   * OSC 5522) reach the clipboard here, and their OSC 5522 replies are sent.
+   * Off where the source handles them itself: a Rex server decodes them and
+   * says so with clipboard_written events, and answers the program.
+   */
+  void setClipboardWrites(bool on) { _clipboardWrites = on; }
+  bool clipboardWrites() const { return _clipboardWrites; }
+  /**
    * puddlejumper: a cell's size in device pixels, the unit images are
    * measured in (kitty's graphics protocol, and the CSI 14 t and 16 t size
    * reports). Set by the session from its view.
@@ -426,6 +434,13 @@ signals:
    */
   void progressReport(int state, int progress);
   void promptStarted();
+  /**
+   * puddlejumper: a program put something on the clipboard (OSC 52 or
+   * 5522), or on the primary selection: the text's length (-1 if there was
+   * no text) and every type given. A write of nothing (characters 0, no
+   * types) cleared it.
+   */
+  void clipboardWritten(bool primary, qint64 characters, const QStringList &types);
 
   /**
    * Emitted when the program running in the terminal changes the
@@ -540,6 +555,7 @@ private:
   bool _bracketedPasteMode;
   bool _answerQueries = true;   // puddlejumper
   bool _answerProgramStatusQuery = true;   // puddlejumper
+  bool _clipboardWrites = true;   // puddlejumper
   QSize _cellPixelSize;   // puddlejumper
   QTimer _bulkTimer1{this};
   QTimer _bulkTimer2{this};

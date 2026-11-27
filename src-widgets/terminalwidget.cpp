@@ -106,6 +106,7 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings,
     m_statusWatch->setInterval(500);
     connect(m_statusWatch, &QTimer::timeout, this, &TerminalWidget::checkProgramStatusOwner);
     connect(m_terminal, &QTermWidget::programStatusReport, this, &TerminalWidget::onProgramStatusReport);
+    connect(m_terminal, &QTermWidget::clipboardWritten, this, &TerminalWidget::clipboardWritten);
     connect(m_terminal, &QTermWidget::fullReset, m_status, &ProgramStatus::reset);
     connect(m_terminal, &QTermWidget::progressReport, this, [this](int state, int progress) {
         if (m_status->applyProgress(state, progress))
@@ -782,6 +783,12 @@ void TerminalWidget::onProgramStatusReport(const QString &body)
 {
     if (m_status->apply(body))
         watchProgramStatusOwner();
+}
+
+void TerminalWidget::setSourceHandlesClipboard(bool handles)
+{
+    if (m_terminal)
+        m_terminal->setClipboardWrites(!handles);
 }
 
 void TerminalWidget::setSourceAnswersProgramStatus(bool answers)

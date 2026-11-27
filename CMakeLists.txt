@@ -412,6 +412,13 @@ target_include_directories(test-ghosttyreplay PRIVATE src-widgets)
 target_compile_definitions(test-ghosttyreplay PRIVATE
     PJ_GHOSTTY_FIXTURES="${CMAKE_CURRENT_SOURCE_DIR}/src-widgets/dev/ghostty-snapshot")
 
+# test-clipboard — programs' clipboard writes (OSC 52, kitty's OSC 5522) in
+# qtermwidget's emulator. Dev tool only; never installed.
+# Run: ./build/test-clipboard (offscreen; QT_QPA_PLATFORM=wayland for a real one)
+qt_add_executable(test-clipboard src-widgets/dev/test_clipboard.cpp)
+target_link_libraries(test-clipboard PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets qtermwidget)
+target_include_directories(test-clipboard PRIVATE src-widgets)
+
 # test-rexterminalstream — the Rex terminal stream (snapshot, markers,
 # output) on a capture from a Rex-compatible server, and the client path from
 # it into qtermwidget. Dev tool only; never installed.

@@ -23,6 +23,7 @@
 // Own
 #include "Vt102Emulation.h"
 
+#include <optional>
 #include <string>
 #include "tools.h"
 
@@ -31,7 +32,10 @@
 #include <unistd.h>
 
 // Qt
+#include <QClipboard>
 #include <QEvent>
+#include <QGuiApplication>
+#include <QMimeData>
 #include <QKeyEvent>
 #include <QDebug>
 
@@ -354,16 +358,19 @@ bool Vt102Emulation::receiveLongString(char32_t cc)
     return true;
   }
 
-  // A graphics command, to the String Terminator (or BEL).
+  // A graphics command or a clipboard OSC, to the String Terminator (or BEL).
   if (longStringEscPending)
   {
     longStringEscPending = false;
     if (cc == '\\')
     {
       const bool overflow = longStringOverflow;
+      const LongString kind = longString;
       const QByteArray body = std::move(graphicsData);
       resetTokenizer();
-      if (!overflow)
+      if (kind == LongString::Clipboard)
+        processClipboardCommand(body, overflow);
+      else if (!overflow)
         processGraphicsCommand(body);
       return true;
     }
@@ -381,9 +388,12 @@ bool Vt102Emulation::receiveLongString(char32_t cc)
   if (cc == 7)
   {
     const bool overflow = longStringOverflow;
+    const LongString kind = longString;
     const QByteArray body = std::move(graphicsData);
     resetTokenizer();
-    if (!overflow)
+    if (kind == LongString::Clipboard)
+      processClipboardCommand(body, overflow);
+    else if (!overflow)
       processGraphicsCommand(body);
     return true;
   }
@@ -439,6 +449,18 @@ void Vt102Emulation::receiveChar(char32_t cc)
   {
     resetTokenizer();
     longString = LongString::Passthrough;
+    return;
+  }
+  // OSC 52 and OSC 5522, whose base64 can run long.
+  if (tokenBuffer[0] == ESC && tokenBuffer[1] == ']' && tokenBuffer[2] == '5'
+      && ((tokenBufferPos == 5 && tokenBuffer[3] == '2' && tokenBuffer[4] == ';')
+          || (tokenBufferPos == 7 && tokenBuffer[3] == '5' && tokenBuffer[4] == '2' && tokenBuffer[5] == '2'
+              && tokenBuffer[6] == ';')))
+  {
+    const QByteArray prefix = tokenBufferPos == 5 ? QByteArray("52;") : QByteArray("5522;");
+    resetTokenizer();
+    longString = LongString::Clipboard;
+    graphicsData = prefix;
     return;
   }
 
@@ -1114,6 +1136,9 @@ void Vt102Emulation::processToken(int token, char32_t p, int q)
     case TY_CSI_PR('p', 1047) : reportDecMode(1047, getMode(MODE_AppScreen) ? 1 : 2);          break; // Alt screen (xterm)
     case TY_CSI_PR('p', 1049) : reportDecMode(1049, getMode(MODE_AppScreen) ? 1 : 2);          break; // Alt screen + cursor
     case TY_CSI_PR('p', 2004) : reportDecMode(2004, getMode(MODE_BracketedPaste) ? 1 : 2);     break; // Bracketed paste
+    // puddlejumper: kitty's clipboard paste events, known and off: how a
+    // program learns that OSC 5522 is understood (see processOsc5522()).
+    case TY_CSI_PR('p', 5522) : if (clipboardWrites()) reportDecMode(5522, 2);                 break;
 
     //FIXME: when changing between vt52 and ansi mode evtl do some resetting.
     case TY_VT52('A'      ) : _currentScreen->cursorUp             (         1); break; //VT52
@@ -1187,6 +1212,268 @@ void Vt102Emulation::reportPixelSize(bool cell)
     snprintf(tmp, sizeof tmp, "\033[4;%d;%dt", size.height() * _currentScreen->getLines(),
              size.width() * _currentScreen->getColumns());
   sendString(tmp);
+}
+
+// puddlejumper: clipboard OSCs. OSC 52 (xterm's) writes text to the
+// clipboard or the primary selection; OSC 5522 (kitty's) writes any types,
+// in chunks, and answers. Programs may write but not read: OSC 52's read is
+// answered as if the clipboard were empty (as kitty answers when it refuses,
+// so nothing waits), OSC 5522's with EPERM, except the list of types on it,
+// which the protocol allows without asking.
+static std::optional<QByteArray> fromBase64(const QByteArray &s)
+{
+  auto r = QByteArray::fromBase64Encoding(s, QByteArray::AbortOnBase64DecodingErrors);
+  if (!r)
+    return std::nullopt;
+  return *r;
+}
+
+// The most an OSC 5522 write may carry (the protocol asks for at least 64 MiB).
+static constexpr qsizetype kMaxClipboardWrite = 64 * 1024 * 1024;
+
+void Vt102Emulation::processClipboardCommand(const QByteArray &body, bool overflow)
+{
+  if (!clipboardWrites())
+    return;
+  const bool kitty = body.startsWith("5522;");
+  if (overflow)
+  {
+    // Too long to keep, or not ASCII: dropped, and a write it was part of
+    // ends.
+    if (kitty && clipboardWrite.active)
+    {
+      const QByteArray id = clipboardWrite.id;
+      clipboardWrite = ClipboardWrite();
+      sendOsc5522("type=write:status=EFBIG" + id);
+    }
+    return;
+  }
+  if (kitty)
+    processOsc5522(body.mid(5));
+  else
+    processOsc52(body.mid(3));
+}
+
+void Vt102Emulation::processOsc52(const QByteArray &body)
+{
+  const int semi = body.indexOf(';');
+  if (semi < 0)
+    return;
+  const QByteArray targets = body.left(semi);
+  const QByteArray data = body.mid(semi + 1);
+  QClipboard *cb = QGuiApplication::clipboard();
+  // c: the clipboard; p and s: the primary selection, where there is one;
+  // 0-7 (cut buffers): none. None named: the clipboard.
+  bool clipboard = targets.isEmpty(), primary = false;
+  for (char c : targets)
+  {
+    if (c == 'c')
+      clipboard = true;
+    else if (c == 'p' || c == 's')
+      primary = true;
+  }
+  primary = primary && cb->supportsSelection();
+  if (data == "?")
+  {
+    // Behind tmux, tmux answers.
+    if (answerQueries())
+      sendString(QByteArray("\033]52;" + (targets.isEmpty() ? QByteArray("c") : targets.left(1)) + ";\033\\"));
+    return;
+  }
+  if (!clipboard && !primary)
+    return;
+  const std::optional<QByteArray> decoded = fromBase64(data);
+  if (!decoded)
+    return;
+  const QString text = QString::fromUtf8(*decoded);
+  if (clipboard)
+    cb->setText(text, QClipboard::Clipboard);
+  if (primary)
+    cb->setText(text, QClipboard::Selection);
+  emit clipboardWritten(!clipboard, text.size(),
+                        text.isEmpty() ? QStringList() : QStringList{QStringLiteral("text/plain")});
+}
+
+void Vt102Emulation::sendOsc5522(const QByteArray &metadata, const QByteArray &payload)
+{
+  QByteArray out = "\033]5522;" + metadata;
+  if (!payload.isEmpty())
+    out += ';' + payload;
+  sendString(out + "\033\\");
+}
+
+void Vt102Emulation::processOsc5522(const QByteArray &body)
+{
+  const int semi = body.indexOf(';');
+  const QByteArray meta = semi < 0 ? body : body.left(semi);
+  const QByteArray payload = semi < 0 ? QByteArray() : body.mid(semi + 1);
+  QHash<QByteArray, QByteArray> keys;
+  for (const QByteArray &kv : meta.split(':'))
+  {
+    const int eq = kv.indexOf('=');
+    if (eq > 0)
+      keys.insert(kv.left(eq), kv.mid(eq + 1));
+  }
+  // The id comes back in every answer, with only the characters allowed.
+  QByteArray idPart;
+  for (char c : keys.value("id"))
+  {
+    if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_'
+        || c == '+' || c == '.')
+      idPart += c;
+  }
+  if (!idPart.isEmpty())
+    idPart = ":id=" + idPart;
+  const QByteArray type = keys.value("type");
+  const bool primary = keys.value("loc") == "primary";
+  QClipboard *cb = QGuiApplication::clipboard();
+
+  if (type == "write")
+  {
+    clipboardWrite = ClipboardWrite();
+    clipboardWrite.id = idPart;
+    if (primary && !cb->supportsSelection())
+    {
+      sendOsc5522("type=write:status=ENOSYS" + idPart);
+      return;
+    }
+    clipboardWrite.active = true;
+    clipboardWrite.primary = primary;
+    return;
+  }
+
+  if (type == "wdata" || type == "walias")
+  {
+    // After an error, nothing until the next write.
+    if (!clipboardWrite.active)
+      return;
+    const QByteArray wid = clipboardWrite.id;
+    const auto fail = [&](const char *status) {
+      clipboardWrite = ClipboardWrite();
+      sendOsc5522("type=write:status=" + QByteArray(status) + wid);
+    };
+    const QByteArray mimeB64 = keys.value("mime");
+    if (mimeB64.isEmpty())
+    {
+      if (type == "walias" || !payload.isEmpty())
+      {
+        fail("EINVAL");
+        return;
+      }
+      // The end: every type, decoded whole.
+      QList<QPair<QByteArray, QByteArray>> decoded;
+      for (const auto &[mime, b64] : clipboardWrite.data)
+      {
+        const std::optional<QByteArray> d = fromBase64(b64);
+        if (!d)
+        {
+          fail("EINVAL");
+          return;
+        }
+        decoded.append({mime, *d});
+      }
+      auto *md = new QMimeData;
+      QStringList types;
+      qint64 characters = decoded.isEmpty() ? 0 : -1;
+      const auto isText = [](const QByteArray &m) { return m == "text/plain" || m.startsWith("text/plain;"); };
+      for (const auto &[mime, d] : decoded)
+      {
+        if (isText(mime))
+        {
+          const QString text = QString::fromUtf8(d);
+          md->setText(text);
+          characters = text.size();
+        }
+        if (mime != "text/plain")
+          md->setData(QString::fromUtf8(mime), d);
+        types << QString::fromUtf8(mime);
+      }
+      for (const auto &[alias, target] : clipboardWrite.aliases)
+      {
+        for (const auto &[mime, d] : decoded)
+        {
+          if (mime != target)
+            continue;
+          if (isText(alias) && !md->hasText())
+          {
+            md->setText(QString::fromUtf8(d));
+            characters = md->text().size();
+          }
+          md->setData(QString::fromUtf8(alias), d);
+          types << QString::fromUtf8(alias);
+          break;
+        }
+      }
+      const bool toPrimary = clipboardWrite.primary;
+      clipboardWrite = ClipboardWrite();
+      cb->setMimeData(md, toPrimary ? QClipboard::Selection : QClipboard::Clipboard);
+      sendOsc5522("type=write:status=DONE" + wid);
+      emit clipboardWritten(toPrimary, characters, types);
+      return;
+    }
+    const std::optional<QByteArray> mime = fromBase64(mimeB64);
+    if (!mime || mime->isEmpty())
+    {
+      fail("EINVAL");
+      return;
+    }
+    if (type == "walias")
+    {
+      const std::optional<QByteArray> list = fromBase64(payload);
+      if (!list)
+      {
+        fail("EINVAL");
+        return;
+      }
+      for (const QByteArray &alias : list->split(' '))
+      {
+        if (!alias.isEmpty())
+          clipboardWrite.aliases.append({alias, *mime});
+      }
+      return;
+    }
+    clipboardWrite.size += payload.size();
+    if (clipboardWrite.size / 4 * 3 > kMaxClipboardWrite)
+    {
+      fail("EFBIG");
+      return;
+    }
+    for (auto &entry : clipboardWrite.data)
+    {
+      if (entry.first == *mime)
+      {
+        entry.second += payload;
+        return;
+      }
+    }
+    clipboardWrite.data.append({*mime, payload});
+    return;
+  }
+
+  if (type == "read")
+  {
+    if (primary && !cb->supportsSelection())
+    {
+      sendOsc5522("type=read:status=ENOSYS" + idPart);
+      return;
+    }
+    const std::optional<QByteArray> wanted = fromBase64(payload);
+    if (!wanted)
+      return; // reads have no status for a bad request: ignored
+    if (wanted->trimmed() != ".")
+    {
+      sendOsc5522("type=read:status=EPERM" + idPart);
+      return;
+    }
+    // Only the list of types: allowed without asking.
+    sendOsc5522("type=read:status=OK" + QByteArray(primary ? ":loc=primary" : "") + idPart);
+    const QMimeData *md = cb->mimeData(primary ? QClipboard::Selection : QClipboard::Clipboard);
+    QByteArray list = md ? md->formats().join(QLatin1Char(' ')).toUtf8() : QByteArray();
+    if (!list.isEmpty())
+      list += '\n';
+    sendOsc5522("type=read:status=DATA" + idPart + ":mime=" + QByteArray(".").toBase64(), list.toBase64());
+    sendOsc5522("type=read:status=DONE" + idPart);
+  }
 }
 
 // puddlejumper: a kitty graphics command (see TerminalGraphics), for the

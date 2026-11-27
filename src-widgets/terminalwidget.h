@@ -242,6 +242,15 @@ public:
     /* External panes: whether their source answers the program status
      * query itself (tmux 3.9 does), so that it isn't answered twice. */
     void setSourceAnswersProgramStatus(bool answers);
+    /* The source decodes programs' clipboard writes itself (a Rex server, with
+     * clipboard_written events): the emulator leaves them, and doesn't answer. */
+    void setSourceHandlesClipboard(bool handles);
+    /* A program here wrote the clipboard by the source's say-so: as if the
+     * emulator had (clipboardWritten). */
+    void reportClipboardWrite(bool primary, qint64 characters, const QStringList &types)
+    {
+        emit clipboardWritten(primary, characters, types);
+    }
 
     /*
      * Program resume (OSC 7577, see ProgramResume). A local pane gives its
@@ -295,6 +304,10 @@ signals:
 
     /* A program here reported its status (programStatus() has it). */
     void programStatusReported();
+
+    /* A program here put something on the clipboard (or the primary
+     * selection): the text's length, -1 if none; its types. */
+    void clipboardWritten(bool primary, qint64 characters, const QStringList &types);
 
     /* A link in the output was Ctrl-clicked, or opened from the menu. */
     void linkOpened(const QUrl &url);

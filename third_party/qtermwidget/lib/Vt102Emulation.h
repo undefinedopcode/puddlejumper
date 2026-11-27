@@ -147,17 +147,33 @@ private:
   bool inTmuxPassthrough() const;
   void unwrapTmuxPassthrough();
   // puddlejumper: strings that can run to megabytes, gathered here rather
-  // than in tokenBuffer: kitty graphics commands (ESC _ G ... ESC \), and
-  // tmux's passthrough, which may carry them.
-  enum class LongString { None, Graphics, Passthrough };
+  // than in tokenBuffer: kitty graphics commands (ESC _ G ... ESC \),
+  // tmux's passthrough, which may carry them, and clipboard writes (OSC 52
+  // and OSC 5522).
+  enum class LongString { None, Graphics, Passthrough, Clipboard };
   LongString longString = LongString::None;
-  QByteArray graphicsData;          // after "ESC _ G"
+  QByteArray graphicsData;          // after "ESC _ G", or the clipboard OSC's "52;…" / "5522;…"
   std::u32string passthroughData;   // after "ESC P tmux;"
   bool longStringOverflow = false;
   bool longStringEscPending = false;
   // Takes a character of a long string; true if it was one.
   bool receiveLongString(char32_t cc);
   void processGraphicsCommand(const QByteArray &body);
+  // puddlejumper: clipboard writes and reads (OSC 52, and kitty's OSC 5522).
+  void processClipboardCommand(const QByteArray &body, bool overflow);
+  void processOsc52(const QByteArray &body);
+  void processOsc5522(const QByteArray &body);
+  void sendOsc5522(const QByteArray &metadata, const QByteArray &payload = QByteArray());
+  // An OSC 5522 write being received: its chunks, base64 still, by type.
+  struct ClipboardWrite {
+    bool active = false;
+    bool primary = false;
+    QByteArray id;
+    QList<QPair<QByteArray, QByteArray>> data;   // type, base64
+    QList<QPair<QByteArray, QByteArray>> aliases; // alias, its target type
+    qsizetype size = 0;
+  };
+  ClipboardWrite clipboardWrite;
 #define MAXARGS 15
   void addDigit(int dig);
   void addArgument();
