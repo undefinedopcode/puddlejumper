@@ -59,6 +59,9 @@ public:
         QString category;
         QString description;
         QString keywords;
+        // The server gave it a title. A block's untitled actions are its
+        // API methods (for scripts and keys), not for a palette or menu.
+        bool titled = false;
     };
     enum class Result { Run, Prefix, Swallow, Unbound };
 
@@ -69,8 +72,11 @@ public:
     QString hash() const { return m_hash; }
     QString configPath() const { return m_configPath; }
     const QList<Binding> &bindings() const { return m_bindings; }
-    /* The server's actions (configured and block ones), for menus. */
+    /* The server's actions (configured and block ones). */
     const QList<Action> &actions() const { return m_actions; }
+    /* Those a person runs, for the palette and menus: the configured ones
+     * and a block's titled ones (Clear Terminal), not its API methods. */
+    QList<Action> peopleActions() const;
     const Action *action(const QString &name) const;
     QStringList diagnostics() const { return m_diagnostics; }
     bool hasMode(const QString &mode) const;

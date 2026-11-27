@@ -1856,10 +1856,10 @@ void MainWindow::rebuildServersMenu()
     if (RexSession *rex = rexSessionFor(currentTab())) {
         QPointer<RexSession> session(rex);
         // The server's own actions (from its init.lua, and the terminal's).
-        if (!rex->keymap().actions().isEmpty()) {
+        if (const QList<RexKeymap::Action> actions = rex->keymap().peopleActions(); !actions.isEmpty()) {
             auto *actionsMenu = m_serversMenu->addMenu(tr("Rex &Actions"));
             QHash<QString, QMenu *> byCategory;
-            for (const RexKeymap::Action &a : rex->keymap().actions()) {
+            for (const RexKeymap::Action &a : actions) {
                 QMenu *into = actionsMenu;
                 if (!a.category.isEmpty()) {
                     if (!byCategory.contains(a.category))

@@ -64,6 +64,7 @@ QJsonObject keymapJson()
       "actions": [
         {"name": "greet", "kind": "lua", "title": "Greet", "category": "Test"},
         {"name": "com.superlogical.terminal.clear", "kind": "block", "title": "Clear Terminal"},
+        {"name": "com.superlogical.terminal.pwd", "kind": "block", "description": "Get the working directory."},
         {"name": "client.tab.new", "kind": "client", "title": "New Tab"}
       ],
       "diagnostics": [{"severity": "warning", "source": "init.lua", "message": "unknown action gone"}],
@@ -102,8 +103,19 @@ int main(int argc, char *argv[])
     check(!km.isLoaded(), QStringLiteral("not loaded at first"));
     km.parse(keymapJson());
     check(km.isLoaded() && km.hash() == QLatin1String("abc"), QStringLiteral("hash"));
-    check(km.actions().size() == 2 && km.action(QStringLiteral("greet")) && !km.action(QStringLiteral("client.tab.new")),
+    check(km.actions().size() == 3 && km.action(QStringLiteral("greet")) && !km.action(QStringLiteral("client.tab.new")),
           QStringLiteral("the server's actions, not the client's"));
+    // A block's untitled actions are its API methods: kept (for keys), but
+    // not offered in the palette or menus.
+    {
+        QStringList shown;
+        for (const RexKeymap::Action &a : km.peopleActions())
+            shown << a.name;
+        check(shown == QStringList({"greet", "com.superlogical.terminal.clear"}),
+              QStringLiteral("for people: the configured and titled ones (%1)").arg(shown.join(' ')));
+        const RexKeymap::Action *pwd = km.action(QStringLiteral("com.superlogical.terminal.pwd"));
+        check(pwd && !pwd->titled && pwd->title == pwd->name, QStringLiteral("an untitled one goes by its name"));
+    }
     check(km.diagnostics() == QStringList{"init.lua: unknown action gone"}, QStringLiteral("diagnostics"));
 
     // Lookups: the first match wins.

@@ -140,7 +140,8 @@ void RexKeymap::parse(const QJsonObject &reply)
                       text(a, "description"), text(a, "keywords")};
         if (action.name.isEmpty() || action.kind == QLatin1String("client"))
             continue;
-        if (action.title.isEmpty())
+        action.titled = !action.title.isEmpty();
+        if (!action.titled)
             action.title = action.name;
         m_actions << action;
     }
@@ -152,6 +153,16 @@ void RexKeymap::parse(const QJsonObject &reply)
         const QString source = text(d, "source");
         m_diagnostics << (source.isEmpty() ? message : source + QStringLiteral(": ") + message);
     }
+}
+
+QList<RexKeymap::Action> RexKeymap::peopleActions() const
+{
+    QList<Action> out;
+    for (const Action &a : m_actions) {
+        if (a.titled || a.kind != QLatin1String("block"))
+            out << a;
+    }
+    return out;
 }
 
 const RexKeymap::Action *RexKeymap::action(const QString &name) const

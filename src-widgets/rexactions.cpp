@@ -119,9 +119,10 @@ void MainWindow::showCommandPalette()
 #ifdef PUDDLEJUMPER_REX
     if (rex) {
         QPointer<RexSession> session(rex);
-        for (const RexKeymap::Action &a : rex->keymap().actions()) {
+        for (const RexKeymap::Action &a : rex->keymap().peopleActions()) {
             const QString name = a.name;
-            entries << CommandPalette::Entry{a.title, a.category.isEmpty() ? tr("Rex") : a.category, name,
+            // Rex's own group for one with none (an older server's).
+            entries << CommandPalette::Entry{a.title, a.category.isEmpty() ? tr("Actions") : a.category, name,
                                              a.keywords + QLatin1Char(' ') + a.description,
                                              RexKeymap::display(rex->keymap().keysFor(name)),
                                              [session, pane, name]() {
