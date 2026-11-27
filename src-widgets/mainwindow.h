@@ -111,6 +111,11 @@ private:
     /* The workspace a tab is in, as an index; -1 if none. */
     int workspaceOf(const Tab *tab) const;
     int workspaceIndex(const QString &id) const;
+    // A tmux or Rex session of that workspace still opening (no tab yet).
+    bool sessionsOpening(const QString &workspaceId) const;
+    // An empty workspace on screen gets a local tab, unless a session of
+    // its is still opening (its tabs come then).
+    void ensureTab();
     void switchWorkspace(int index);
     /* Bring a tab on screen, switching workspace if need be. */
     void showTab(Tab *tab);

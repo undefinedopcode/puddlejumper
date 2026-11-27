@@ -1652,7 +1652,7 @@ void MainWindow::removeTab(Tab *tab)
     tab->deleteLater();
 
     if (m_tabs->count() == 0) {
-        newTab();
+        ensureTab();
         return;
     }
     syncTabTitles();
@@ -2026,6 +2026,7 @@ void MainWindow::attachTmux(const QString &label, const QStringList &command,
         session->deleteLater();
         rebuildTmuxMenu();
         if (!*shownAny) {
+            ensureTab();   // its workspace may have been waiting for it
             QMessageBox::warning(this, tr("tmux"),
                                  tr("Could not attach to tmux session “%1”.").arg(session->label())
                                      + (reason.isEmpty() ? QString() : QStringLiteral("\n\n") + reason));
@@ -2237,6 +2238,7 @@ void MainWindow::openRex(const QUrl &server, const QString &sessionId, const QSt
         m_rexWorkspace.remove(session);
         session->deleteLater();
         if (!*shownAny) {
+            ensureTab();   // its workspace may have been waiting for it
             if (quiet) {
                 qCInfo(lcTmux) << "Rex session" << session->sessionId() << "not restored:" << reason;
                 return;
@@ -3134,6 +3136,27 @@ int MainWindow::workspaceOf(const Tab *tab) const
     return -1;
 }
 
+bool MainWindow::sessionsOpening(const QString &workspaceId) const
+{
+    for (TmuxSession *s : std::as_const(m_tmuxSessions)) {
+        if (m_sessionWorkspace.value(s) == workspaceId && s->tabs().isEmpty())
+            return true;
+    }
+#ifdef PUDDLEJUMPER_REX
+    for (RexSession *s : std::as_const(m_rexSessions)) {
+        if (m_rexWorkspace.value(s) == workspaceId && s->tabs().isEmpty())
+            return true;
+    }
+#endif
+    return false;
+}
+
+void MainWindow::ensureTab()
+{
+    if (m_tabs->count() == 0 && !sessionsOpening(m_workspaces.value(m_currentWorkspace).id))
+        newTab();
+}
+
 int MainWindow::workspaceIndex(const QString &id) const
 {
     for (int i = 0; i < m_workspaces.size(); ++i) {
@@ -3172,7 +3195,7 @@ void MainWindow::switchWorkspace(int index)
     m_switchingWorkspace = false;
 
     if (m_tabs->count() == 0) {
-        newTab();   // a new or emptied workspace starts with a tab
+        ensureTab();   // a new or emptied workspace starts with a tab
     } else {
         for (int i = 0; i < m_tabs->count(); ++i)
             syncTabText(pageAt(i));
@@ -3383,7 +3406,7 @@ void MainWindow::moveTabToWorkspace(Tab *tab, int index)
     }
 
     if (m_tabs->count() == 0) {
-        newTab();
+        ensureTab();
     } else {
         syncTabTitles();
         updateStatus();
@@ -3823,7 +3846,9 @@ bool MainWindow::restoreSession()
     }
 
     if (m_tabs->count() == 0) {
-        newTab();
+        // Its tmux and Rex tabs come as they attach: a local tab only if
+        // there are none to wait for (or they fail).
+        ensureTab();
     } else {
         const int current = qBound(0, m_workspaces.at(m_currentWorkspace).currentTab,
                                    m_tabs->count() - 1);
