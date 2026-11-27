@@ -42,8 +42,12 @@ public:
     void setTitle(int index, const QString &title);
     /* The card's second line: what's running, where, or which tmux session. */
     void setSubtitle(int index, const QString &subtitle);
-    /* A small label on the preview, such as the tmux session's name. */
+    /* A small label on the preview: where the tab is (its tmux or Rex
+     * session, or the host). */
     void setBadge(int index, const QString &badge);
+    /* The protocol icon before the title: an appIcon() name, drawn in the
+     * sidebar's text colour; empty for none. */
+    void setIcon(int index, const QString &icon);
     void setPreview(int index, const QPixmap &pixmap);
     /* Mark a tab that produced output while it was not being watched. */
     void setBusy(int index, bool busy);

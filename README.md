@@ -281,8 +281,11 @@ tabs beside New Tab.
 
 Each card shows a live preview of the tab, its title, and a second line saying
 what it is: the program running (when it isn't just the shell), the directory,
-and how many panes, or for tmux the active pane's title, with a `tmux <session>`
-badge on the preview. A dot marks a tab that has had output you haven't seen.
+and how many panes, or for tmux and Rex the active pane's title. An icon before
+the title says what kind of tab it is (a local terminal, tmux, Rex, VNC, RDP or
+the web), as it does in the tab bar, and a badge on the preview says where: the
+tmux or Rex session, or the host. A dot marks a tab that has had output you
+haven't seen.
 
 - **Click** a card to switch to it; **drag** cards to reorder the tabs (the tab
   bar follows, and the other way round); **middle-click**, or the ✕ that

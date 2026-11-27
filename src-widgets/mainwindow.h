@@ -208,6 +208,10 @@ private:
                     const QString &workspaceId = QString(), bool show = false);
     void newTmuxSession();
     void connectTmuxHost();
+    /* What kind of tab a page is, as an appIcon() name: terminal, tmux,
+     * Rex, VNC, RDP or web. On its tab in the strip and the sidebar. */
+    QString tabIconName(Tab *page) const;
+    void updateTabIcon(int index);
 #ifdef PUDDLEJUMPER_REX
     /* Rex: a session on a Rex server, its terminal in a tab. Closing the tab
      * detaches; the session goes on running on the server. */

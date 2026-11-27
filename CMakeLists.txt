@@ -201,6 +201,13 @@ qt_add_resources(puddlejumper "lucide_icons"
     BASE icons/lucide
     FILES ${LUCIDE_ICONS}
 )
+# The tabs' protocol icons (terminal, tmux, Rex, VNC, RDP), in currentColor.
+file(GLOB CONNECTION_ICONS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" icons/connections/*.svg)
+qt_add_resources(puddlejumper "connection_icons"
+    PREFIX "/connections"
+    BASE icons/connections
+    FILES ${CONNECTION_ICONS}
+)
 
 install(TARGETS puddlejumper
     BUNDLE  DESTINATION .

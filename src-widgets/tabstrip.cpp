@@ -6,6 +6,7 @@
 
 #include "tabstrip.h"
 
+#include "appicon.h"
 #include "cardstyle.h"
 
 #include <QAbstractItemModel>
@@ -28,6 +29,7 @@ constexpr int kTitleRole = Qt::UserRole + 1;
 constexpr int kBusyRole = Qt::UserRole + 2;
 constexpr int kStatusKindRole = Qt::UserRole + 3;
 constexpr int kNaturalWidthRole = Qt::UserRole + 4;   // before layoutTabs() narrows it
+constexpr int kIconRole = Qt::UserRole + 5;           // appIcon() name: the tab's protocol
 
 // Tab geometry, in logical pixels.
 constexpr int kSide = 6;        // between the window edge and the first tab
@@ -36,6 +38,7 @@ constexpr int kGapV = 4;        // above and below a tab
 constexpr int kPadH = 10;       // inside a tab, before the title
 constexpr int kPadV = 6;        // inside a tab, above and below the title
 constexpr int kClose = 16;      // the close button
+constexpr int kIcon = 14;       // the protocol icon, before the title
 constexpr int kMinWidth = 110;
 constexpr int kMaxWidth = 220;
 constexpr int kFade = 28;       // the fade at an edge with tabs beyond it
@@ -91,11 +94,11 @@ public:
     }
 
     // The width a tab wants for its title, within kMinWidth..kMaxWidth.
-    static int rowWidth(const QString &title, const QFont &font)
+    static int rowWidth(const QString &title, const QFont &font, bool icon)
     {
         // Measured semibold, as the current tab's title is drawn, so a tab
         // doesn't change width on becoming current.
-        const int text = QFontMetrics(titleFont(font, true)).horizontalAdvance(title);
+        const int text = QFontMetrics(titleFont(font, true)).horizontalAdvance(title) + (icon ? kIcon + 7 : 0);
         const int chrome = 2 * kGapH + kPadH + 6 + kDot + 4 + kClose + kPadH / 2;
         return qBound(kMinWidth, text + chrome, kMaxWidth);
     }
@@ -116,12 +119,22 @@ public:
             tintBlocked && kind == cardstyle::Status::Blocked ? cardstyle::statusColour(kind) : QColor());
 
         const QRect title = titleRect(option.rect);
+        QRect text = title;
+        // What kind of tab it is: terminal, tmux, Rex, VNC, RDP, web.
+        if (const QString icon = index.data(kIconRole).toString(); !icon.isEmpty()) {
+            const qreal dpr = p->device() ? p->device()->devicePixelRatioF() : 1.0;
+            const QPixmap pm = appIcon(icon.toLatin1().constData(), foreground).pixmap(QSize(kIcon, kIcon), dpr);
+            p->setOpacity(selected ? 0.95 : 0.7);
+            p->drawPixmap(QPoint(title.left(), title.center().y() - kIcon / 2 + 1), pm);
+            p->setOpacity(1);
+            text.setLeft(title.left() + kIcon + 7);
+        }
         const QFont font = titleFont(option.font, selected);
         p->setFont(font);
         p->setPen(foreground);
-        p->drawText(title, Qt::AlignLeft | Qt::AlignVCenter,
+        p->drawText(text, Qt::AlignLeft | Qt::AlignVCenter,
                     QFontMetrics(font).elidedText(index.data(kTitleRole).toString(),
-                                                  Qt::ElideRight, title.width()));
+                                                  Qt::ElideRight, text.width()));
 
         // A program's status (needing you, failed, done, working) takes the
         // place of the new-output dot, in its colour.
@@ -299,7 +312,8 @@ QListWidgetItem *TabStrip::item(int index) const
 void TabStrip::updateItemWidth(QListWidgetItem *item)
 {
     item->setData(kNaturalWidthRole,
-                  TabDelegate::rowWidth(item->data(kTitleRole).toString(), m_list->font()));
+                  TabDelegate::rowWidth(item->data(kTitleRole).toString(), m_list->font(),
+                                        !item->data(kIconRole).toString().isEmpty()));
     m_list->updateGeometry();
     layoutTabs();
 }
@@ -353,8 +367,9 @@ void TabStrip::showAllTabsMenu()
     const QFontMetrics fm(menu.font());
     for (int i = 0; i < m_list->count(); ++i) {
         const QListWidgetItem *tab = m_list->item(i);
+        const QString icon = tab->data(kIconRole).toString();
         QAction *act = menu.addAction(
-            tab->data(kBusyRole).toBool() ? dot : QIcon(),
+            tab->data(kBusyRole).toBool() ? dot : icon.isEmpty() ? QIcon() : appIcon(icon.toLatin1().constData()),
             fm.elidedText(tab->data(kTitleRole).toString(), Qt::ElideRight, 360));
         act->setCheckable(true);
         act->setChecked(i == m_list->currentRow());
@@ -423,6 +438,15 @@ void TabStrip::setTintBlocked(bool tint)
         return;
     delegate->tintBlocked = tint;
     m_list->viewport()->update();
+}
+
+void TabStrip::setIcon(int index, const QString &icon)
+{
+    QListWidgetItem *tab = item(index);
+    if (!tab || tab->data(kIconRole).toString() == icon)
+        return;
+    tab->setData(kIconRole, icon);
+    updateItemWidth(tab);
 }
 
 void TabStrip::setBusy(int index, bool busy)

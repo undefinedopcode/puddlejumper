@@ -20,6 +20,8 @@
  * it is drawn, and follows a switch between light and dark.
  *
  * An unknown name gives a null icon, and a toolbar button shows its text.
+ * A name with a slash is a path in another bundled set, drawn the same way:
+ * "connections/rex-tab-icon" (icons/connections/, the tabs' protocols).
  */
 QIcon appIcon(const char *lucideName);
 /* The same, always in `colour` (dimmed when disabled): for icons drawn over a

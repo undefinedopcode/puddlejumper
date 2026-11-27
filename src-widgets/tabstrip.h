@@ -42,6 +42,9 @@ public:
     void setTabToolTip(int index, const QString &toolTip);
     /* Mark a tab that produced output while it was not being watched. */
     void setBusy(int index, bool busy);
+    /* The protocol icon before the title: an appIcon() name ("connections/
+     * rex-tab-icon"), drawn in the strip's text colour; empty for none. */
+    void setIcon(int index, const QString &icon);
     /* Tint the tabs whose program is waiting on the user. */
     void setTintBlocked(bool tint);
     /* What a program in the tab says it is doing (OSC 7501): a dot in its

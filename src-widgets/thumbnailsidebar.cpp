@@ -6,6 +6,8 @@
 
 #include "thumbnailsidebar.h"
 
+#include "appicon.h"
+
 #include "cardstyle.h"
 
 #include <QAbstractItemModel>
@@ -30,6 +32,7 @@ constexpr int kStatusKindRole = Qt::UserRole + 6;
 constexpr int kStatusLabelRole = Qt::UserRole + 7;
 constexpr int kStatusProgressRole = Qt::UserRole + 8;
 constexpr int kStatusDetailRole = Qt::UserRole + 9;
+constexpr int kIconRole = Qt::UserRole + 10;   // appIcon() name: the tab's protocol
 
 // Card geometry, in logical pixels.
 constexpr int kSide = 8;        // between the sidebar edge and a card
@@ -120,6 +123,23 @@ public:
                + QFontMetrics(smallFont(font)).height() + kPad;
     }
 
+    // The tab's protocol icon at the start of `title`, a little dimmer
+    // than the text unless the card is current; the title's room after it.
+    QRect paintIcon(QPainter *p, const QModelIndex &index, QRect title, int lineHeight, bool selected) const
+    {
+        const QString icon = index.data(kIconRole).toString();
+        if (icon.isEmpty())
+            return title;
+        const int side = lineHeight - 3;
+        const qreal dpr = p->device() ? p->device()->devicePixelRatioF() : 1.0;
+        const QPixmap pm = appIcon(icon.toLatin1().constData(), foreground).pixmap(QSize(side, side), dpr);
+        p->setOpacity(selected ? 0.95 : 0.7);
+        p->drawPixmap(QPoint(title.left(), title.center().y() - side / 2), pm);
+        p->setOpacity(1);
+        title.setLeft(title.left() + side + 6);
+        return title;
+    }
+
     void paintClose(QPainter *p, const QRect &close) const
     {
         p->setPen(Qt::NoPen);
@@ -161,6 +181,7 @@ public:
             cardstyle::paintDot(p, QPointF(title.right() - kDot / 2.0, title.center().y() + 0.5), accent);
             title.setRight(title.right() - kDot - 6);
         }
+        title = paintIcon(p, index, title, tm.height(), selected);
         p->setFont(titleFont);
         p->setPen(foreground);
         p->drawText(title, Qt::AlignLeft | Qt::AlignVCenter,
@@ -250,7 +271,8 @@ public:
             return;
         }
 
-        // A badge on the preview (the tmux session).
+        // A badge on the preview: where the tab is (its tmux or Rex
+        // session, or the host).
         const QString badge = index.data(kBadgeRole).toString();
         const QFont small = smallFont(option.font);
         if (!badge.isEmpty()) {
@@ -300,6 +322,7 @@ public:
         }
         QFont titleFont = option.font;
         titleFont.setWeight(selected ? QFont::DemiBold : QFont::Normal);
+        title = paintIcon(p, index, title, titleMetrics.height(), selected);
         p->setFont(titleFont);
         p->setPen(foreground);
         p->drawText(title, Qt::AlignLeft | Qt::AlignVCenter,
@@ -463,6 +486,12 @@ void ThumbnailSidebar::setSubtitle(int index, const QString &subtitle)
 {
     if (QListWidgetItem *item = card(index))
         item->setData(kSubtitleRole, subtitle);
+}
+
+void ThumbnailSidebar::setIcon(int index, const QString &icon)
+{
+    if (QListWidgetItem *item = card(index))
+        item->setData(kIconRole, icon);
 }
 
 void ThumbnailSidebar::setBadge(int index, const QString &badge)

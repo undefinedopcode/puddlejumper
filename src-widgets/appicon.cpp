@@ -20,6 +20,9 @@ namespace {
 
 QString resourcePath(const QString &name)
 {
+    // A name with a slash is another bundled set's ("connections/rex-tab-icon").
+    if (name.contains(QLatin1Char('/')))
+        return QStringLiteral(":/%1.svg").arg(name);
     return QStringLiteral(":/lucide/%1.svg").arg(name);
 }
 

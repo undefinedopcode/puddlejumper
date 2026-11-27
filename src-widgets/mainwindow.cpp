@@ -1402,11 +1402,40 @@ bool MainWindow::isAppShortcut(const QKeyEvent *event) const
     return false;
 }
 
+QString MainWindow::tabIconName(Tab *page) const
+{
+#ifdef PUDDLEJUMPER_WEB
+    if (qobject_cast<WebTab *>(page))
+        return QStringLiteral("globe");
+#endif
+    if (auto *vnc = qobject_cast<VncTab *>(page))
+        return vnc->view()->client()->scheme() == QLatin1String("rdp") ? QStringLiteral("connections/rdp-tab-icon")
+                                                                       : QStringLiteral("connections/vnc-tab-icon");
+    auto *tab = qobject_cast<TerminalTab *>(page);
+    if (!tab)
+        return {};
+#ifdef PUDDLEJUMPER_REX
+    if (rexSessionFor(tab))
+        return QStringLiteral("connections/rex-tab-icon");
+#endif
+    if (tmuxSessionFor(tab))
+        return QStringLiteral("connections/tmux-tab-icon");
+    return QStringLiteral("connections/terminal-tab-icon");
+}
+
+void MainWindow::updateTabIcon(int index)
+{
+    const QString icon = tabIconName(pageAt(index));
+    m_tabStrip->setIcon(index, icon);
+    m_sidebar->setIcon(index, icon);
+}
+
 void MainWindow::syncTabText(Tab *page)
 {
     const int i = m_tabs->indexOf(page);
     if (i < 0)
         return;
+    updateTabIcon(i);
 
 #ifdef PUDDLEJUMPER_WEB
     if (auto *web = qobject_cast<WebTab *>(page)) {
@@ -2315,6 +2344,7 @@ void MainWindow::syncTabTitles()
     // The cards are new: put back the marks for unseen output.
     for (int i = 0; i < m_tabs->count(); ++i) {
         m_tabStrip->setTabToolTip(i, m_tabs->tabToolTip(i));
+        updateTabIcon(i);
         if (auto *tab = pageAt(i); tab && tab->property(kBusyProperty).toBool()) {
             m_sidebar->setBusy(i, true);
             m_tabStrip->setBusy(i, true);
@@ -2342,14 +2372,20 @@ void MainWindow::refreshPreviews(bool all)
 
 void MainWindow::updateCardDetails(int index)
 {
+    // The pill says where a tab is (the icon says what it is): the host,
+    // or the tmux or Rex session. Local tabs have none.
     if (auto *vnc = qobject_cast<VncTab *>(pageAt(index))) {
-        m_sidebar->setBadge(index, vnc->view()->client()->scheme().toUpper());
-        m_sidebar->setSubtitle(index, vnc->details());
+        m_sidebar->setBadge(index, vnc->address());
+        QString details = vnc->details();   // the address in the pill, not twice
+        const QString lead = vnc->address() + QStringLiteral("  ·  ");
+        if (details.startsWith(lead))
+            details = details.mid(lead.size());
+        m_sidebar->setSubtitle(index, details);
         return;
     }
 #ifdef PUDDLEJUMPER_WEB
     if (auto *web = qobject_cast<WebTab *>(pageAt(index))) {
-        m_sidebar->setBadge(index, tr("Web"));
+        m_sidebar->setBadge(index, web->url().host());
         m_sidebar->setSubtitle(index, web->details());
         return;
     }
@@ -2363,14 +2399,14 @@ void MainWindow::updateCardDetails(int index)
     // active pane's title when that says more than the window's name.
 #ifdef PUDDLEJUMPER_REX
     if (auto *rex = rexSessionFor(tab)) {
-        m_sidebar->setBadge(index, tr("rex %1").arg(rex->label()));
+        m_sidebar->setBadge(index, rex->label());
         const QString title = pane->sessionTitle();
         m_sidebar->setSubtitle(index, title == rex->windowName(tab) ? QString() : title);
         return;
     }
 #endif
     if (auto *session = tmuxSessionFor(tab)) {
-        m_sidebar->setBadge(index, tr("tmux %1").arg(session->label()));
+        m_sidebar->setBadge(index, session->label());
         const QString title = pane->sessionTitle();
         m_sidebar->setSubtitle(index, title == session->windowName(tab) ? QString() : title);
         return;
