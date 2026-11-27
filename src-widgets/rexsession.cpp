@@ -1101,12 +1101,21 @@ void RexSession::runAction(const QString &name, const QJsonObject &args, const T
     if (!block.isEmpty())
         p.insert(QStringLiteral("block_id"), block);
     m_control->request(QStringLiteral("client.action"), p,
-                       [this, name](const QJsonObject &payload, const QJsonObject &error) {
-                           if (!error.isEmpty())
+                       [this, name, block](const QJsonObject &payload, const QJsonObject &error) {
+                           if (!error.isEmpty()) {
                                emit actionFailed(name, str(error, "message").isEmpty() ? str(error, "code")
                                                                                        : str(error, "message"));
-                           else
-                               emit actionFinished(name, payload.value(QLatin1String("result")));
+                               return;
+                           }
+                           // What it queued with rex.client.queue is ours to
+                           // perform, in order (Rex performs none of it).
+                           for (const QJsonValue &v : payload.value(QLatin1String("client_actions")).toArray()) {
+                               const QJsonObject q = v.toObject();
+                               if (!str(q, "action").isEmpty())
+                                   emit queuedAction(name, str(q, "action"), q.value(QLatin1String("args")).toObject(),
+                                                     block.isEmpty() ? nullptr : paneForBlock(block));
+                           }
+                           emit actionFinished(name, payload.value(QLatin1String("result")));
                        });
 }
 

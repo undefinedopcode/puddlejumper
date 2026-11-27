@@ -327,6 +327,13 @@ void keymapTests(Server &server, Client &c, Settings &settings)
                          performAction = action;
                          performArgs = args;
                      });
+    QStringList queued;
+    QJsonObject queuedArgs;
+    QObject::connect(s, &RexSession::queuedAction, &guard,
+                     [&](const QString &from, const QString &action, const QJsonObject &args, TerminalWidget *) {
+                         queued << from + QLatin1Char(':') + action;
+                         queuedArgs = args;
+                     });
     QObject::connect(s, &RexSession::promptRequested, &guard, [&](const QString &call, const QJsonObject &p) {
         promptCall = call;
         prompt = p;
@@ -381,7 +388,8 @@ void keymapTests(Server &server, Client &c, Settings &settings)
         check(performCall.isEmpty(), QStringLiteral("an undeclared action isn't asked for"));
     }
 
-    if (!km.action(QStringLiteral("ask")) || !km.action(QStringLiteral("via_client"))) {
+    if (!km.action(QStringLiteral("ask")) || !km.action(QStringLiteral("via_client"))
+        || !km.action(QStringLiteral("queue_then_fail"))) {
         QTextStream(stdout) << "keymap: no test actions configured; actions skipped\n";
         return;
     }
@@ -426,18 +434,21 @@ void keymapTests(Server &server, Client &c, Settings &settings)
               == QJsonValue(QStringLiteral("cancelled")),
           QStringLiteral("cancelled"));
 
-    // An action that runs one of the client's.
+    // An action that queues one of the client's (rex.client.queue): it comes
+    // back in the reply for this client to perform, before the result; a
+    // failed action's queue is dropped.
     finished.clear();
     results.clear();
     s->runAction(QStringLiteral("via_client"), {}, nullptr, QStringLiteral("key"));
-    if (check(waitFor([&] { return !performCall.isEmpty(); }), QStringLiteral("rex.perform asks the client"))) {
-        check(performArgs.value("why").toString() == QLatin1String("test"), QStringLiteral("with its arguments"));
-        s->replyCall(std::exchange(performCall, QString()), {},
-                     QJsonObject{{QStringLiteral("code"), QStringLiteral("not_supported")},
-                                 {QStringLiteral("message"), QStringLiteral("not here")}});
-        check(waitFor([&] { return failed.contains(QStringLiteral("via_client")); }),
-              QStringLiteral("the client's refusal fails the action"));
+    if (check(waitFor([&] { return finished.contains(QStringLiteral("via_client")); }), QStringLiteral("via_client finishes"))) {
+        check(queued == QStringList{QStringLiteral("via_client:client.tab.new")}, QStringLiteral("its queued action, for this client"));
+        check(queuedArgs.value("why").toString() == QLatin1String("test"), QStringLiteral("with its arguments"));
+        check(performCall.isEmpty(), QStringLiteral("not asked for as a perform"));
     }
+    queued.clear();
+    s->runAction(QStringLiteral("queue_then_fail"), {}, nullptr, QStringLiteral("key"));
+    if (check(waitFor([&] { return failed.contains(QStringLiteral("queue_then_fail")); }), QStringLiteral("queue_then_fail fails")))
+        check(queued.isEmpty(), QStringLiteral("a failed action's queue is dropped"));
 
     // The client's own scripts: key handlers, forwarded keys.
     if (TerminalWidget *pane = c.panes().value(0)) {

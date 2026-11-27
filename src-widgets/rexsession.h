@@ -228,6 +228,11 @@ signals:
     void promptRequested(const QString &callId, const QJsonObject &prompt);
     /* The question is no longer wanted; close it without answering. */
     void promptEnded(const QString &callId);
+    /* An action this client ran (runAction) queued one of the client's own
+     * actions (rex.client.queue): perform it, as Rex leaves that to the
+     * caller. Each comes in order, before actionFinished. */
+    void queuedAction(const QString &fromAction, const QString &action, const QJsonObject &args,
+                      TerminalWidget *pane);
     void actionFinished(const QString &action, const QJsonValue &result);
     /* Local files were dropped on one of the panes (a server elsewhere). */
     void filesDropped(TerminalWidget *pane, const QStringList &paths);

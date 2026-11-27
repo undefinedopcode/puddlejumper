@@ -20,9 +20,11 @@
  * (client.set_script) gave the server: the key goes there with client.key.
  *
  * The server can also ask this client to run one of its actions
- * (client_perform_requested: another client's client.perform, or an action's
+ * (client_perform_requested: another client's client.perform, or atlantis's
  * rex.perform), and an action can ask a question (client_prompt_requested,
- * shown as a dialog).
+ * shown as a dialog). What an action this client ran queued with
+ * rex.client.queue comes back in its reply (client_actions), and is
+ * performed here, in order: Rex leaves that to the caller.
  */
 
 #include "mainwindow.h"
@@ -416,6 +418,13 @@ void MainWindow::wireRexActions(RexSession *session)
                     session->replyCall(callId, QJsonValue());
                 else
                     session->replyCall(callId, {}, apiError(QStringLiteral("not_supported"), why));
+            });
+    // What an action queued for this client (rex.client.queue): done here.
+    connect(session, &RexSession::queuedAction, this,
+            [this, session](const QString &from, const QString &action, const QJsonObject &args, TerminalWidget *pane) {
+                QString why;
+                if (!performClientAction(action, args, pane, &why, session))
+                    statusBar()->showMessage(tr("%1: %2: %3").arg(from, action, why), 8000);
             });
     connect(session, &RexSession::promptRequested, this,
             [this, session](const QString &callId, const QJsonObject &prompt) { showRexPrompt(session, callId, prompt); });

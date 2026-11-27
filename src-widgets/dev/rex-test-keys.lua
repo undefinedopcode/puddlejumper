@@ -11,7 +11,12 @@ rex.action{name = 'choose', title = 'Choose', category = 'Test', run = function(
   return r or err
 end}
 rex.action{name = 'via_client', title = 'Via Client', category = 'Test', run = function(ctx)
-  return rex.perform('client.tab.new', {why = 'test'})
+  rex.client.queue('client.tab.new', {why = 'test'})
+  return 'queued'
+end}
+rex.action{name = 'queue_then_fail', title = 'Queue Then Fail', category = 'Test', run = function(ctx)
+  rex.client.queue('client.tab.new')
+  error('after queueing')
 end}
 rex.bind('ctrl+shift+h', 'hello')
 rex.bind('ctrl+a>c', 'hello')
