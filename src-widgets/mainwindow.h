@@ -250,7 +250,10 @@ private:
                       const QString &origin);
     /* One of the app's actions, by name; false (and why) if there is none
      * or it can't run now. */
-    bool performClientAction(const QString &name, const QJsonObject &args, TerminalWidget *pane, QString *error);
+    // One of the app's actions, as a Rex keymap or client.perform asks
+    // (from: the session asking, if known).
+    bool performClientAction(const QString &name, const QJsonObject &args, TerminalWidget *pane, QString *error,
+                             RexSession *from = nullptr);
     void showRexPrompt(RexSession *session, const QString &callId, const QJsonObject &prompt);
     /* Copying files to and from a Rex server (its fs block). Local files
      * into a pane's directory there (or, `ask`, wherever is typed). */
@@ -379,6 +382,7 @@ private:
     QMenu *m_newTabWithProfileMenu = nullptr;
     QMenu *m_tmuxMenu = nullptr;
     Notifier *m_notifier = nullptr;
+    QHash<QString, qint64> m_scriptNotifiedAt;   // client.notify's, by key: one a second
     QList<TmuxSession *> m_tmuxSessions;
 #ifdef PUDDLEJUMPER_REX
     QList<RexSession *> m_rexSessions;

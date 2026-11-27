@@ -28,6 +28,7 @@
 #include "mainwindow.h"
 
 #include "commandpalette.h"
+#include "notifier.h"
 #include "terminaltab.h"
 #include "terminalwidget.h"
 
@@ -43,6 +44,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QInputDialog>
@@ -87,6 +89,7 @@ QJsonObject argsSchema(const QList<std::pair<QString, QString>> &properties, con
 bool argumentAction(const QString &name)
 {
     return name.startsWith(QLatin1String("client.mode.")) || name == QLatin1String("client.tab.goto")
+        || name == QLatin1String("client.notify")
         || name == QLatin1String("client.workspace.switch");
 }
 
@@ -196,6 +199,15 @@ QJsonObject MainWindow::rexKeymapRequest() const
                            {QStringLiteral("category"), QStringLiteral("Workspace")},
                            {QStringLiteral("args"), argsSchema({{QStringLiteral("name"), QStringLiteral("string")},
                                                                 {QStringLiteral("index"), QStringLiteral("integer")}})}};
+    actions << QJsonObject{{QStringLiteral("name"), QStringLiteral("client.notify")},
+                           {QStringLiteral("kind"), QStringLiteral("client")},
+                           {QStringLiteral("title"), tr("Show a Notification")},
+                           {QStringLiteral("description"),
+                            tr("A desktop notification: title, and body if given, naming the tab it came from")},
+                           {QStringLiteral("category"), QStringLiteral("App")},
+                           {QStringLiteral("args"), argsSchema({{QStringLiteral("title"), QStringLiteral("string")},
+                                                                {QStringLiteral("body"), QStringLiteral("string")}},
+                                                               {QStringLiteral("title")})}};
     // Keymap modes: entered and left by binding these.
     for (const char *name : {"client.mode.enter", "client.mode.exit", "client.mode.exit_all"}) {
         const QString n = QString::fromLatin1(name);
@@ -273,7 +285,7 @@ void MainWindow::wireRexActions(RexSession *session)
     connect(session, &RexSession::performRequested, this,
             [this, session](const QString &callId, const QString &action, const QJsonObject &args, TerminalWidget *pane) {
                 QString why;
-                if (performClientAction(action, args, pane, &why))
+                if (performClientAction(action, args, pane, &why, session))
                     session->replyCall(callId, QJsonValue());
                 else
                     session->replyCall(callId, {}, apiError(QStringLiteral("not_supported"), why));
@@ -310,8 +322,44 @@ void MainWindow::wireRexActions(RexSession *session)
 }
 
 bool MainWindow::performClientAction(const QString &name, const QJsonObject &args, TerminalWidget *pane,
-                                     QString *error)
+                                     QString *error, RexSession *from)
 {
+    if (name == QLatin1String("client.notify")) {
+        const QString title = args.value(QLatin1String("title")).toString().simplified();
+        const QString body = args.value(QLatin1String("body")).toString().trimmed();
+        if (title.isEmpty()) {
+            *error = tr("client.notify needs a title");
+            return false;
+        }
+        // Clicking it shows the pane's tab; it goes when that tab is seen.
+        TerminalTab *tab = nullptr;
+        for (Tab *page : allPages()) {
+            if (auto *t = qobject_cast<TerminalTab *>(page); t && pane && t->contains(pane))
+                tab = t;
+        }
+#ifdef PUDDLEJUMPER_REX
+        if (!from && pane)
+            from = rexSessionFor(pane);
+#endif
+        // Where it came from, always: a script can't pass for something else.
+        QString where = tab ? describeTab(tab) : QString();
+#ifdef PUDDLEJUMPER_REX
+        if (!tab && from)
+            where = tr("Rex %1").arg(from->label());
+#endif
+        if (where.isEmpty())
+            where = tr("Rex");
+        const QString key = tab ? notificationKey(tab)
+                                : QStringLiteral("notify-%1").arg(quintptr(from), 0, 16);
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (now - m_scriptNotifiedAt.value(key) < 1000) {
+            *error = tr("Too many notifications: one a second");
+            return false;
+        }
+        m_scriptNotifiedAt.insert(key, now);
+        m_notifier->notify(key, tr("%1 — %2").arg(title.left(200), where), body.left(2000));
+        return true;
+    }
     if (name == QLatin1String("client.mode.enter")) {
         const QString mode = args.value(QLatin1String("mode")).toString();
         if (mode.isEmpty()) {
@@ -425,7 +473,7 @@ void MainWindow::runRexAction(RexSession *session, TerminalWidget *pane, const Q
         return false;
     }();
     if (ours) {
-        if (!performClientAction(name, args, pane, &why))
+        if (!performClientAction(name, args, pane, &why, session))
             statusBar()->showMessage(why, 5000);
         return;
     }
