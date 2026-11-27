@@ -472,6 +472,7 @@ void MainWindow::onCurrentTabChanged(int index)
         tab->focusContent();
         syncTabText(tab);
     }
+    updateWindowTitle();
     updateTabColours();
     updateStatus();
 }
@@ -1458,7 +1459,7 @@ void MainWindow::syncTabText(Tab *page)
         m_tabStrip->setTitle(i, name);
         m_tabStrip->setTabToolTip(i, m_tabs->tabToolTip(i));
         if (web == currentPage())
-            setWindowTitle(tr("%1 — PuddleJumper").arg(name));
+            updateWindowTitle();
         return;
     }
 #endif
@@ -1471,7 +1472,7 @@ void MainWindow::syncTabText(Tab *page)
         m_tabStrip->setTitle(i, name);
         m_tabStrip->setTabToolTip(i, m_tabs->tabToolTip(i));
         if (vnc == currentPage())
-            setWindowTitle(tr("%1 — PuddleJumper").arg(name));
+            updateWindowTitle();
         return;
     }
 
@@ -1492,6 +1493,8 @@ void MainWindow::syncTabText(Tab *page)
                                      ? tr("Rex %1 — %2").arg(rex->label(), name)
                                      : tr("Rex %1 — %2\n%3").arg(rex->label(), name, title));
         m_tabStrip->setTabToolTip(i, m_tabs->tabToolTip(i));
+        if (tab == currentTab())
+            updateWindowTitle();
         return;
     }
 #endif
@@ -1507,8 +1510,7 @@ void MainWindow::syncTabText(Tab *page)
                                      : tr("tmux %1 — %2\n%3").arg(session->label(), name, title));
         m_tabStrip->setTabToolTip(i, m_tabs->tabToolTip(i));
         if (tab == currentTab())
-            setWindowTitle(tr("%1 — tmux %2 — PuddleJumper")
-                               .arg(title.isEmpty() ? name : title, session->label()));
+            updateWindowTitle();
         return;
     }
 
@@ -1523,8 +1525,41 @@ void MainWindow::syncTabText(Tab *page)
     m_tabStrip->setTitle(i, name);
     m_tabStrip->setTabToolTip(i, m_tabs->tabToolTip(i));
     if (tab == currentTab())
-        setWindowTitle(title.isEmpty() ? QStringLiteral("PuddleJumper")
-                                       : tr("%1 — PuddleJumper").arg(title));
+        updateWindowTitle();
+}
+
+void MainWindow::updateWindowTitle()
+{
+    // The tab on screen (what its program calls itself, else its name),
+    // where it lives (a tmux or Rex session), then the workspace when there
+    // is more than one.
+    QStringList parts;
+    if (Tab *page = currentPage()) {
+        const int i = m_tabs->indexOf(page);
+        QString name = i >= 0 ? m_tabs->tabText(i) : QString();
+        auto *tab = qobject_cast<TerminalTab *>(page);
+        const TerminalWidget *pane = tab ? tab->activePane() : nullptr;
+        const QString title = pane ? pane->sessionTitle() : QString();
+        // A name the user gave a local tab wins, as on the tab itself.
+        if (!title.isEmpty() && !(tab && !tab->customTitle().isEmpty() && !tmuxSessionFor(tab)
+#ifdef PUDDLEJUMPER_REX
+                                  && !rexSessionFor(tab)
+#endif
+                                  ))
+            name = title;
+        if (!name.isEmpty())
+            parts << name;
+#ifdef PUDDLEJUMPER_REX
+        if (auto *rex = tab ? rexSessionFor(tab) : nullptr)
+            parts << tr("Rex %1").arg(rex->label());
+#endif
+        if (auto *session = tab ? tmuxSessionFor(tab) : nullptr)
+            parts << tr("tmux %1").arg(session->label());
+    }
+    if (m_workspaces.size() > 1 && m_currentWorkspace >= 0 && m_currentWorkspace < m_workspaces.size())
+        parts << m_workspaces.at(m_currentWorkspace).name;
+    parts << QStringLiteral("PuddleJumper");
+    setWindowTitle(parts.join(QStringLiteral(" — ")));
 }
 
 void MainWindow::wirePane(TerminalWidget *term)
@@ -3527,6 +3562,7 @@ void MainWindow::updateWorkspaceChrome()
                              m_workspaceMenu, m_workspaces.size() > 1);
     if (m_workspaceMenu)
         rebuildWorkspaceMenu();   // a global menu shows a copy: keep it current
+    updateWindowTitle();   // it names the workspace
 }
 
 void MainWindow::markTabBusy(Tab *tab)

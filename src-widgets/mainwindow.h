@@ -116,6 +116,8 @@ private:
     // An empty workspace on screen gets a local tab, unless a session of
     // its is still opening (its tabs come then).
     void ensureTab();
+    // The window's title: the current tab, its session, the workspace.
+    void updateWindowTitle();
     void switchWorkspace(int index);
     /* Bring a tab on screen, switching workspace if need be. */
     void showTab(Tab *tab);
