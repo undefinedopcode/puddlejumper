@@ -44,6 +44,7 @@
 
 #include <QAction>
 #include <QApplication>
+#include <QClipboard>
 #include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -89,7 +90,7 @@ QJsonObject argsSchema(const QList<std::pair<QString, QString>> &properties, con
 bool argumentAction(const QString &name)
 {
     return name.startsWith(QLatin1String("client.mode.")) || name == QLatin1String("client.tab.goto")
-        || name == QLatin1String("client.notify")
+        || name == QLatin1String("client.notify") || name == QLatin1String("client.clipboard.set")
         || name == QLatin1String("client.workspace.switch");
 }
 
@@ -208,6 +209,13 @@ QJsonObject MainWindow::rexKeymapRequest() const
                            {QStringLiteral("args"), argsSchema({{QStringLiteral("title"), QStringLiteral("string")},
                                                                 {QStringLiteral("body"), QStringLiteral("string")}},
                                                                {QStringLiteral("title")})}};
+    actions << QJsonObject{{QStringLiteral("name"), QStringLiteral("client.clipboard.set")},
+                           {QStringLiteral("kind"), QStringLiteral("client")},
+                           {QStringLiteral("title"), tr("Copy to the Clipboard")},
+                           {QStringLiteral("description"), tr("Puts text on this computer's clipboard")},
+                           {QStringLiteral("category"), QStringLiteral("Edit")},
+                           {QStringLiteral("args"), argsSchema({{QStringLiteral("text"), QStringLiteral("string")}},
+                                                               {QStringLiteral("text")})}};
     // Keymap modes: entered and left by binding these.
     for (const char *name : {"client.mode.enter", "client.mode.exit", "client.mode.exit_all"}) {
         const QString n = QString::fromLatin1(name);
@@ -324,6 +332,25 @@ void MainWindow::wireRexActions(RexSession *session)
 bool MainWindow::performClientAction(const QString &name, const QJsonObject &args, TerminalWidget *pane,
                                      QString *error, RexSession *from)
 {
+    // Where an action came from (the pane's tab, else its Rex session), so
+    // what it does can say so: a script can't pass for something else.
+    TerminalTab *sourceTab = nullptr;
+    const auto source = [&]() {
+        for (Tab *page : allPages()) {
+            if (auto *t = qobject_cast<TerminalTab *>(page); t && pane && t->contains(pane))
+                sourceTab = t;
+        }
+#ifdef PUDDLEJUMPER_REX
+        if (!from && pane)
+            from = rexSessionFor(pane);
+#endif
+        QString where = sourceTab ? describeTab(sourceTab) : QString();
+#ifdef PUDDLEJUMPER_REX
+        if (!sourceTab && from)
+            where = tr("Rex %1").arg(from->label());
+#endif
+        return where.isEmpty() ? tr("Rex") : where;
+    };
     if (name == QLatin1String("client.notify")) {
         const QString title = args.value(QLatin1String("title")).toString().simplified();
         const QString body = args.value(QLatin1String("body")).toString().trimmed();
@@ -331,26 +358,10 @@ bool MainWindow::performClientAction(const QString &name, const QJsonObject &arg
             *error = tr("client.notify needs a title");
             return false;
         }
+        const QString where = source();
         // Clicking it shows the pane's tab; it goes when that tab is seen.
-        TerminalTab *tab = nullptr;
-        for (Tab *page : allPages()) {
-            if (auto *t = qobject_cast<TerminalTab *>(page); t && pane && t->contains(pane))
-                tab = t;
-        }
-#ifdef PUDDLEJUMPER_REX
-        if (!from && pane)
-            from = rexSessionFor(pane);
-#endif
-        // Where it came from, always: a script can't pass for something else.
-        QString where = tab ? describeTab(tab) : QString();
-#ifdef PUDDLEJUMPER_REX
-        if (!tab && from)
-            where = tr("Rex %1").arg(from->label());
-#endif
-        if (where.isEmpty())
-            where = tr("Rex");
-        const QString key = tab ? notificationKey(tab)
-                                : QStringLiteral("notify-%1").arg(quintptr(from), 0, 16);
+        const QString key = sourceTab ? notificationKey(sourceTab)
+                                      : QStringLiteral("notify-%1").arg(quintptr(from), 0, 16);
         const qint64 now = QDateTime::currentMSecsSinceEpoch();
         if (now - m_scriptNotifiedAt.value(key) < 1000) {
             *error = tr("Too many notifications: one a second");
@@ -358,6 +369,26 @@ bool MainWindow::performClientAction(const QString &name, const QJsonObject &arg
         }
         m_scriptNotifiedAt.insert(key, now);
         m_notifier->notify(key, tr("%1 — %2").arg(title.left(200), where), body.left(2000));
+        return true;
+    }
+    if (name == QLatin1String("client.clipboard.set")) {
+        const QString text = args.value(QLatin1String("text")).toString();
+        if (text.isEmpty()) {
+            *error = tr("client.clipboard.set needs text");
+            return false;
+        }
+        constexpr qsizetype kMaxClipboard = 512 * 1024;
+        if (text.size() > kMaxClipboard) {
+            *error = tr("Too much text for the clipboard: %1 characters, at most %2")
+                         .arg(text.size())
+                         .arg(kMaxClipboard);
+            return false;
+        }
+        QApplication::clipboard()->setText(text);
+        // Said, always: what's pasted next is no longer what was copied.
+        statusBar()->showMessage(tr("Copied to the clipboard by %1: %n character(s)", nullptr, int(text.size()))
+                                     .arg(source()),
+                                 8000);
         return true;
     }
     if (name == QLatin1String("client.mode.enter")) {
