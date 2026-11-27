@@ -256,10 +256,14 @@ private:
                              RexSession *from = nullptr);
     void showRexPrompt(RexSession *session, const QString &callId, const QJsonObject &prompt);
     /* Copying files to and from a Rex server (its fs block). Local files
-     * into a pane's directory there (or, `ask`, wherever is typed). */
-    void copyToRex(RexSession *session, TerminalWidget *pane, const QStringList &paths, bool ask);
-    /* A path (or pattern) on the server, asked for, into a local folder. */
-    void copyFromRex(RexSession *session, TerminalWidget *pane);
+     * into a pane's directory there (or `destination`, or, `ask`, wherever
+     * is typed). */
+    void copyToRex(RexSession *session, TerminalWidget *pane, const QStringList &paths, bool ask,
+                   const QString &destination = QString());
+    /* A path (or pattern) on the server, asked for unless `remote` is given,
+     * into a local folder (asked for unless `localDir` is given). */
+    void copyFromRex(RexSession *session, TerminalWidget *pane, const QString &remote = QString(),
+                     const QString &localDir = QString());
 #endif
     /* Every action by name; a Rex pane's server actions too. */
     void showCommandPalette();

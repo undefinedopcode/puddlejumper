@@ -44,6 +44,7 @@
 #include "rexkeymap.h"
 #include "rexprompt.h"
 #include "rexsession.h"
+#include "rexsocket.h"
 
 #include <QFileInfo>
 
@@ -55,6 +56,9 @@
 #include <QClipboard>
 #include <QDateTime>
 #include <QDialog>
+#include <QTimer>
+#include <QStandardPaths>
+#include <QFileDialog>
 #include <QDialogButtonBox>
 #include <QInputDialog>
 #include <QJsonArray>
@@ -100,7 +104,8 @@ bool argumentAction(const QString &name)
     return name.startsWith(QLatin1String("client.mode.")) || name == QLatin1String("client.tab.goto")
         || name == QLatin1String("client.notify") || name == QLatin1String("client.clipboard.set")
         || name == QLatin1String("client.web.open") || name == QLatin1String("client.vnc.open")
-        || name == QLatin1String("client.rdp.open")
+        || name == QLatin1String("client.rdp.open") || name == QLatin1String("client.file.upload")
+        || name == QLatin1String("client.file.download")
         || name == QLatin1String("client.workspace.switch");
 }
 
@@ -266,6 +271,29 @@ QJsonObject MainWindow::rexKeymapRequest() const
                                                      {QStringLiteral("reuse"), QStringLiteral("boolean")}})}};
         }
     }
+    // Copying files: what leaves this computer is always picked here, in a
+    // file dialog; what arrives goes to Downloads (never over a file) or a
+    // folder picked here.
+    actions << QJsonObject{{QStringLiteral("name"), QStringLiteral("client.file.upload")},
+                           {QStringLiteral("kind"), QStringLiteral("client")},
+                           {QStringLiteral("title"), tr("Copy Files to the Server")},
+                           {QStringLiteral("description"),
+                            tr("Asks for files on this computer and copies them to the server: into to (relative "
+                               "paths start at the terminal's directory), else the terminal's directory. Done once "
+                               "asked; the copy shows its own progress")},
+                           {QStringLiteral("category"), QStringLiteral("Files")},
+                           {QStringLiteral("args"), argsSchema({{QStringLiteral("to"), QStringLiteral("string")}})}};
+    actions << QJsonObject{{QStringLiteral("name"), QStringLiteral("client.file.download")},
+                           {QStringLiteral("kind"), QStringLiteral("client")},
+                           {QStringLiteral("title"), tr("Copy Files from the Server")},
+                           {QStringLiteral("description"),
+                            tr("Copies path on the server (a file or folder; * and ? match names; relative paths "
+                               "start at the terminal's directory) into Downloads, never over a file there; ask "
+                               "true asks for the folder instead. Done once started")},
+                           {QStringLiteral("category"), QStringLiteral("Files")},
+                           {QStringLiteral("args"), argsSchema({{QStringLiteral("path"), QStringLiteral("string")},
+                                                                {QStringLiteral("ask"), QStringLiteral("boolean")}},
+                                                               {QStringLiteral("path")})}};
     // Keymap modes: entered and left by binding these.
     for (const char *name : {"client.mode.enter", "client.mode.exit", "client.mode.exit_all"}) {
         const QString n = QString::fromLatin1(name);
@@ -572,6 +600,48 @@ bool MainWindow::performClientAction(const QString &name, const QJsonObject &arg
         }
         return true;
     }
+#ifdef PUDDLEJUMPER_REX
+    if (name == QLatin1String("client.file.upload") || name == QLatin1String("client.file.download")) {
+        const QString where = source();
+        if (!from) {
+            *error = tr("%1 needs a Rex session to copy with").arg(name);
+            return false;
+        }
+        QPointer<RexSession> session(from);
+        QPointer<TerminalWidget> target(pane);
+        if (name == QLatin1String("client.file.download")) {
+            const QString path = args.value(QLatin1String("path")).toString().trimmed();
+            if (path.isEmpty()) {
+                *error = tr("client.file.download needs a path");
+                return false;
+            }
+            QString local;
+            if (!args.value(QLatin1String("ask")).toBool(false)) {
+                local = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+                if (local.isEmpty() || !QDir().mkpath(local))
+                    local = QDir::homePath();
+            }
+            // After answering: the folder may be asked for.
+            QTimer::singleShot(0, this, [this, session, target, path, local]() {
+                if (session)
+                    copyFromRex(session, target, path, local);
+            });
+            return true;
+        }
+        const QString to = args.value(QLatin1String("to")).toString().trimmed();
+        QTimer::singleShot(0, this, [this, session, target, to, where]() {
+            if (!session)
+                return;
+            const QString host = rexaddress::displayName(session->server());
+            const QStringList paths = QFileDialog::getOpenFileNames(
+                this, tr("%1 asks for files to copy to %2%3").arg(where, host, to.isEmpty() ? QString() : QLatin1Char(':') + to),
+                QDir::homePath());
+            if (!paths.isEmpty() && session)
+                copyToRex(session, target, paths, false, to);
+        });
+        return true;
+    }
+#endif
     if (name == QLatin1String("client.mode.enter")) {
         const QString mode = args.value(QLatin1String("mode")).toString();
         if (mode.isEmpty()) {

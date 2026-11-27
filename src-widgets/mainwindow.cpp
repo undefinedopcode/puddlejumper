@@ -4509,16 +4509,17 @@ QString itemsText(int n)
 
 } // namespace
 
-void MainWindow::copyToRex(RexSession *session, TerminalWidget *pane, const QStringList &paths, bool ask)
+void MainWindow::copyToRex(RexSession *session, TerminalWidget *pane, const QStringList &paths, bool ask,
+                           const QString &destination)
 {
     QPointer<RexSession> guard(session);
     QPointer<MainWindow> self(this);
     // Relative paths there start at the pane's directory (else home).
-    session->paneDirectory(pane, [self, guard, paths, ask](const QString &dir) {
+    session->paneDirectory(pane, [self, guard, paths, ask, destination](const QString &dir) {
         if (!self || !guard)
             return;
         const QString host = rexaddress::displayName(guard->server());
-        QString dest;
+        QString dest = destination;
         if (ask) {
             bool ok = false;
             dest = QInputDialog::getText(self, tr("Copy to Server"),
@@ -4542,16 +4543,17 @@ void MainWindow::copyToRex(RexSession *session, TerminalWidget *pane, const QStr
     });
 }
 
-void MainWindow::copyFromRex(RexSession *session, TerminalWidget *pane)
+void MainWindow::copyFromRex(RexSession *session, TerminalWidget *pane, const QString &given,
+                             const QString &localDir)
 {
     QPointer<RexSession> guard(session);
     QPointer<MainWindow> self(this);
-    session->paneDirectory(pane, [self, guard](const QString &dir) {
+    session->paneDirectory(pane, [self, guard, given, localDir](const QString &dir) {
         if (!self || !guard)
             return;
         const QString host = rexaddress::displayName(guard->server());
-        bool ok = false;
-        const QString remote =
+        bool ok = !given.isEmpty();
+        const QString remote = ok ? given :
             QInputDialog::getText(self, tr("Copy from Server"),
                                   tr("A file or folder on %1 to copy here; * and ? match names, and relative "
                                      "paths start at %2:")
@@ -4560,7 +4562,7 @@ void MainWindow::copyFromRex(RexSession *session, TerminalWidget *pane)
                 .trimmed();
         if (!ok || remote.isEmpty() || !guard)
             return;
-        const QString local = QFileDialog::getExistingDirectory(
+        const QString local = !localDir.isEmpty() ? localDir : QFileDialog::getExistingDirectory(
             self, tr("Copy into Folder"), QStandardPaths::writableLocation(QStandardPaths::DownloadLocation));
         if (local.isEmpty() || !guard)
             return;
