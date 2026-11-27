@@ -42,6 +42,9 @@ file(GLOB LUCIDE_ICONS RELATIVE "${CMAKE_CURRENT_SOURCE_DIR}" icons/lucide/*.svg
 # launches.
 # ---------------------------------------------------------------------------
 qt_add_executable(puddlejumper
+    src-widgets/aboutdialog.cpp
+    src-widgets/aboutdialog.h
+    src-widgets/popupframe.h
     src-widgets/appicon.cpp
     src-widgets/appicon.h
     src-widgets/cardstyle.h
@@ -194,8 +197,23 @@ endif()
 # Embed the icon so the window and taskbar get it without an install step.
 qt_add_resources(puddlejumper "app_icons"
     PREFIX "/"
-    FILES icons/puddlejumper.svg
+    FILES icons/puddlejumper.svg icons/portal-prompt.svg
 )
+# The version and the commit built from, for About (and TERM_PROGRAM_VERSION).
+# Configured again after each commit, so the commit stays current.
+find_package(Git QUIET)
+set(PUDDLEJUMPER_GIT_COMMIT "")
+if(GIT_FOUND AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git")
+    execute_process(COMMAND "${GIT_EXECUTABLE}" rev-parse --short HEAD
+                    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+                    OUTPUT_VARIABLE PUDDLEJUMPER_GIT_COMMIT OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/.git/logs/HEAD")
+        set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/.git/logs/HEAD")
+    endif()
+endif()
+target_compile_definitions(puddlejumper PRIVATE
+    PUDDLEJUMPER_VERSION="${PROJECT_VERSION}"
+    PUDDLEJUMPER_GIT_COMMIT="${PUDDLEJUMPER_GIT_COMMIT}")
 qt_add_resources(puddlejumper "lucide_icons"
     PREFIX "/lucide"
     BASE icons/lucide

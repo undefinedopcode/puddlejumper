@@ -90,7 +90,10 @@ int main(int argc, char *argv[])
     app.setOrganizationName(QStringLiteral("puddlejumper"));
     app.setApplicationName(QStringLiteral("puddlejumper"));
     app.setApplicationDisplayName(QStringLiteral("PuddleJumper"));
-    app.setApplicationVersion(QStringLiteral("0.2.0"));
+#ifndef PUDDLEJUMPER_VERSION
+#define PUDDLEJUMPER_VERSION "0.2.0"
+#endif
+    app.setApplicationVersion(QStringLiteral(PUDDLEJUMPER_VERSION));
     app.setDesktopFileName(QStringLiteral("puddlejumper"));
     adoptFormerName();   // superterm's settings, the first time
 

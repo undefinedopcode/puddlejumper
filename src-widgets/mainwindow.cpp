@@ -6,6 +6,7 @@
 
 #include "mainwindow.h"
 
+#include "aboutdialog.h"
 #include "appicon.h"
 #include "formername.h"
 #include "macwindow.h"
@@ -736,6 +737,16 @@ void MainWindow::buildMenus()
     connect(m_serversMenu, &QMenu::aboutToShow, this, &MainWindow::rebuildServersMenu);
     connect(&m_servers, &ServerStore::changed, this, &MainWindow::rebuildServersMenu);
     rebuildServersMenu();
+
+    // On macOS, About moves to the application menu (its role).
+    auto *help = menuBar()->addMenu(tr("&Help"));
+    auto *aboutAct = help->addAction(tr("&About PuddleJumper"));
+    aboutAct->setMenuRole(QAction::AboutRole);
+    tagRexAction(aboutAct, "client.about", "App");
+    connect(aboutAct, &QAction::triggered, this, [this]() {
+        AboutDialog about(this);
+        about.exec();
+    });
 
     // Every action by name. Ctrl+Shift+A, as JetBrains' "Find Action": free
     // in terminals, as the other Ctrl+Shift letters here.

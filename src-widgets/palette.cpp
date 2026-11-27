@@ -8,6 +8,7 @@
 
 #include "appicon.h"
 #include "cardstyle.h"
+#include "popupframe.h"
 
 #include <QFrame>
 #include <QHBoxLayout>
@@ -25,20 +26,9 @@
 
 namespace {
 
-constexpr int kShadow = 14;  // room around the panel for its shadow
-constexpr int kRadius = 12;  // the panel's corners
-
-QColor muted(const QPalette &pal)
-{
-    return cardstyle::mix(pal.color(QPalette::Window), pal.color(QPalette::WindowText), 0.58);
-}
-
-// The panel's colour: the window's, a touch towards the text, so it stands
-// off whatever it is over.
-QColor panelColour(const QPalette &pal)
-{
-    return cardstyle::mix(pal.color(QPalette::Window), pal.color(QPalette::WindowText), 0.03);
-}
+using popupframe::kShadow;
+using popupframe::muted;
+using popupframe::panelColour;
 
 class RowDelegate : public QStyledItemDelegate
 {
@@ -371,20 +361,7 @@ bool PaletteDialog::eventFilter(QObject *watched, QEvent *event)
 void PaletteDialog::paintEvent(QPaintEvent *)
 {
     QPainter p(this);
-    p.setRenderHint(QPainter::Antialiasing);
-    const QRectF panel = QRectF(rect()).adjusted(kShadow, kShadow, -kShadow, -kShadow);
-    // A soft shadow: rings fading out from the panel.
-    for (int i = kShadow; i > 0; --i) {
-        QPainterPath ring;
-        ring.addRoundedRect(panel.adjusted(-i, -i + 4, i, i + 4).intersected(QRectF(rect())), kRadius + i, kRadius + i);
-        const qreal t = 1.0 - qreal(i) / kShadow;
-        p.fillPath(ring, QColor(0, 0, 0, int(6 * t * t)));
-    }
-    QPainterPath path;
-    path.addRoundedRect(panel, kRadius, kRadius);
-    p.fillPath(path, panelColour(palette()));
-    p.setPen(QPen(cardstyle::mix(palette().color(QPalette::Window), palette().color(QPalette::WindowText), 0.16), 1));
-    p.drawPath(path);
+    popupframe::paint(p, rect(), palette());
 }
 
 void PaletteDialog::showEvent(QShowEvent *event)
