@@ -746,9 +746,10 @@ How it works:
   `send-keys -H`.
 - tmux decides the layout in character cells. puddlejumper tells tmux how many
   cells fit (`refresh-client -C`) and sizes every pane and split handle to
-  whole cells, so each pane shows exactly the grid tmux gave it. That is why
-  tmux panes have no scrollbar or per-pane margin: the tab is padded instead.
-  Scrolling back works with the wheel and keys.
+  whole cells, so each pane shows exactly the grid tmux gave it. The margin is
+  inside each pane, as in a local tab, and counted in its size; tmux panes
+  have no scrollbar (scrolling back works with the wheel and keys). Rex tabs
+  are laid out the same way.
 - On attaching, each pane's history and screen come from `capture-pane`, and
   a full-screen program (an editor, a pager) is put back on the alternate
   screen.

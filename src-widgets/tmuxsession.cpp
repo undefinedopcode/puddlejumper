@@ -200,14 +200,12 @@ TmuxSession::TmuxSession(const QString &label, const QStringList &command,
     });
 
     // A font change changes the cell size, so every layout and the client
-    // size in cells. Padding follows the margin setting.
+    // size in cells; so does the margin (inside each pane). The window
+    // restyles the panes first: its handler was connected before any
+    // session's (MainWindow::applyAppearanceToAll()).
     connect(&m_settings, &Settings::appearanceChanged, this, [this]() {
         if (m_metrics)
             m_metrics->applyAppearance();
-        for (const Window &w : std::as_const(m_windows)) {
-            if (w.tab)
-                w.tab->setPadding(m_settings.appearance().terminalMargin);
-        }
         m_clientCells = QSize();
         relayoutAll();
         m_sizeTimer->start();
@@ -393,7 +391,6 @@ void TmuxSession::addWindow(int id, const QByteArray &layout, const QString &nam
 
     auto *tab = new TerminalTab(nullptr);
     tab->setAlwaysFramed(true);
-    tab->setPadding(m_settings.appearance().terminalMargin);
     w.tab = tab;
     m_windows.insert(id, w);
 
@@ -688,7 +685,7 @@ QSize TmuxSession::cellSize()
 
 QSize TmuxSession::paneChrome() const
 {
-    // tmux panes are always framed and have no margin or scrollbar (see
-    // TerminalWidget::applyAppearance()), so this is the same for every pane.
-    return TerminalWidget::frameChrome(true);
+    // tmux panes are always framed, with the margin inside and no
+    // scrollbar, so this is the same for every pane.
+    return TerminalWidget::externalChrome(true);
 }

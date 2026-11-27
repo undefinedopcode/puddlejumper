@@ -234,7 +234,6 @@ RexSession::RexSession(const QUrl &server, const QString &sessionId, const Setti
         for (Window &w : m_windows) {
             if (!w.tab)
                 continue;
-            w.tab->setPadding(m_settings.appearance().terminalMargin);
             layoutWindow(w);
         }
     }, Qt::QueuedConnection);
@@ -351,8 +350,9 @@ QSize RexSession::cellSize()
 QSize RexSession::paneChrome() const
 {
     // Rex tabs are always framed, like tmux's, so a pane's chrome is the
-    // same split or not (a tiled pane's: a card's with pane cards on).
-    return TerminalWidget::frameChrome(true);
+    // same split or not (a tiled pane's: a card's with pane cards on), and
+    // the margin is inside it.
+    return TerminalWidget::externalChrome(true);
 }
 
 // ---- Attaching and following the view. -------------------------------------
@@ -577,7 +577,7 @@ QRect RexSession::floatingFrame(const QRectF &bounds, const QSize &area, QSize *
 {
     // The frame is as much of the bounds as whole cells fill.
     const QSize cell = cellSize();
-    const QSize chrome = TerminalWidget::frameChrome(false) + TerminalTab::floatingChrome();
+    const QSize chrome = TerminalWidget::externalChrome(false) + TerminalTab::floatingChrome();
     const QRect box(qRound(bounds.x() * area.width()), qRound(bounds.y() * area.height()),
                     qRound(bounds.width() * area.width()), qRound(bounds.height() * area.height()));
     const int columns = qMax(4, (box.width() - chrome.width()) / qMax(1, cell.width()));
@@ -653,7 +653,6 @@ void RexSession::layoutWindow(Window &w)
     if (fresh) {
         w.tab = new TerminalTab(nullptr);
         w.tab->setAlwaysFramed(true);
-        w.tab->setPadding(m_settings.appearance().terminalMargin);
         w.tab->setPaneControls(true);
         TerminalTab *tab = w.tab;
         connect(tab, &TerminalTab::paneZoomRequested, this, [this](TerminalWidget *pane) { toggleZoom(pane); });

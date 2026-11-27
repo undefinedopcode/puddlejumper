@@ -116,13 +116,7 @@ public:
     /* The layout area within the tab (floating frames are kept inside it). */
     QRect layoutRect() const;
 
-    /*
-     * Space round the whole layout, filled with the terminal background. tmux
-     * tabs use it in place of each pane's own margin (see TerminalWidget's
-     * applyAppearance()).
-     */
-    void setPadding(int pixels);
-    /* The size a layout has to fit in: the tab less its padding. */
+    /* The size a layout has to fit in. */
     QSize layoutArea() const;
 
     /* Frame panes even when there is only one, so a pane's chrome is the same
@@ -153,11 +147,13 @@ public:
      */
     QPixmap previewPixmap(const QSize &size, qreal devicePixelRatio = 1.0) const override;
 
-    /* The terminal background, for padding and splitter handles. */
+    /* The terminal background, behind a server's layout and for splitter
+     * handles. */
     QColor backgroundColour() const override;
     /* The terminal's default text colour. */
     QColor foregroundColour() const override;
-    /* Behind the panes (padding, splitter gaps): the terminal's background,
+    /* Behind the panes (a server layout's leftover, splitter gaps): the
+     * terminal's background,
      * or with pane cards the sidebar's surface. */
     QColor containerColour() const;
 
@@ -243,7 +239,6 @@ private:
     QWidget *m_root = nullptr;      // a TerminalWidget or a QSplitter
     QPointer<TerminalWidget> m_active;
     bool m_alwaysFramed = false;
-    int m_padding = 0;
     QString m_layoutShape;          // applyLayout(): structure of the last layout
     QString m_floatingShape;        // and of its floating layers
     struct Floating

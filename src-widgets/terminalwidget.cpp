@@ -58,6 +58,7 @@ constexpr int kCardSide = 3;
 constexpr int kCardTitle = 22;  // as a float's title strip (kFloatTitle)
 constexpr int kCardRadius = 6;
 bool s_paneCards = false;
+int s_margin = 0;   // the terminal margin (appearance), for externalChrome()
 bool s_quietFocus = false;
 } // namespace
 
@@ -245,6 +246,7 @@ void TerminalWidget::applyAppearance()
 {
     s_paneCards = m_settings.appearance().paneCards;
     s_quietFocus = m_settings.appearance().quietFocus;
+    s_margin = qMax(0, m_settings.appearance().terminalMargin);
     applyFrameMargins();
     if (!m_terminal)
         return;
@@ -319,10 +321,10 @@ void TerminalWidget::applyAppearance()
     };
     m_terminal->setKeyboardCursorShape(kShapes[qBound(0, a.cursorShape, 2)]);
 
-    // Breathing room around the terminal grid. Not for external panes: their
-    // size must map exactly onto the cells their source (tmux) lays out, so
-    // the tab pads round the whole layout instead.
-    m_terminal->setMargin(isExternal() ? 0 : a.terminalMargin);
+    // Breathing room around the terminal grid, inside the pane, whatever
+    // runs it. A tmux or Rex pane is sized to its cells plus this and its
+    // frame (externalChrome()), so the server's cells still fit exactly.
+    m_terminal->setMargin(a.terminalMargin);
 
     // Bidirectional text rendering (Konsole's "bidi").
     m_terminal->setBidiEnabled(a.bidi);
@@ -502,6 +504,11 @@ QSize TerminalWidget::frameChrome(bool tiled)
     if (s_paneCards && tiled)
         return {2 * kCardSide, kCardTitle + kCardSide};
     return {2 * kPaneBorder, 2 * kPaneBorder};
+}
+
+QSize TerminalWidget::externalChrome(bool tiled)
+{
+    return frameChrome(tiled) + QSize(2 * s_margin, 2 * s_margin);
 }
 
 int TerminalWidget::cardTitleHeight()

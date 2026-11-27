@@ -3985,13 +3985,11 @@ void MainWindow::openWorkspaceFile(const QString &path)
     if (spec.tmux) {
         QString error;
         // The size the session will be shown at, in cells, as TmuxSession
-        // works it out: the page less its margin and a pane's frame.
+        // works it out: the page less a pane's frame and margin.
         QSize cells;
         if (TerminalWidget *pane = currentTerminal(); pane && m_tabs->currentWidget()) {
             const QSize cell = pane->cellSize();
-            const int m = m_settings.appearance().terminalMargin;
-            const QSize area = m_tabs->currentWidget()->size() - QSize(2 * m, 2 * m)
-                               - TerminalWidget::frameChrome(true);
+            const QSize area = m_tabs->currentWidget()->size() - TerminalWidget::externalChrome(true);
             if (!cell.isEmpty())
                 cells = QSize(qMax(10, area.width() / cell.width()), qMax(3, area.height() / cell.height()));
         }

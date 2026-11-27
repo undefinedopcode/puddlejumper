@@ -692,6 +692,35 @@ int main(int argc, char *argv[])
         agrees(server, c, QStringLiteral("font back"));
     }
 
+    // The margin is inside each pane, round its grid, as for a local pane:
+    // a bigger one, fewer cells, the server told, the pane no bigger.
+    {
+        TerminalWidget *pane = c.panes().value(0);
+        auto *display = pane->findChild<Konsole::TerminalDisplay *>();
+        const QSize before = screenSize(pane);
+        const QSize paneBefore = pane->size();
+        const int margin = settings.appearance().terminalMargin;
+        // As the window does (applyAppearanceToAll): every pane restyled.
+        auto restyle = QObject::connect(&settings, &Settings::appearanceChanged, [&c]() {
+            for (TerminalWidget *p : c.panes())
+                p->applyAppearance();
+        });
+        settings.setTerminalMargin(margin + 20);
+        check(waitFor([&] { return screenSize(pane).width() < before.width() && screenSize(pane).height() < before.height(); }),
+              QStringLiteral("bigger margin: fewer cells (%1x%2, were %3x%4)")
+                  .arg(screenSize(pane).width()).arg(screenSize(pane).height()).arg(before.width()).arg(before.height()));
+        check(display && display->margin() == margin + 20, QStringLiteral("the margin is the pane's own (inside it): %1, want %2").arg(display ? display->margin() : -1).arg(margin + 20));
+        check(qAbs(pane->width() - paneBefore.width()) <= pane->cellSize().width()
+                  && qAbs(pane->height() - paneBefore.height()) <= pane->cellSize().height(),
+              QStringLiteral("bigger margin: the pane keeps its place (%1x%2, was %3x%4)")
+                  .arg(pane->width()).arg(pane->height()).arg(paneBefore.width()).arg(paneBefore.height()));
+        agrees(server, c, QStringLiteral("bigger margin"));
+        settings.setTerminalMargin(margin);
+        check(waitFor([&] { return screenSize(pane) == before; }), QStringLiteral("margin back: the grid back"));
+        agrees(server, c, QStringLiteral("margin back"));
+        QObject::disconnect(restyle);
+    }
+
     // ---- A new window: a second tab.
     c.session->newWindow();
     check(waitFor([&] { return c.tabs.size() == 2; }), QStringLiteral("a second tab"));

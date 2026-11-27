@@ -154,6 +154,10 @@ public:
     /* The pixels a framed pane's frame takes, across and down: a card's
      * (tiled) or the plain border's. */
     static QSize frameChrome(bool tiled = true);
+    /* All a tmux or Rex pane has round its cells, across and down: its frame
+     * and the terminal margin on each side (no scrollbar). Such a pane is
+     * sized to cells * cell size plus this. */
+    static QSize externalChrome(bool tiled = true);
     /*
      * Quiet focus (Settings: appearance/quietFocus): the focused pane's
      * frame (a card's, a float's, the plain border) a brighter edge like

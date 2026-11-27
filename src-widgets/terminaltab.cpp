@@ -438,7 +438,7 @@ QString TerminalTab::floatingLayerOf(const TerminalWidget *pane) const
 
 QSize TerminalTab::paneGap(const QSize &cell, const QSize &chrome)
 {
-    if (TerminalWidget::paneCards() && chrome == TerminalWidget::frameChrome(true))
+    if (TerminalWidget::paneCards() && chrome == TerminalWidget::externalChrome(true))
         return {kLocalHandleWidth, kLocalHandleWidth};  // as a local tab's
     return {qMax(1, cell.width() - chrome.width()), qMax(1, cell.height() - chrome.height())};
 }
@@ -778,13 +778,6 @@ void TerminalTab::updateFrames()
     }
 }
 
-void TerminalTab::setPadding(int pixels)
-{
-    m_padding = qMax(0, pixels);
-    m_layout->setContentsMargins(m_padding, m_padding, m_padding, m_padding);
-    update();
-}
-
 QSize TerminalTab::layoutArea() const
 {
     return layoutRect().size();
@@ -932,7 +925,9 @@ void TerminalTab::showEvent(QShowEvent *event)
 
 void TerminalTab::paintEvent(QPaintEvent *)
 {
-    if (m_padding == 0)
+    // A server's layout is whole cells, which rarely fill the tab exactly:
+    // what's left over (and the gaps) shows the terminal's background.
+    if (!m_alwaysFramed)
         return;
     QPainter p(this);
     p.fillRect(rect(), containerColour());
@@ -1102,7 +1097,7 @@ void TerminalTab::applyLayout(const PaneLayout &layout,
     const QSize extra = floatingChrome();
     // A floating pane's own frame is the plain one, whatever a tiled pane's
     // is (pane cards: the float's frame has the title).
-    const QSize floatChrome = chrome == TerminalWidget::frameChrome(true) ? TerminalWidget::frameChrome(false) : chrome;
+    const QSize floatChrome = chrome == TerminalWidget::externalChrome(true) ? TerminalWidget::externalChrome(false) : chrome;
     for (int i = 0; i < m_floating.size() && i < floating.size(); ++i) {
         m_floating[i].title = floating.at(i).title;
         const Floating &f = m_floating.at(i);
