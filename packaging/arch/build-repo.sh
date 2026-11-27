@@ -23,8 +23,9 @@ sed -i "s|^_root=.*|_root=$(cd "$here/../.." && pwd)|" "$work/PKGBUILD"
 if [[ $(id -u) == 0 ]]; then
   user=${BUILD_USER:-builder}
   id "$user" >/dev/null 2>&1 || useradd -m "$user"
-  chown -R "$user" "$work" "$out"
-  git config --system --add safe.directory '*'
+  # The checkout too: git (pkgver, Go's VCS stamp) only trusts a repository
+  # its user owns, and a CI checkout belongs to someone else.
+  chown -R "$user" "$work" "$out" "$(cd "$here/../.." && pwd)"
   (cd "$work" && runuser -u "$user" -- env PKGDEST="$out" makepkg --noconfirm --nodeps)
 else
   (cd "$work" && PKGDEST="$out" makepkg --noconfirm --syncdeps)
