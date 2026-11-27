@@ -396,6 +396,11 @@ public:
     QVector<LineProperty> getLineProperties( int startLine , int endLine ) const;
 
 
+    /** puddlejumper: whether this is the alternate screen (programs that take
+     * the whole window, like editors, draw on it). */
+    void setAlternate(bool alternate) { _alternate = alternate; }
+    bool isAlternate() const { return _alternate; }
+
     /** Return the number of lines. */
     int getLines() const
     { return lines; }
@@ -588,6 +593,7 @@ public:
     }
 
 private:
+    bool _alternate = false;
     Screen(const Screen &) = delete;
     Screen &operator=(const Screen &) = delete;
 

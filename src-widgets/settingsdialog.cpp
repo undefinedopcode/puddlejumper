@@ -384,6 +384,15 @@ QWidget *SettingsDialog::buildAppearancePage()
     });
     rendering->addRow(QString(), m_quietFocusBox);
 
+    m_paddingFollowsAppBox = new QCheckBox(tr("Margin follows a full-screen program's background"), page);
+    m_paddingFollowsAppBox->setToolTip(tr("While a full-screen program (an editor, say) paints the "
+                                          "terminal in a background colour of its own, fill the margin "
+                                          "around it (and a pane card) with that colour too"));
+    connect(m_paddingFollowsAppBox, &QCheckBox::toggled, this, [this](bool v) {
+        m_settings.setPaddingFollowsApp(v);
+    });
+    rendering->addRow(QString(), m_paddingFollowsAppBox);
+
     layout->addStretch(1);
     return page;
 }
@@ -1119,6 +1128,7 @@ void SettingsDialog::syncFromSettings()
     m_bidiBox->setChecked(a.bidi);
     m_paneCardsBox->setChecked(a.paneCards);
     m_quietFocusBox->setChecked(a.quietFocus);
+    m_paddingFollowsAppBox->setChecked(a.paddingFollowsApp);
 
     const int cursorIndex = m_cursorShapeBox->findData(QString::number(a.cursorShape));
     if (cursorIndex >= 0)

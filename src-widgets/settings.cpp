@@ -31,6 +31,7 @@ constexpr auto kTerminalMargin = "appearance/terminalMargin";
 constexpr auto kBidi           = "appearance/bidi";
 constexpr auto kPaneCards      = "appearance/paneCards";
 constexpr auto kQuietFocus      = "appearance/quietFocus";
+constexpr auto kPaddingFollowsApp = "appearance/paddingFollowsApp";
 constexpr auto kScrollback  = "scrolling/scrollback";
 constexpr auto kScrollbarPos   = "scrolling/scrollbarPosition";
 constexpr auto kFlowCtrlWarn   = "scrolling/flowControlWarning";
@@ -120,6 +121,8 @@ void Settings::load()
         m_settings.value(kPaneCards, m_appearance.paneCards).toBool();
     m_appearance.quietFocus =
         m_settings.value(kQuietFocus, m_appearance.quietFocus).toBool();
+    m_appearance.paddingFollowsApp =
+        m_settings.value(kPaddingFollowsApp, m_appearance.paddingFollowsApp).toBool();
     m_appearance.opacity =
         m_settings.value(kOpacity, m_appearance.opacity).toDouble();
 
@@ -353,6 +356,15 @@ void Settings::setQuietFocus(bool v)
     if (m_appearance.quietFocus == v) return;
     m_appearance.quietFocus = v;
     m_settings.setValue(kQuietFocus, v);
+    m_settings.sync();
+    emit appearanceChanged();
+}
+
+void Settings::setPaddingFollowsApp(bool v)
+{
+    if (m_appearance.paddingFollowsApp == v) return;
+    m_appearance.paddingFollowsApp = v;
+    m_settings.setValue(kPaddingFollowsApp, v);
     m_settings.sync();
     emit appearanceChanged();
 }

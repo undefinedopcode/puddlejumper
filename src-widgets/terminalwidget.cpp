@@ -81,8 +81,14 @@ TerminalWidget::TerminalWidget(int id, const Settings &settings,
     applyAppearance();
     applyScrolling();
     m_terminal->setKeyBindings(QStringLiteral("default"));
-    if (auto *d = display())
+    if (auto *d = display()) {
         d->installEventFilter(this);  // pointerPressed()
+        // A card's panel follows a program's background as the margin does.
+        connect(d, &Konsole::TerminalDisplay::appBackgroundChanged, this, [this]() {
+            if (isCard())
+                update();
+        });
+    }
 
     connect(m_terminal, &QTermWidget::titleChanged, this, [this]() {
         const QString t = m_terminal->title().trimmed();
@@ -335,6 +341,9 @@ void TerminalWidget::applyAppearance()
     // runs it. A tmux or Rex pane is sized to its cells plus this and its
     // frame (externalChrome()), so the server's cells still fit exactly.
     m_terminal->setMargin(a.terminalMargin);
+    // An editor's own background in that margin too (and a card's panel).
+    if (auto *d = this->display())
+        d->setPaddingFollowsApp(a.paddingFollowsApp);
 
     // Bidirectional text rendering (Konsole's "bidi").
     m_terminal->setBidiEnabled(a.bidi);
@@ -471,15 +480,19 @@ QColor TerminalWidget::frameEdgeColour(const QColor &bg, const QColor &fg, bool 
 
 QColor TerminalWidget::cardStripColour() const
 {
+    // The terminal's own background (a full-screen program's, while the
+    // margin follows it), so the card reads as one block; only the focused
+    // card's strip is tinted.
     QColor bg = palette().color(QPalette::Window), fg = palette().color(QPalette::WindowText);
     if (auto *d = display()) {
         fg = d->colorTable()[0].color;
-        bg = d->colorTable()[1].color;
+        bg = d->appBackground().isValid() ? d->appBackground() : d->colorTable()[1].color;
     }
-    const bool active = m_frame == PaneFrame::Active;
-    if (active && s_quietFocus)
+    if (m_frame != PaneFrame::Active)
+        return bg;
+    if (s_quietFocus)
         return cardstyle::mix(bg, fg, 0.13);
-    return cardstyle::mix(bg, active ? cardstyle::accent() : fg, active ? 0.16 : 0.06);
+    return cardstyle::mix(bg, cardstyle::accent(), 0.16);
 }
 
 void TerminalWidget::setPaneCards(bool on)
@@ -674,15 +687,18 @@ void TerminalWidget::paintEvent(QPaintEvent *)
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
         QColor bg = palette().color(QPalette::Window), fg = palette().color(QPalette::WindowText);
+        QColor scheme = bg;
         if (auto *d = display()) {
             fg = d->colorTable()[0].color;
-            bg = d->colorTable()[1].color;
+            scheme = d->colorTable()[1].color;
+            // A full-screen program's own background, as the margin's.
+            bg = d->appBackground().isValid() ? d->appBackground() : scheme;
         }
         const bool active = m_frame == PaneFrame::Active;
         const QColor edge = frameEdgeColour(bg, fg, active, false);
         // Round corners onto the surface the cards sit on (the sidebar's,
         // from the scheme's own background, not a focus tint).
-        p.fillRect(rect(), cardstyle::surface(themeBackground(), fg));
+        p.fillRect(rect(), cardstyle::surface(scheme, fg));
         const QRectF panel = QRectF(rect()).adjusted(0.75, 0.75, -0.75, -0.75);
         QPainterPath path;
         path.addRoundedRect(panel, kCardRadius, kCardRadius);

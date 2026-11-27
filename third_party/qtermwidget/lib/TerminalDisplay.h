@@ -204,6 +204,13 @@ public:
     void setLineSpacing(uint);
     void setMargin(int);
 
+    /** puddlejumper: while a program on the alternate screen paints most of
+     * most of the window in one background colour of its own (an editor's
+     * theme), fill the margin with it too, not the scheme's background. */
+    void setPaddingFollowsApp(bool on);
+    /** That colour; invalid when the scheme's background is used. */
+    QColor appBackground() const { return _appBackground; }
+
     int margin() const;
     uint lineSpacing() const;
 
@@ -595,6 +602,8 @@ signals:
 
     void notifyBell(const QString&);
     void usesMouseChanged();
+    /** puddlejumper: appBackground() changed. */
+    void appBackgroundChanged(const QColor &colour);
 
 protected:
     bool event( QEvent * ) override;
@@ -843,6 +852,10 @@ private:
     bool _ctrlDrag;           // require Ctrl key for drag
     TripleClickMode _tripleClickMode;
     bool _isFixedSize; //Columns / lines are locked.
+    bool _paddingFollowsApp = false;
+    QColor _appBackground;   // see appBackground()
+    void updateAppBackground();
+    QColor fillColor() const { return _appBackground.isValid() ? _appBackground : palette().window().color(); }
     QTimer* _blinkTimer;  // active when hasBlinker
     QTimer* _blinkCursorTimer;  // active when hasBlinkingCursor
     static std::shared_ptr<QTimer> _hideMouseTimer;

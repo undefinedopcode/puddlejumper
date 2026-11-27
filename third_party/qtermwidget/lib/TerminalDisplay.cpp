@@ -64,6 +64,7 @@
 //#include <config-apps.h>
 #include "Filter.h"
 #include "konsole_wcwidth.h"
+#include "Screen.h"
 #include "ScreenWindow.h"
 #include "TerminalCharacterDecoder.h"
 
@@ -190,6 +191,7 @@ void TerminalDisplay::setColorTable(const ColorEntry table[])
       _colorTable[i] = table[i];
 
   setBackgroundColor(_colorTable[DEFAULT_BACK_COLOR].color);
+  updateAppBackground();
 }
 
 /* ------------------------------------------------------------------------- */
@@ -1092,9 +1094,11 @@ void TerminalDisplay::drawTextFragment(QPainter& painter ,
     if (backgroundPass)
     {
         // draw background if different from the display's background color
-        if ( backgroundColor != palette().window().color() )
+        // (puddlejumper: the program's, while the margin follows it; cells
+        // in the scheme's background keep its transparency)
+        if ( backgroundColor != fillColor() )
             drawBackground(painter,rect,backgroundColor,
-                           false /* do not use transparency */);
+                           backgroundColor == palette().window().color());
         painter.restore();
         return;
     }
@@ -1488,6 +1492,8 @@ void TerminalDisplay::updateImage()
   // update the parts of the display which have changed
   update(dirtyRegion);
 
+  updateAppBackground();
+
   // puddlejumper: images aren't in the characters compared above. While any
   // show, or when they change, all is drawn again: they move with the text,
   // and over unchanged cells.
@@ -1725,7 +1731,7 @@ void TerminalDisplay::paintEvent( QPaintEvent* pe )
   QRegion textRegion;
   for (auto rect = regToDraw.begin(); rect != regToDraw.end(); rect++)
   {
-    drawBackground(paint,*rect,palette().window().color(),
+    drawBackground(paint,*rect,fillColor(),
                    true /* use opacity setting */);
     // Text is redrawn one cell further out on each side, so the overhang of a
     // glyph just outside the repainted area comes back too. The painter is
@@ -3957,6 +3963,45 @@ QRect TerminalDisplay::cellArea() const
     const QPoint topLeft = contentsRect().topLeft();
     return {topLeft.x() + _leftMargin, topLeft.y() + _topMargin,
             _columns * _fontWidth, _lines * _fontHeight};
+}
+
+void TerminalDisplay::setPaddingFollowsApp(bool on)
+{
+    if (_paddingFollowsApp == on)
+        return;
+    _paddingFollowsApp = on;
+    updateAppBackground();
+}
+
+void TerminalDisplay::updateAppBackground()
+{
+    // The background most of the cells have, when that's more than half
+    // of them: a program's own, which an editor's statusline or tab bar
+    // doesn't change. Only on the alternate screen, so a shell's coloured
+    // prompt or output never spills into the margin.
+    QColor colour;
+    if (_paddingFollowsApp && _image && _screenWindow && _screenWindow->screen()
+        && _screenWindow->screen()->isAlternate() && _usedLines > 0 && _usedColumns > 0)
+    {
+        QHash<QRgb, int> count;
+        const int cells = _usedLines * _usedColumns;
+        for (int y = 0; y < _usedLines; ++y)
+            for (int x = 0; x < _usedColumns; ++x)
+                ++count[_image[loc(x, y)].backgroundColor.color(_colorTable).rgba()];
+        for (auto it = count.cbegin(); it != count.cend(); ++it) {
+            if (2 * it.value() > cells) {
+                colour = QColor::fromRgba(it.key());
+                break;
+            }
+        }
+        if (colour == palette().window().color())
+            colour = QColor();
+    }
+    if (colour == _appBackground)
+        return;
+    _appBackground = colour;
+    update();
+    emit appBackgroundChanged(colour);
 }
 
 int TerminalDisplay::margin() const

@@ -59,6 +59,7 @@ Emulation::Emulation() :
   // create screens with a default size
   _screen[0] = new Screen(40,80);
   _screen[1] = new Screen(40,80);
+  _screen[1]->setAlternate(true);
   _currentScreen = _screen[0];
 
   QObject::connect(&_bulkTimer1, &QTimer::timeout, this, &Konsole::Emulation::showBulk);

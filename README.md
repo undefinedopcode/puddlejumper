@@ -171,6 +171,7 @@ lineSpacing=0
 tabLayout=standard
 cursorShape=0
 terminalMargin=4
+paddingFollowsApp=true
 bidi=true
 opacity=1
 

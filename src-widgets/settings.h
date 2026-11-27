@@ -79,6 +79,11 @@ public:
         /* The focused pane's frame (tiled or floating) a brighter edge like
          * the others', not the accent colour. */
         bool    quietFocus = false;
+
+        /* While a program on the alternate screen (an editor, say) paints
+         * the window's edge in a background of its own, the margin around
+         * the grid, and a card's panel, take that colour. */
+        bool    paddingFollowsApp = true;
     };
 
     struct Scrolling {
@@ -180,6 +185,7 @@ public:
     void setBidi(bool v);
     void setPaneCards(bool v);
     void setQuietFocus(bool v);
+    void setPaddingFollowsApp(bool v);
     void setScrollback(int v);
     void setScrollbarPosition(const QString &v);
     void setFlowControlWarning(bool v);

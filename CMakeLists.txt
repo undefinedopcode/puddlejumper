@@ -419,6 +419,12 @@ qt_add_executable(test-clipboard src-widgets/dev/test_clipboard.cpp)
 target_link_libraries(test-clipboard PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets qtermwidget)
 target_include_directories(test-clipboard PRIVATE src-widgets)
 
+# test-appbackground — the margin following a full-screen program's
+# background (TerminalDisplay::setPaddingFollowsApp). Dev tool only.
+# Run: ./build/test-appbackground (offscreen)
+qt_add_executable(test-appbackground src-widgets/dev/test_appbackground.cpp)
+target_link_libraries(test-appbackground PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets qtermwidget)
+
 # test-graphics — kitty's graphics protocol (TerminalGraphics): chunks as the
 # spec and as kitten icat send them, files and shared memory. Dev tool only.
 # Run: ./build/test-graphics
