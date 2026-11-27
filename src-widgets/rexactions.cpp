@@ -69,6 +69,27 @@ QString plainTitle(const QAction *a)
     return t.section(QLatin1Char('\t'), 0, 0).trimmed();
 }
 
+// A JSON schema for an action's arguments: an object of these properties.
+QJsonObject argsSchema(const QList<std::pair<QString, QString>> &properties, const QStringList &required = {})
+{
+    QJsonObject props;
+    for (const auto &[name, type] : properties)
+        props.insert(name, QJsonObject{{QStringLiteral("type"), type}});
+    QJsonObject schema{{QStringLiteral("type"), QStringLiteral("object")},
+                       {QStringLiteral("properties"), props},
+                       {QStringLiteral("additionalProperties"), false}};
+    if (!required.isEmpty())
+        schema.insert(QStringLiteral("required"), QJsonArray::fromStringList(required));
+    return schema;
+}
+
+// Actions that are the app's but not a menu's: they need arguments.
+bool argumentAction(const QString &name)
+{
+    return name.startsWith(QLatin1String("client.mode.")) || name == QLatin1String("client.tab.goto")
+        || name == QLatin1String("client.workspace.switch");
+}
+
 QJsonObject apiError(const QString &code, const QString &message)
 {
     return QJsonObject{{QStringLiteral("code"), code}, {QStringLiteral("message"), message}};
@@ -143,9 +164,12 @@ QJsonObject MainWindow::rexKeymapRequest() const
     QJsonArray actions, bindings;
     for (const QAction *a : namedActions()) {
         const QString name = a->property("rexAction").toString();
-        actions << QJsonObject{{QStringLiteral("name"), name}, {QStringLiteral("kind"), QStringLiteral("client")},
-                               {QStringLiteral("title"), plainTitle(a)},
-                               {QStringLiteral("category"), a->property("rexCategory").toString()}};
+        QJsonObject action{{QStringLiteral("name"), name}, {QStringLiteral("kind"), QStringLiteral("client")},
+                           {QStringLiteral("title"), plainTitle(a)},
+                           {QStringLiteral("category"), a->property("rexCategory").toString()}};
+        if (name == QLatin1String("client.tab.rename"))
+            action.insert(QStringLiteral("args"), argsSchema({{QStringLiteral("title"), QStringLiteral("string")}}));
+        actions << action;
         for (const QKeySequence &seq : a->shortcuts()) {
             QJsonArray keys;
             for (int i = 0; i < seq.count(); ++i) {
@@ -157,6 +181,21 @@ QJsonObject MainWindow::rexKeymapRequest() const
                 bindings << QJsonObject{{QStringLiteral("keys"), keys}, {QStringLiteral("action"), name}};
         }
     }
+    // Actions that need arguments, so only for bindings (and scripts).
+    actions << QJsonObject{{QStringLiteral("name"), QStringLiteral("client.tab.goto")},
+                           {QStringLiteral("kind"), QStringLiteral("client")},
+                           {QStringLiteral("title"), tr("Go to Tab")},
+                           {QStringLiteral("description"), tr("The tab at index (1 is the first, -1 the last)")},
+                           {QStringLiteral("category"), QStringLiteral("Tab")},
+                           {QStringLiteral("args"), argsSchema({{QStringLiteral("index"), QStringLiteral("integer")}},
+                                                               {QStringLiteral("index")})}};
+    actions << QJsonObject{{QStringLiteral("name"), QStringLiteral("client.workspace.switch")},
+                           {QStringLiteral("kind"), QStringLiteral("client")},
+                           {QStringLiteral("title"), tr("Switch to Workspace")},
+                           {QStringLiteral("description"), tr("The workspace called name, or at index (1 is the first)")},
+                           {QStringLiteral("category"), QStringLiteral("Workspace")},
+                           {QStringLiteral("args"), argsSchema({{QStringLiteral("name"), QStringLiteral("string")},
+                                                                {QStringLiteral("index"), QStringLiteral("integer")}})}};
     // Keymap modes: entered and left by binding these.
     for (const char *name : {"client.mode.enter", "client.mode.exit", "client.mode.exit_all"}) {
         const QString n = QString::fromLatin1(name);
@@ -288,6 +327,69 @@ bool MainWindow::performClientAction(const QString &name, const QJsonObject &arg
         statusBar()->clearMessage();
         return true;
     }
+    if (name == QLatin1String("client.tab.goto")) {
+        const QJsonValue v = args.value(QLatin1String("index"));
+        const int n = m_tabs->count();
+        const int index = v.toInt(0);
+        if (!v.isDouble() || index == 0 || v.toDouble() != index) {
+            *error = tr("client.tab.goto needs an index (1 is the first tab, -1 the last)");
+            return false;
+        }
+        const int i = index > 0 ? index - 1 : n + index;
+        if (i < 0 || i >= n) {
+            *error = tr("There is no tab %1 (this workspace has %n)", nullptr, n).arg(index);
+            return false;
+        }
+        m_tabs->setCurrentIndex(i);
+        return true;
+    }
+    if (name == QLatin1String("client.workspace.switch")) {
+        int found = -1;
+        const QJsonValue byName = args.value(QLatin1String("name")), byIndex = args.value(QLatin1String("index"));
+        if (byName.isString()) {
+            const QString want = byName.toString().trimmed();
+            for (int i = 0; i < m_workspaces.size() && found < 0; ++i) {
+                if (m_workspaces.at(i).name == want)
+                    found = i;
+            }
+            for (int i = 0; i < m_workspaces.size() && found < 0; ++i) {
+                if (m_workspaces.at(i).name.compare(want, Qt::CaseInsensitive) == 0)
+                    found = i;
+            }
+            if (found < 0) {
+                *error = tr("There is no workspace “%1”").arg(want);
+                return false;
+            }
+        } else if (byIndex.isDouble()) {
+            const int index = byIndex.toInt(0);
+            if (index < 1 || index > m_workspaces.size() || byIndex.toDouble() != index) {
+                *error = tr("There is no workspace %1 (there are %n)", nullptr, int(m_workspaces.size()))
+                             .arg(byIndex.toDouble());
+                return false;
+            }
+            found = index - 1;
+        } else {
+            *error = tr("client.workspace.switch needs a name or an index");
+            return false;
+        }
+        switchWorkspace(found);   // nothing to do if it's on screen already
+        return true;
+    }
+    if (name == QLatin1String("client.tab.rename") && args.contains(QLatin1String("title"))) {
+        const QJsonValue title = args.value(QLatin1String("title"));
+        if (!title.isString()) {
+            *error = tr("client.tab.rename's title is text");
+            return false;
+        }
+        // The tab of the pane the request names, else the one on screen.
+        int index = m_tabs->currentIndex();
+        for (int i = 0; pane && i < m_tabs->count(); ++i) {
+            if (auto *t = qobject_cast<TerminalTab *>(m_tabs->widget(i)); t && t->contains(pane))
+                index = i;
+        }
+        setTabName(index, title.toString().trimmed());
+        return true;
+    }
     for (QAction *a : namedActions()) {
         if (a->property("rexAction").toString() != name)
             continue;
@@ -316,7 +418,7 @@ void MainWindow::runRexAction(RexSession *session, TerminalWidget *pane, const Q
                               const QString &origin)
 {
     QString why;
-    const bool ours = name.startsWith(QLatin1String("client.mode.")) || [&] {
+    const bool ours = argumentAction(name) || [&] {
         for (QAction *a : namedActions())
             if (a->property("rexAction").toString() == name)
                 return true;

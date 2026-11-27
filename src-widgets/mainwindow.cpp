@@ -2592,8 +2592,17 @@ void MainWindow::renameTab(int index)
         session ? session->windowName(terminal)
                 : (tab->customTitle().isEmpty() ? m_tabs->tabText(index) : tab->customTitle()),
         &ok).trimmed();
-    if (!ok)
+    if (ok)
+        setTabName(index, name);
+}
+
+void MainWindow::setTabName(int index, const QString &name)
+{
+    auto *tab = pageAt(index);
+    if (!tab)
         return;
+    auto *session = tmuxSessionFor(tab);
+    auto *terminal = qobject_cast<TerminalTab *>(tab);
     if (session) {
         // tmux renames it and says so; the tab follows from that.
         if (!name.isEmpty())

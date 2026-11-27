@@ -318,6 +318,9 @@ private:
     void showTabMenu(int index, const QPoint &globalPos);
     /* Name a tab; a tmux tab's window is renamed in tmux. */
     void renameTab(int index);
+    // Names a tab: a tmux or Rex window is renamed there (an empty name
+    // does nothing); a local tab's empty name follows its title again.
+    void setTabName(int index, const QString &name);
     void buildMenus();
     void buildStatusBar();
     void buildLayout();
