@@ -512,6 +512,15 @@ int TerminalWidget::paneGap()
     return s_paneGap;
 }
 
+void TerminalWidget::setCardTitleReserve(int pixels)
+{
+    if (pixels == m_cardReserve)
+        return;
+    m_cardReserve = pixels;
+    if (isCard())
+        update();
+}
+
 void TerminalWidget::setFallbackTitle(const QString &title)
 {
     if (m_fallbackTitle == title)
@@ -721,7 +730,7 @@ void TerminalWidget::paintEvent(QPaintEvent *)
         f.setPointSizeF(qMax(7.0, f.pointSizeF() * 0.85));  // as a float's title
         p.setFont(f);
         const QFontMetrics fm(f);
-        QRect strip(kCardRadius + 2, 0, width() - 2 * (kCardRadius + 2), kCardTitle);
+        QRect strip(kCardRadius + 2, 0, width() - 2 * (kCardRadius + 2) - m_cardReserve, kCardTitle);
         const QColor strong = cardstyle::mix(bg, fg, active ? 0.85 : 0.6);
         const QColor dim = cardstyle::mix(bg, fg, active ? 0.55 : 0.38);
         if (!m_cardProgram.isEmpty() || !m_cardDir.isEmpty()) {

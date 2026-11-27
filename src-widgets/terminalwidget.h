@@ -151,6 +151,8 @@ public:
     static bool paneCards();
     /* The gap between split panes and round framed ones (appearance). */
     static int paneGap();
+    /* Pixels at the right of a card's title strip kept for its buttons. */
+    void setCardTitleReserve(int pixels);
     /* What a card's title strip says: for a local pane the foreground
      * program and its directory ("micro  ·  ~/src"), else the title. */
     QString cardTitle() const;
@@ -353,6 +355,7 @@ private:
     QString m_fallbackTitle;          // setFallbackTitle()
     // A local card's title: the foreground program and where it is.
     QString m_cardProgram;
+    int m_cardReserve = 0;   // setCardTitleReserve()
     QString m_cardDir;
     QTimer *m_cardWatch = nullptr;
     void refreshCardContext();

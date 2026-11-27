@@ -179,6 +179,8 @@ public:
     void setZoomedPanes(const QList<TerminalWidget *> &panes);
     /* Show, move or hide the hover buttons for where the mouse is now. */
     void updateHoverControls();
+    /* A card's buttons, in every tiled card's title strip. */
+    void updateCardControls();
 
     /* To the active pane. */
     void focusContent() override;
@@ -261,6 +263,7 @@ private:
     bool m_paneControls = false;
     bool m_hoverControls = true;
     QPointer<QWidget> m_hover;            // the PaneControls
+    QList<QPointer<QWidget>> m_cardControls;  // each card's own (updateCardControls())
     QList<QPointer<TerminalWidget>> m_zoomedPanes;
     bool isZoomedPane(const TerminalWidget *pane) const;
 };

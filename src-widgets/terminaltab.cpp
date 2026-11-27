@@ -765,6 +765,10 @@ void TerminalTab::updateFrames()
     if (m_hover)
         m_hover->update();  // the hover buttons take the strip's colour
     applyPaneGap();
+    updateCardControls();
+    for (const QPointer<QWidget> &c : std::as_const(m_cardControls))
+        if (c)
+            c->update();   // the focused card's strip is tinted
     const QString activeLayer = m_active ? floatingLayerOf(m_active) : QString();
     for (const Floating &f : std::as_const(m_floating)) {
         if (auto *frame = static_cast<FloatingFrame *>(f.frame.data())) {
@@ -1206,7 +1210,16 @@ public:
 
     void showFor(TerminalWidget *pane, bool zoomed, bool layoutButtons, const QColor &bg, const QColor &fg)
     {
+        // Shown already as asked (a card's, kept up as its pane moves): only
+        // into place again.
+        if (isVisible() && m_pane == pane && m_zoomed == zoomed && m_layoutButtons == layoutButtons
+            && m_bg == bg && m_fg == fg && m_compact == pane->isCardShown()) {
+            place();
+            return;
+        }
         m_pane = pane;
+        m_zoomed = zoomed;
+        m_layoutButtons = layoutButtons;
         m_bg = bg;
         m_fg = fg;
         m_right->setIcon(appIcon("columns-2", fg));
@@ -1323,6 +1336,8 @@ private:
     QToolButton *m_float = nullptr;
     QToolButton *m_close = nullptr;
     bool m_compact = false;
+    bool m_zoomed = false;
+    bool m_layoutButtons = false;
     QColor m_bg;
     QColor m_fg;
 };
@@ -1335,6 +1350,33 @@ void TerminalTab::setPaneControls(bool on)
     if (m_hover)
         static_cast<PaneControls *>(m_hover.data())->dismiss();  // shown again with its buttons
     updateFrames();
+}
+
+void TerminalTab::updateCardControls()
+{
+    // Every tiled card shows its buttons in its title strip all the time,
+    // so the cards look alike; the hover pill is for panes without one.
+    QList<TerminalWidget *> cards;
+    const QList<TerminalWidget *> all = panes();
+    for (TerminalWidget *pane : all) {
+        if (m_hoverControls && pane->isCardShown() && !pane->isHidden() && floatingLayerOf(pane).isEmpty())
+            cards << pane;
+        else
+            pane->setCardTitleReserve(0);
+    }
+    m_cardControls.removeAll(nullptr);
+    while (m_cardControls.size() < cards.size())
+        m_cardControls << new PaneControls(this);
+    for (int i = 0; i < m_cardControls.size(); ++i) {
+        auto *controls = static_cast<PaneControls *>(m_cardControls.at(i).data());
+        if (i >= cards.size()) {
+            controls->dismiss();
+            continue;
+        }
+        TerminalWidget *pane = cards.at(i);
+        controls->showFor(pane, isZoomedPane(pane), m_paneControls, backgroundColour(), foregroundColour());
+        pane->setCardTitleReserve(controls->width() + 3);
+    }
 }
 
 QList<QRect> TerminalTab::floatingFrameRects() const
@@ -1351,6 +1393,7 @@ void TerminalTab::setHoverControls(bool on)
     m_hoverControls = on;
     if (!on && m_hover)
         static_cast<PaneControls *>(m_hover.data())->dismiss();
+    updateCardControls();
 }
 
 void TerminalTab::setZoomedPanes(const QList<TerminalWidget *> &panes)
@@ -1365,6 +1408,7 @@ void TerminalTab::setZoomedPanes(const QList<TerminalWidget *> &panes)
     if (auto *controls = static_cast<PaneControls *>(m_hover.data()))
         controls->dismiss();  // shown again with its new state
     updateHoverControls();
+    updateCardControls();
 }
 
 bool TerminalTab::isZoomedPane(const TerminalWidget *pane) const
@@ -1401,6 +1445,10 @@ void TerminalTab::updateHoverControls()
         if (!pane->isVisible() || !floatingLayerOf(pane).isEmpty())
             continue;
         if (pane->rect().contains(pane->mapFromGlobal(global))) {
+            if (pane->isCardShown() && floatingLayerOf(pane).isEmpty()) {
+                controls->dismiss();  // a card has its own (updateCardControls())
+                return;
+            }
             if (controls->pane() != pane || !controls->isVisible())
                 controls->showFor(pane, isZoomedPane(pane), m_paneControls, backgroundColour(), foregroundColour());
             else
@@ -1417,10 +1465,14 @@ bool TerminalTab::eventFilter(QObject *watched, QEvent *event)
         switch (event->type()) {
         case QEvent::Enter:
         case QEvent::Leave:
+            QTimer::singleShot(0, this, &TerminalTab::updateHoverControls);
+            break;
         case QEvent::Resize:
         case QEvent::Move:
         case QEvent::Hide:
+        case QEvent::Show:
             QTimer::singleShot(0, this, &TerminalTab::updateHoverControls);
+            QTimer::singleShot(0, this, &TerminalTab::updateCardControls);
             break;
         default:
             break;
