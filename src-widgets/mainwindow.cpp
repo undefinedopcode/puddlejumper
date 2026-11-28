@@ -895,27 +895,22 @@ void MainWindow::buildMenus()
     });
     // The pane actions stay visible and enabled: hiding or disabling one
     // would kill its shortcut until the menu next opened over a Rex pane.
-    // Into another of the session's windows: filled as the menu opens.
+    // Into another of the session's windows, or another session: each
+    // filled as it opens, and never hidden or disabled. A global menu
+    // (Plasma's, macOS's) shows a menu as it was before the View menu's
+    // aboutToShow could change it: the submenus showed only on the next
+    // look, or not at all once disabled. A placeholder keeps each a submenu
+    // there before it is first filled.
     auto *movePaneMenu = view->addMenu(tr("&Move Pane to Window"));
-    connect(view, &QMenu::aboutToShow, movePaneMenu, [this, movePaneMenu]() {
-        movePaneMenu->clear();
+    movePaneMenu->addAction(tr("No other windows"))->setEnabled(false);
+    connect(movePaneMenu, &QMenu::aboutToShow, this, [this, movePaneMenu]() {
+        fillMovePaneMenu(movePaneMenu, currentTerminal());
+    });
+    auto *moveWindowMenu = view->addMenu(tr("Move &Window to Session"));
+    moveWindowMenu->addAction(tr("No other sessions"))->setEnabled(false);
+    connect(moveWindowMenu, &QMenu::aboutToShow, this, [this, moveWindowMenu]() {
         TerminalWidget *t = currentTerminal();
-        RexSession *rex = t ? rexSessionFor(t) : nullptr;
-        movePaneMenu->menuAction()->setVisible(rex != nullptr);
-        if (!rex)
-            return;
-        QPointer<RexSession> session(rex);
-        QPointer<TerminalWidget> pane(t);
-        for (TerminalTab *tab : rex->tabs()) {
-            if (tab->contains(t))
-                continue;
-            QPointer<TerminalTab> to(tab);
-            movePaneMenu->addAction(rex->windowName(tab), this, [session, pane, to]() {
-                if (session && pane && to)
-                    session->movePane(pane, to);
-            });
-        }
-        movePaneMenu->setEnabled(!movePaneMenu->isEmpty());
+        fillMoveWindowMenu(moveWindowMenu, t ? qobject_cast<TerminalTab *>(tabOf(t)) : nullptr);
     });
     connect(view, &QMenu::aboutToShow, zoomPaneAct, [this, zoomPaneAct]() {
         TerminalWidget *t = currentTerminal();
@@ -2245,6 +2240,128 @@ RexSession *MainWindow::rexSessionFor(const TerminalWidget *pane) const
     return nullptr;
 }
 
+void MainWindow::fillMovePaneMenu(QMenu *menu, TerminalWidget *pane)
+{
+    menu->clear();
+    RexSession *rex = pane ? rexSessionFor(pane) : nullptr;
+    if (!rex) {
+        menu->addAction(tr("Only Rex panes can move"))->setEnabled(false);
+        return;
+    }
+    QPointer<RexSession> session(rex);
+    QPointer<TerminalWidget> moving(pane);
+    int n = 0;
+    for (TerminalTab *tab : rex->tabs()) {
+        ++n;
+        if (tab->contains(pane))
+            continue;
+        QPointer<TerminalTab> to(tab);
+        const QString name = rex->windowName(tab);
+        menu->addAction(name.isEmpty() ? tr("Window %1").arg(n) : name, this, [session, moving, to]() {
+            if (session && moving && to)
+                session->movePane(moving, to);
+        });
+    }
+    if (menu->isEmpty())
+        menu->addAction(tr("No other windows"))->setEnabled(false);
+}
+
+void MainWindow::fillMoveWindowMenu(QMenu *menu, TerminalTab *tab)
+{
+    menu->clear();
+    RexSession *rex = tab ? rexSessionFor(tab) : nullptr;
+    if (!rex) {
+        menu->addAction(tr("Only Rex windows can move"))->setEnabled(false);
+        return;
+    }
+    if (!rex->canTransferWindows()) {
+        menu->addAction(rex->isOffline() ? tr("Waiting for the server")
+                                         : tr("The server can't move windows (Rex API 22)"))->setEnabled(false);
+        return;
+    }
+    QPointer<RexSession> from(rex);
+    QPointer<TerminalTab> moving(tab);
+    // The server's sessions open here first, then any of them.
+    for (RexSession *s : std::as_const(m_rexSessions)) {
+        if (s == rex || s->server() != rex->server() || !s->isAttached())
+            continue;
+        const QString to = s->sessionId();
+        menu->addAction(s->label(), this, [this, from, moving, to]() {
+            if (from && moving)
+                transferRexWindow(from, moving, to);
+        });
+    }
+    if (!menu->isEmpty())
+        menu->addSeparator();
+    menu->addAction(tr("Other Session…"), this, [this, from, moving]() {
+        if (!from || !moving)
+            return;
+        from->listOtherSessions([this, from, moving, guard = QPointer<MainWindow>(this)](
+                                    const QList<QPair<QString, QString>> &sessions, const QString &error) {
+            if (!guard || !from || !moving)
+                return;
+            if (!error.isEmpty() || sessions.isEmpty()) {
+                statusBar()->showMessage(error.isEmpty() ? tr("The server has no other sessions")
+                                                         : tr("Could not list the sessions: %1").arg(error), 4000);
+                return;
+            }
+            QStringList items;
+            for (const auto &s : sessions)
+                items << tr("%1 (%2)").arg(s.second, s.first.section(QLatin1Char(':'), -1).left(8));
+            bool chosen = false;
+            const QString item = uiprompt::pick(this, tr("Move “%1” to a session").arg(from->windowName(moving)),
+                                                items, &chosen);
+            const int i = int(items.indexOf(item));
+            if (chosen && i >= 0 && from && moving)
+                transferRexWindow(from, moving, sessions.at(i).first);
+        });
+    });
+}
+
+void MainWindow::transferRexWindow(RexSession *from, TerminalTab *tab, const QString &toSessionId)
+{
+    const QUrl server = from->server();
+    const QString name = from->windowName(tab);
+    QPointer<MainWindow> self(this);
+    from->transferWindow(tab, toSessionId, [self, server, toSessionId, name](const QString &windowId, const QString &error) {
+        if (!self)
+            return;
+        if (!error.isEmpty()) {
+            self->statusBar()->showMessage(tr("Could not move “%1”: %2").arg(name, error), 5000);
+            return;
+        }
+        // Shown where it went: that session's tab for it, once its view
+        // has it; the session opened here if it wasn't.
+        RexSession *to = nullptr;
+        for (RexSession *s : std::as_const(self->m_rexSessions))
+            if (s->server() == server && s->sessionId() == toSessionId)
+                to = s;
+        if (!to) {
+            self->openRex(server, toSessionId);
+            for (RexSession *s : std::as_const(self->m_rexSessions))
+                if (s->server() == server && s->sessionId() == toSessionId)
+                    to = s;
+        }
+        if (!to)
+            return;
+        if (TerminalTab *shown = to->tabForWindow(windowId)) {
+            self->showTab(shown);
+            return;
+        }
+        auto once = std::make_shared<QMetaObject::Connection>();
+        *once = connect(to, &RexSession::tabAdded, self, [self, to, windowId, once](TerminalTab *tab, const QString &) {
+            if (tab != to->tabForWindow(windowId))
+                return;
+            QObject::disconnect(*once);
+            QTimer::singleShot(0, self, [self, tab = QPointer<TerminalTab>(tab)]() {
+                if (self && tab)
+                    self->showTab(tab);
+            });
+        });
+        QTimer::singleShot(10000, self, [once]() { QObject::disconnect(*once); });
+    });
+}
+
 void MainWindow::newRexTab()
 {
     QSettings settings;
@@ -2694,6 +2811,10 @@ void MainWindow::showTabMenu(int index, const QPoint &globalPos)
         bool wholeSession = tmuxSessionFor(pageAt(index)) != nullptr;
 #ifdef PUDDLEJUMPER_REX
         wholeSession = wholeSession || rexSessionFor(pageAt(index));
+#endif
+#ifdef PUDDLEJUMPER_REX
+        if (auto *terminalTab = qobject_cast<TerminalTab *>(pageAt(index)); terminalTab && rexSessionFor(terminalTab))
+            fillMoveWindowMenu(menu.addMenu(tr("Move &Window to Session")), terminalTab);
 #endif
         QMenu *move = menu.addMenu(wholeSession ? tr("&Move Session to Workspace")
                                                 : tr("&Move to Workspace"));

@@ -1698,6 +1698,61 @@ void RexSession::movePane(TerminalWidget *pane, TerminalTab *to)
                        });
 }
 
+bool RexSession::canTransferWindows() const
+{
+    return m_control && m_control->apiRevision() >= 22 && !m_finished && !m_offline;
+}
+
+void RexSession::transferWindow(TerminalTab *tab, const QString &toSessionId,
+                                std::function<void(const QString &, const QString &)> done)
+{
+    const Window *w = windowOf(tab);
+    if (!w || toSessionId.isEmpty() || toSessionId == m_sessionId || !canTransferWindows()) {
+        if (done)
+            done({}, tr("this window can't be moved"));
+        return;
+    }
+    const QString windowId = w->id;
+    QPointer<RexSession> self(this);
+    m_control->request(QStringLiteral("session.transfer_window"),
+                       QJsonObject{{QStringLiteral("session_id"), m_sessionId},
+                                   {QStringLiteral("window_id"), windowId},
+                                   {QStringLiteral("to_session_id"), toSessionId}},
+                       [self, windowId, done](const QJsonObject &, const QJsonObject &error) {
+                           if (!error.isEmpty())
+                               qCWarning(lcRex) << "transfer refused:" << error;
+                           if (done)
+                               done(error.isEmpty() ? windowId : QString(),
+                                    error.isEmpty() ? QString() : str(error, "message"));
+                       });
+}
+
+void RexSession::listOtherSessions(std::function<void(const QList<QPair<QString, QString>> &, const QString &)> done)
+{
+    if (!m_control || m_finished) {
+        done({}, tr("not connected"));
+        return;
+    }
+    const QString self = m_sessionId;
+    m_control->request(QStringLiteral("session.list"), {},
+                       [self, done](const QJsonObject &payload, const QJsonObject &error) {
+                           if (!error.isEmpty()) {
+                               done({}, str(error, "message"));
+                               return;
+                           }
+                           QList<QPair<QString, QString>> list;
+                           for (const QJsonValue &v : payload.value(QLatin1String("sessions")).toArray()) {
+                               const QJsonObject s = v.toObject();
+                               const QString id = str(s, "session_id");
+                               if (id.isEmpty() || id == self)
+                                   continue;
+                               const QString label = str(s, "label");
+                               list.append({id, label.isEmpty() ? shortId(id) : label});
+                           }
+                           done(list, {});
+                       });
+}
+
 void RexSession::renameSession(const QString &name)
 {
     if (m_finished)

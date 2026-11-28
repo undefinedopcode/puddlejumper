@@ -1427,6 +1427,80 @@ int main(int argc, char *argv[])
         check(holder && pane->parentWidget() == holder, QStringLiteral("not rebuilt for it"));
     }
 
+    // ---- A window moved into another session (session.transfer_window),
+    // its programs running, and back; then another session's only window
+    // moved in, which ends that session here and on the server.
+    if (c.tabs.size() == 2 && c.session->canTransferWindows()) {
+        Client d;
+        d.open(url, QString(), settings, profile);
+        if (check(waitFor([&] { return d.tabs.size() == 1; }), QStringLiteral("transfer: another session"))) {
+            const QString did = d.session->sessionId();
+            TerminalTab *moving = c.tabs.value(1);
+            TerminalWidget *marked = moving->panes().first();
+            QStringList blocks;
+            for (TerminalWidget *p : moving->panes())
+                blocks << c.session->blockId(p);
+            type(marked, QStringLiteral("echo BEFORE_TRANSFER\r"));
+            check(waitFor([&] { return shows(marked, QStringLiteral("BEFORE_TRANSFER")); }), QStringLiteral("transfer: marked"));
+            QString moved, error = QStringLiteral("no reply");
+            c.session->transferWindow(moving, did, [&](const QString &w, const QString &e) {
+                moved = w;
+                error = e;
+            });
+            check(waitFor([&] { return !moved.isEmpty() || error != QLatin1String("no reply"); }) && !moved.isEmpty(),
+                  QStringLiteral("transfer: done (%1)").arg(error));
+            check(waitFor([&] { return c.tabs.size() == 1 && d.tabs.size() == 2; }),
+                  QStringLiteral("transfer: the tab left one session for the other"));
+            check(!c.hasEnded && !d.hasEnded, QStringLiteral("transfer: both sessions go on"));
+            TerminalTab *arrived = d.session->tabForWindow(moved);
+            bool same = arrived && arrived->panes().size() == blocks.size();
+            for (const QString &b : blocks)
+                same = same && d.session->paneForBlock(b) && arrived->contains(d.session->paneForBlock(b))
+                       && !d.session->hasExited(d.session->paneForBlock(b)) && !c.session->paneForBlock(b);
+            check(same, QStringLiteral("transfer: the same window and blocks, running, there and not here"));
+            TerminalWidget *there = d.session->paneForBlock(blocks.first());
+            check(there && waitFor([&] { return shows(there, QStringLiteral("BEFORE_TRANSFER")); }),
+                  QStringLiteral("transfer: its screen came with it"));
+            if (there) {
+                type(there, QStringLiteral("echo AFTER_TRANSFER\r"));
+                check(waitFor([&] { return shows(there, QStringLiteral("AFTER_TRANSFER")); }),
+                      QStringLiteral("transfer: typed into where it went"));
+            }
+            agrees(server, c, QStringLiteral("transfer: the session it left"));
+            agrees(server, d, QStringLiteral("transfer: the session it went to"));
+
+            QString back, backError = QStringLiteral("no reply");
+            d.session->transferWindow(arrived, sid, [&](const QString &w, const QString &e) {
+                back = w;
+                backError = e;
+            });
+            check(waitFor([&] { return c.tabs.size() == 2 && d.tabs.size() == 1; }) && back == moved,
+                  QStringLiteral("transfer: and back (%1)").arg(backError));
+            agrees(server, c, QStringLiteral("transfer: back"));
+
+            // The other session's only window: that session ends, and goes.
+            QString last;
+            d.session->transferWindow(d.tabs.value(0), sid, [&](const QString &w, const QString &) { last = w; });
+            check(waitFor([&] { return d.hasEnded && c.tabs.size() == 3; }) && !last.isEmpty(),
+                  QStringLiteral("transfer: the last window moved ends its session here (%1)").arg(d.ended));
+            check(waitFor([&] { return !server.sessionIds().contains(did); }, 5000),
+                  QStringLiteral("transfer: and the emptied session goes"));
+            agrees(server, c, QStringLiteral("transfer: a window moved in"));
+            c.session->closeWindow(c.session->tabForWindow(last));
+            check(waitFor([&] { return c.tabs.size() == 2; }), QStringLiteral("transfer: the window moved in closed"));
+            // A session that isn't there.
+            QString nowhere = QStringLiteral("no reply");
+            c.session->transferWindow(c.tabs.value(1), QStringLiteral("session:00000000-0000-0000-0000-000000000000"),
+                                      [&](const QString &w, const QString &e) { nowhere = w.isEmpty() ? e : QString(); });
+            check(waitFor([&] { return nowhere != QLatin1String("no reply"); }) && !nowhere.isEmpty() && c.tabs.size() == 2,
+                  QStringLiteral("transfer: to no session, refused (%1)").arg(nowhere));
+        }
+        d.close();
+    } else {
+        check(c.tabs.size() == 2, QStringLiteral("transfer: two windows to start with"));
+        QTextStream(stdout) << "transfer: the server can't move windows (API revision < 22); skipped\n";
+    }
+
     // ---- Keymaps and actions.
     keymapTests(server, c, settings);
 

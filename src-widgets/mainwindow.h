@@ -225,6 +225,15 @@ private:
      * detaches; the session goes on running on the server. */
     RexSession *rexSessionFor(const Tab *tab) const;
     RexSession *rexSessionFor(const TerminalWidget *pane) const;
+    /* The submenus that move a Rex pane to another of its session's
+     * windows, and a Rex window (tab) to another session on its server:
+     * filled as each opens, with a disabled line when there's nothing to
+     * choose. */
+    void fillMovePaneMenu(QMenu *menu, TerminalWidget *pane);
+    void fillMoveWindowMenu(QMenu *menu, TerminalTab *tab);
+    /* session.transfer_window, then the window shown in the session it
+     * went to (opened here if it wasn't). */
+    void transferRexWindow(RexSession *from, TerminalTab *tab, const QString &toSessionId);
     /* Ask for a server, then a session on it (or a new one). */
     void newRexTab();
     /* List a Rex server's sessions and attach to the one chosen (or a new one). */

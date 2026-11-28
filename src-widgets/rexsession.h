@@ -150,6 +150,19 @@ public:
     /* Move a pane into another of the session's windows, beside its focused
      * tiled pane. A window left empty goes. */
     void movePane(TerminalWidget *pane, TerminalTab *to);
+    /* Whether the server can move a window into another session
+     * (session.transfer_window, API revision 22). */
+    bool canTransferWindows() const;
+    /* Move a window, its programs running, into another session on the
+     * same server (session.transfer_window). Its tab goes from here as the
+     * view says; the session it went to shows it (if open here). The last
+     * window going leaves this session empty, and it ends. `done` gets the
+     * window's id, or an error message. */
+    void transferWindow(TerminalTab *tab, const QString &toSessionId,
+                        std::function<void(const QString &windowId, const QString &error)> done = {});
+    /* The server's other sessions, (id, label), over this session's
+     * connection: for a menu. */
+    void listOtherSessions(std::function<void(const QList<QPair<QString, QString>> &, const QString &error)> done);
     /* Zoom a pane to fill its window (the others hidden), or back. */
     void toggleZoom(TerminalWidget *pane);
     bool isZoomed(const TerminalTab *tab) const;
