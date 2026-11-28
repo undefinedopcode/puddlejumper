@@ -489,13 +489,20 @@ void keymapTests(Server &server, Client &c, Settings &settings)
             s->forwardKey(pane, RexKeymap::keyEvent(Qt::Key_U, Qt::ControlModifier | Qt::ShiftModifier, QString()), {});
             check(waitFor([&] { return label() == QLatin1String("forwarded key_u"); }),
                   QStringLiteral("a forwarded key's handler ran, as this client"));
-            // A handler that lets the key by: the server types it.
+            // A handler that lets the key by: the server types it. The key
+            // goes by the control connection, typing by the terminal's, so
+            // each step waits for the one before (Rex doesn't order them).
+            const auto endsWith = [&](const QString &tail) {
+                const QStringList l = paneLines(pane);
+                return std::any_of(l.begin(), l.end(), [&](const QString &x) { return x.endsWith(tail); });
+            };
             type(pane, QStringLiteral("echo FWD_"));
+            waitFor([&] { return endsWith(QStringLiteral("echo FWD_")); });
             s->forwardKey(pane, RexKeymap::keyEvent(Qt::Key_Z, Qt::NoModifier, QStringLiteral("z")), {});
-            type(pane, QStringLiteral("_END\r"));
-            check(waitFor([&] { return shows(pane, QStringLiteral("FWD_z_END")) || shows(pane, QStringLiteral("FWD__END")); })
-                      && !shows(pane, QStringLiteral("FWD__END")),
+            check(waitFor([&] { return endsWith(QStringLiteral("echo FWD_z")); }),
                   QStringLiteral("an unhandled forwarded key reaches the terminal"));
+            type(pane, QStringLiteral("_END\r"));
+            check(waitFor([&] { return shows(pane, QStringLiteral("FWD_z_END")); }), QStringLiteral("and the typing after it"));
             s->setScripts({});
             check(waitFor([&] { return s->keymap().lookup({}, {{"ctrl+shift+u"}}, all) == RexKeymap::Result::Unbound; }),
                   QStringLiteral("scripts removed: the key unbound"));
@@ -530,10 +537,15 @@ void keymapTests(Server &server, Client &c, Settings &settings)
                   QStringLiteral("a broken file is reported, the scripts before kept"));
             check(waitFor([&] { return outcomes == 2; }) && !lastOk && lastMessage.contains(QLatin1String("pj-keys.lua")),
                   QStringLiteral("sendScripts: the server's reason: ") + lastMessage);
-            // An init.lua action isn't a client script, as in Rex.
-            writeLua("rex.action{name = 'x', title = 'X', run = function() end}");
+            // An init.lua action in a client script: Rex (snapshot 2671)
+            // loads it, says nothing offers it, and the keys stay.
+            writeLua("rex.action{name = 'x', title = 'X', run = function() end}\n"
+                     "rex.bind('ctrl+shift+k', function() return true end)\n");
             s->sendScripts(outcome);
-            check(waitFor([&] { return outcomes == 3; }) && !lastOk, QStringLiteral("rex.action refused: ") + lastMessage);
+            check(waitFor([&] { return outcomes == 3; }) && lastOk && lastMessage.contains(QLatin1String("not offered")),
+                  QStringLiteral("rex.action: loaded, with the server's warning: ") + lastMessage);
+            check(s->keymap().lookup({}, {{"ctrl+shift+k"}}, all) == RexKeymap::Result::Run,
+                  QStringLiteral("rex.action: the keys beside it kept"));
             settings.setRexScriptsFile(QString());
             s->sendScripts();
             check(waitFor([&] { return s->keymap().lookup({}, {{"ctrl+shift+k"}}, all) == RexKeymap::Result::Unbound; }),
@@ -548,7 +560,8 @@ void keymapTests(Server &server, Client &c, Settings &settings)
         return;
     }
     // server.config_reload may be for the local socket only; a signal does
-    // as well, to a server given by its PID.
+    // as well, to a server given by its PID (atlantis: SIGHUP reloads; Rex
+    // ignores it, so leave PUDDLEJUMPER_TEST_REX_PID out for Rex).
     const qint64 pid = qEnvironmentVariableIntValue("PUDDLEJUMPER_TEST_REX_PID");
     const auto reload = [&]() {
         if (pid > 0)
@@ -699,7 +712,9 @@ int main(int argc, char *argv[])
               QStringLiteral("bigger font: the grid fits the pane"));
         agrees(server, c, QStringLiteral("bigger font"));
         settings.setFontSize(size);
-        check(waitFor([&] { return screenSize(pane) == before; }), QStringLiteral("font back: the grid back"));
+        check(waitFor([&] { return screenSize(pane) == before; }),
+              QStringLiteral("font back: the grid back (%1x%2, was %3x%4)")
+                  .arg(screenSize(pane).width()).arg(screenSize(pane).height()).arg(before.width()).arg(before.height()));
         agrees(server, c, QStringLiteral("font back"));
     }
 

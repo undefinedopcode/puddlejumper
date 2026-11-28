@@ -378,7 +378,7 @@ void MainWindow::resendRexScripts()
     struct Tally
     {
         int pending = 0, sent = 0;
-        QStringList problems;
+        QStringList problems, notes;
     };
     auto tally = std::make_shared<Tally>();
     tally->pending = int(m_rexSessions.size());
@@ -387,13 +387,19 @@ void MainWindow::resendRexScripts()
     statusBar()->showMessage(tr("Sending %1…").arg(name));
     for (RexSession *s : std::as_const(m_rexSessions)) {
         s->sendScripts([self, tally, name](bool ok, const QString &message) {
-            if (ok)
+            if (ok) {
                 ++tally->sent;
-            else
+                if (!message.isEmpty() && !tally->notes.contains(message))
+                    tally->notes << message;
+            } else
                 tally->problems << message;
             if (--tally->pending > 0 || !self)
                 return;
-            if (tally->problems.isEmpty())
+            if (tally->problems.isEmpty() && !tally->notes.isEmpty())
+                self->statusBar()->showMessage(
+                    tr("Sent %1 to %n Rex session(s), with warnings: %2", nullptr, tally->sent).arg(name, tally->notes.first()),
+                    12000);
+            else if (tally->problems.isEmpty())
                 self->statusBar()->showMessage(tr("Sent %1 to %n Rex session(s)", nullptr, tally->sent).arg(name), 5000);
             else
                 self->statusBar()->showMessage(

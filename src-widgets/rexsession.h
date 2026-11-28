@@ -176,7 +176,8 @@ public:
      * changes. A file that can't be read, or Lua the server refuses, is
      * actionFailed(<file name>, …); a server without client scripts is only
      * logged. `done`, if given, hears how it went: ok, or why not (that
-     * server included). */
+     * server included). Loaded, the message is the server's diagnostics,
+     * if any (what it skipped or ignored). */
     void sendScripts(std::function<void(bool ok, const QString &message)> done = {});
     /* Send a key to the server (client.key) for a pane's block: one bound
      * to client.key.forward, after the keys of its sequence before it

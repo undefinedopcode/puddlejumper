@@ -1174,12 +1174,22 @@ void RexSession::sendScripts(std::function<void(bool ok, const QString &message)
                                {QStringLiteral("source"), QString::fromUtf8(f.readAll())}};
     }
     const QString server = rexaddress::displayName(m_server);
-    setScripts(scripts, [this, name, server, report, sent = !scripts.isEmpty()](const QJsonObject &,
+    setScripts(scripts, [this, name, server, report, sent = !scripts.isEmpty()](const QJsonObject &reply,
                                                                                 const QJsonObject &error) {
         if (error.isEmpty()) {
             m_scriptsSent = sent;
             qCInfo(lcRex) << (sent ? "scripts sent:" : "scripts removed") << name;
-            report(true, {});
+            // Loaded, but the server may say what it skipped or ignored
+            // (a bad key, an action nothing offers): pass that on.
+            QStringList notes;
+            for (const QJsonValue &d : reply.value(QLatin1String("diagnostics")).toArray()) {
+                const QJsonObject o = d.toObject();
+                const QString where = str(o, "source");
+                notes << (where.isEmpty() ? str(o, "message") : where + QStringLiteral(": ") + str(o, "message"));
+            }
+            if (!notes.isEmpty())
+                qCInfo(lcRex) << "scripts' diagnostics:" << notes;
+            report(true, notes.join(QStringLiteral("; ")));
         } else if (str(error, "code") == QLatin1String("method_not_found")) {
             // An older server: quiet on attaching, said when asked.
             qCInfo(lcRex) << "the server takes no client scripts";
