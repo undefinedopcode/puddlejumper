@@ -325,6 +325,18 @@ TerminalWidget *RexSession::paneForBlock(const QString &blockId) const
     return it == m_blocks.end() ? nullptr : it->second->pane.data();
 }
 
+TerminalTab *RexSession::tabForWindow(const QString &windowId) const
+{
+    const QString want = windowId.isEmpty() ? m_activeWindow : windowId;
+    for (const Window &w : m_windows)
+        if (w.id == want && w.tab)
+            return w.tab;
+    if (!windowId.isEmpty())
+        return nullptr;
+    const QList<TerminalTab *> all = tabs();
+    return all.isEmpty() ? nullptr : all.first();
+}
+
 bool RexSession::hasExited(const TerminalWidget *pane) const
 {
     const auto it = m_blocks.find(blockId(pane));

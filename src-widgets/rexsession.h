@@ -112,6 +112,9 @@ public:
     QString windowName(const TerminalTab *tab) const;
     QString blockId(const TerminalWidget *pane) const;
     TerminalWidget *paneForBlock(const QString &blockId) const;
+    /* The tab showing a window of this session, or (windowId empty) its
+     * active window, else its first; null if it shows none. */
+    TerminalTab *tabForWindow(const QString &windowId) const;
     /* Whether another client sizes this pane's block (until a key or a
      * click here takes it). */
     bool isFollowing(const TerminalWidget *pane) const;

@@ -113,7 +113,7 @@ bool argumentAction(const QString &name)
         || name == QLatin1String("client.rdp.open") || name == QLatin1String("client.file.upload")
         || name == QLatin1String("client.file.download") || name == QLatin1String("client.colorscheme.set")
         || name == QLatin1String("client.profile.apply") || name == QLatin1String("client.screenshot.save")
-        || name == QLatin1String("client.workspace.switch");
+        || name == QLatin1String("client.workspace.switch") || name == QLatin1String("client.block.reveal");
 }
 
 QJsonObject apiError(const QString &code, const QString &message)
@@ -222,6 +222,17 @@ QJsonObject MainWindow::rexKeymapRequest() const
                            {QStringLiteral("category"), QStringLiteral("Workspace")},
                            {QStringLiteral("args"), argsSchema({{QStringLiteral("name"), QStringLiteral("string")},
                                                                 {QStringLiteral("index"), QStringLiteral("integer")}})}};
+    actions << QJsonObject{{QStringLiteral("name"), QStringLiteral("client.block.reveal")},
+                           {QStringLiteral("kind"), QStringLiteral("client")},
+                           {QStringLiteral("title"), tr("Reveal a Block")},
+                           {QStringLiteral("description"),
+                            tr("Shows a Rex session's block (or window_id's window, or the session's active one): "
+                               "its workspace and tab come to the front, and the pane gets focus")},
+                           {QStringLiteral("category"), QStringLiteral("Workspace")},
+                           {QStringLiteral("args"), argsSchema({{QStringLiteral("session_id"), QStringLiteral("string")},
+                                                                {QStringLiteral("block_id"), QStringLiteral("string")},
+                                                                {QStringLiteral("window_id"), QStringLiteral("string")}},
+                                                               {QStringLiteral("session_id")})}};
     actions << QJsonObject{{QStringLiteral("name"), QStringLiteral("client.notify")},
                            {QStringLiteral("kind"), QStringLiteral("client")},
                            {QStringLiteral("title"), tr("Show a Notification")},
@@ -899,6 +910,47 @@ bool MainWindow::performClientAction(const QString &name, const QJsonObject &arg
             return false;
         }
         switchWorkspace(found);   // nothing to do if it's on screen already
+        return true;
+    }
+    if (name == QLatin1String("client.block.reveal")) {
+        const QString sessionId = args.value(QLatin1String("session_id")).toString();
+        const QString blockId = args.value(QLatin1String("block_id")).toString();
+        const QString windowId = args.value(QLatin1String("window_id")).toString();
+        if (sessionId.isEmpty()) {
+            *error = tr("client.block.reveal needs a session_id");
+            return false;
+        }
+        // The session as opened here, from the caller's server if it's open
+        // from more than one (ids are only the server's own).
+        RexSession *target = nullptr;
+        for (RexSession *s : std::as_const(m_rexSessions)) {
+            if (s->sessionId() == sessionId && (!target || (from && s->server() == from->server())))
+                target = s;
+        }
+        if (!target) {
+            *error = tr("Session %1 isn't open in any workspace here").arg(sessionId);
+            return false;
+        }
+        TerminalWidget *targetPane = nullptr;
+        TerminalTab *tab = nullptr;
+        if (!blockId.isEmpty()) {
+            targetPane = target->paneForBlock(blockId);
+            tab = targetPane ? tabOf(targetPane) : nullptr;
+            if (!tab) {
+                *error = tr("Block %1 isn't shown in session “%2” here").arg(blockId, target->label());
+                return false;
+            }
+        } else {
+            tab = target->tabForWindow(windowId);
+            if (!tab) {
+                *error = windowId.isEmpty() ? tr("Session “%1” has no windows here").arg(target->label())
+                                            : tr("Window %1 isn't shown in session “%2” here").arg(windowId, target->label());
+                return false;
+            }
+        }
+        showTab(tab);   // its workspace, then the tab
+        if (targetPane)
+            tab->setActivePane(targetPane);
         return true;
     }
     if (name == QLatin1String("client.tab.rename") && args.contains(QLatin1String("title"))) {
