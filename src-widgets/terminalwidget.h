@@ -6,6 +6,7 @@
 
 #pragma once
 
+#include <QPointer>
 #include <QWidget>
 
 #include <functional>
@@ -126,6 +127,16 @@ public:
     /* External terminals: a note in the pane's top corner while its size
      * comes from elsewhere (another client); empty takes it away. */
     void setFollowing(const QString &note);
+    /*
+     * A widget drawn over the cells in their place (OSC 6522's native view),
+     * or nullptr for the cells again. The pane takes it; the cells still
+     * take output underneath.
+     */
+    void setOverlay(QWidget *overlay);
+    QWidget *overlay() const { return m_overlay; }
+    /* The cells' colours: background, foreground, and the accent. */
+    QColor cellBackground() const;
+    QColor cellForeground() const;
     bool isFollowing() const;
 
     /* One character cell, in pixels. */
@@ -351,6 +362,7 @@ private:
     QTermWidget *m_terminal = nullptr;
     std::function<bool(const QStringList &)> m_fileDrop;
     QLabel *m_followBadge = nullptr;  // setFollowing()
+    QPointer<QWidget> m_overlay;      // setOverlay()
     bool m_floating = false;          // setFloating()
     QString m_fallbackTitle;          // setFallbackTitle()
     // A local card's title: the foreground program and where it is.

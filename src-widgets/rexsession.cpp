@@ -11,6 +11,7 @@
 #include <QApplication>
 #include <QClipboard>
 
+#include "cardstyle.h"
 #include "ghosttyreplay.h"
 #include "rexclient.h"
 #include "rexfilecopy.h"
@@ -818,6 +819,7 @@ TerminalWidget *RexSession::makePane(Block *b)
         });
     }
     b->pane = pane;
+    setUpVia(b);
     sendTheme(b);
     showFollowing(b);
     return pane;
@@ -869,8 +871,11 @@ void RexSession::openStream(Block *b)
             onSnapshot(blk, s);
     });
     connect(b->stream, &RexTerminalConnection::output, this, [find](const QByteArray &bytes) {
-        if (Block *blk = find(); blk && blk->pane)
+        if (Block *blk = find(); blk && blk->pane) {
             blk->pane->feed(bytes);
+            if (blk->via)
+                blk->via->feed(bytes);
+        }
     });
     connect(b->stream, &RexTerminalConnection::marker, this, [this, find](const QJsonObject &m) {
         if (Block *blk = find())
@@ -898,6 +903,8 @@ void RexSession::dropBlock(const QString &id)
         b->stream->close();
         b->stream->deleteLater();
     }
+    if (b->via)
+        b->via->deleteLater();
     // A pane in a tab goes when the tab's layout drops it, or with the tab;
     // one never put in a tab is ours.
     if (b->pane && !b->pane->parent())
@@ -916,6 +923,8 @@ void RexSession::onSnapshot(Block *b, const GhosttySnapshot::Snapshot &snapshot)
     // (a resync, or after the stream couldn't be resumed) rebuilds the pane.
     b->pane->setScreenSize(b->screen.width(), b->screen.height());
     b->pane->feed(GhosttySnapshot::replay(snapshot));
+    if (b->via)
+        b->via->resynced();
     showFollowing(b);
     checkSize(b);
 }
@@ -1014,6 +1023,15 @@ void RexSession::onEvent(const QJsonObject &message)
     } else if (type == QLatin1String("block_event")
                && str(payload, "name") == QLatin1String("clipboard_written")) {
         takeClipboardWrite(str(payload, "block_id"), payload.value(QLatin1String("payload")).toObject());
+    } else if (type == QLatin1String("block_event")
+               && str(payload, "name") == QLatin1String("process_changed")) {
+        // Rex's; atlantis doesn't send it, and the hello's check covers that.
+        auto it = m_blocks.find(str(payload, "block_id"));
+        if (it != m_blocks.end() && it->second->via) {
+            const QJsonObject fg = payload.value(QLatin1String("payload")).toObject()
+                                       .value(QLatin1String("foreground")).toObject();
+            it->second->via->foregroundChanged(fg.value(QLatin1String("pid")).toInt());
+        }
     } else if (type == QLatin1String("block_event")
                && str(payload, "name") == QLatin1String("child_exited")) {
         auto it = m_blocks.find(str(payload, "block_id"));
@@ -1253,6 +1271,84 @@ void RexSession::sendInput(Block *b, const QByteArray &bytes)
     if (b->exited || m_finished || m_offline)
         return;
     takeBlock(b);
+    for (qsizetype i = 0; i < bytes.size(); i += kWriteChunk) {
+        QJsonObject p = target(b);
+        p.insert(QStringLiteral("args"),
+                 QJsonObject{{QStringLiteral("data"), QString::fromUtf8(bytes.mid(i, kWriteChunk))}});
+        m_control->request(QStringLiteral("com.superlogical.terminal.write"), p);
+    }
+}
+
+// ---- OSC 6522 -----------------------------------------------------------------
+
+void RexSession::setUpVia(Block *b)
+{
+    if (b->via)
+        return;
+    b->via = new ViaClient(this);
+    const QString id = b->id;
+    auto find = [this, id]() -> Block * {
+        auto it = m_blocks.find(id);
+        return it == m_blocks.end() ? nullptr : it->second.get();
+    };
+    // A program is drawn natively only while it's the block's foreground
+    // process: anything else could say hello and put words in its mouth.
+    QPointer<RexSession> self(this);
+    b->via->setForegroundCheck([self, id](int pid, std::function<void(bool)> done) {
+        if (!self || !self->m_control) {
+            done(false);
+            return;
+        }
+        self->m_control->request(QStringLiteral("com.superlogical.terminal.process"),
+                                 QJsonObject{{QStringLiteral("session_id"), self->m_sessionId},
+                                             {QStringLiteral("block_id"), id},
+                                             {QStringLiteral("args"), QJsonObject()}},
+                                 [done, pid](const QJsonObject &reply, const QJsonObject &error) {
+                                     const QJsonObject fg = reply.value(QLatin1String("foreground")).toObject();
+                                     done(error.isEmpty() && fg.value(QLatin1String("pid")).toInt() == pid);
+                                 });
+    });
+    connect(b->via, &ViaClient::send, this, [this, find](const QByteArray &bytes, bool user) {
+        if (Block *blk = find()) {
+            if (user)
+                sendInput(blk, bytes);
+            else
+                writeRaw(blk, bytes);
+        }
+    });
+    connect(b->via, &ViaClient::windowsChanged, this, [this, find]() {
+        if (Block *blk = find())
+            showVia(blk);
+    });
+    connect(b->via, &ViaClient::ended, this, [find]() {
+        if (Block *blk = find(); blk && blk->pane)
+            blk->pane->setOverlay(nullptr);
+    });
+}
+
+void RexSession::showVia(Block *b)
+{
+    if (!b->pane || !b->via)
+        return;
+    if (!b->via->active()) {
+        b->pane->setOverlay(nullptr);
+        return;
+    }
+    if (qobject_cast<ViaView *>(b->pane->overlay()))
+        return;  // it follows the client itself
+    auto *view = new ViaView(b->via);
+    view->setColours(b->pane->cellBackground(), b->pane->cellForeground(), cardstyle::accent());
+    ViaClient *via = b->via;
+    connect(view, &ViaView::cellsRequested, via, &ViaClient::detach);
+    b->pane->setOverlay(view);
+}
+
+// What the protocol itself says to the program (attach, detach): not the
+// user typing, so it doesn't take the block.
+void RexSession::writeRaw(Block *b, const QByteArray &bytes)
+{
+    if (b->exited || m_finished || m_offline)
+        return;
     for (qsizetype i = 0; i < bytes.size(); i += kWriteChunk) {
         QJsonObject p = target(b);
         p.insert(QStringLiteral("args"),

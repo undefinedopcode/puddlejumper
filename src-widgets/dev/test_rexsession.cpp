@@ -38,12 +38,16 @@
 #include "settings.h"
 #include "terminaltab.h"
 #include "terminalwidget.h"
+#include "via.h"
 
 #include <QApplication>
 #include <QCursor>
 #include <QEventLoop>
 #include <QTimer>
 #include <QToolButton>
+#include <QPushButton>
+#include <QLineEdit>
+#include <QLabel>
 #include <QSplitter>
 #include <QLayout>
 #include <QDir>
@@ -670,6 +674,51 @@ int main(int argc, char *argv[])
     if (!check(waitFor([&] { return shows(first, QStringLiteral("DONE_ONE")); }), QStringLiteral("typed and echoed")))
         QTextStream(stderr) << "  the pane shows:\n    " << paneLines(first).mid(0, 12).join(QStringLiteral("\n    ")) << "\n";
     agrees(server, c, QStringLiteral("first window"));
+
+    // OSC 6522: puddle's server in solo mode, drawn as Qt widgets over the
+    // cells, and used there. Only with PJ_TEST_PUDDLE="puddle-server app.py"
+    // (puddle's examples/hello.py, whose window has Wave and Bye buttons).
+    if (const QString puddle = qEnvironmentVariable("PJ_TEST_PUDDLE"); !puddle.isEmpty()) {
+        const QStringList parts = puddle.split(QLatin1Char(' '));
+        type(first, parts.value(0) + QStringLiteral(" --solo python3 ") + parts.value(1) + QStringLiteral("; echo VIA_DONE_$?\r"));
+        ViaView *view = nullptr;
+        auto button = [&](const QString &prefix) -> QPushButton * {
+            for (auto *b : view ? view->findChildren<QPushButton *>() : QList<QPushButton *>())
+                if (b->text().startsWith(prefix))
+                    return b;
+            return nullptr;
+        };
+        if (check(waitFor([&] {
+                      view = qobject_cast<ViaView *>(first->overlay());
+                      return view && button(QStringLiteral("Wave"));
+                  }),
+                  QStringLiteral("OSC 6522: the native view comes up"))) {
+            check(view->geometry() == first->terminal()->geometry(), QStringLiteral("OSC 6522: over the cells"));
+            if (const QString shots = qEnvironmentVariable("PJ_TEST_SHOTS"); !shots.isEmpty())
+                first->grab().save(shots + QStringLiteral("/via.png"));
+            button(QStringLiteral("Wave"))->click();
+            check(waitFor([&] { return button(QStringLiteral("Wave (1)")); }), QStringLiteral("OSC 6522: a click reaches the app"));
+            if (auto *edit = view->findChild<QLineEdit *>(QStringLiteral("hi/name"))) {
+                edit->setText(QStringLiteral("Ada"));
+                emit edit->textEdited(QStringLiteral("Ada"));
+                check(waitFor([&] {
+                          for (auto *l : view->findChildren<QLabel *>())
+                              if (l->text() == QLatin1String("Hello, Ada!"))
+                                  return true;
+                          return false;
+                      }),
+                      QStringLiteral("OSC 6522: typing reaches the app"));
+            } else {
+                check(false, QStringLiteral("OSC 6522: a text input"));
+            }
+            if (const QString shots = qEnvironmentVariable("PJ_TEST_SHOTS"); !shots.isEmpty())
+                first->grab().save(shots + QStringLiteral("/via-after.png"));
+            button(QStringLiteral("Bye"))->click();
+            check(waitFor([&] { return !first->overlay(); }), QStringLiteral("OSC 6522: the cells again when the app ends"));
+            check(waitFor([&] { return shows(first, QStringLiteral("VIA_DONE_0")); }),
+                  QStringLiteral("OSC 6522: the app exits 0"));
+        }
+    }
 
     // Files dropped on a pane: for a server elsewhere, filesDropped (the
     // window copies them there); for one on this machine's socket, typed as

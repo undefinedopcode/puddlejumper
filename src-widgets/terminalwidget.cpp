@@ -622,6 +622,8 @@ void TerminalWidget::resizeEvent(QResizeEvent *event)
 {
     QWidget::resizeEvent(event);
     placeFollowBadge();
+    if (m_overlay)
+        m_overlay->setGeometry(m_terminal->geometry());
     emit resized();
 }
 
@@ -641,6 +643,43 @@ bool TerminalWidget::eventFilter(QObject *watched, QEvent *event)
         }
     }
     return QWidget::eventFilter(watched, event);
+}
+
+void TerminalWidget::setOverlay(QWidget *overlay)
+{
+    if (overlay == m_overlay)
+        return;
+    const bool hadFocus = m_overlay && m_overlay->isAncestorOf(QApplication::focusWidget());
+    if (m_overlay)
+        m_overlay->deleteLater();
+    m_overlay = overlay;
+    if (!overlay) {
+        if (hadFocus)
+            focusTerminal();
+        return;
+    }
+    overlay->setParent(this);
+    overlay->setGeometry(m_terminal->geometry());
+    overlay->show();
+    overlay->raise();
+    if (m_followBadge && m_followBadge->isVisible())
+        m_followBadge->raise();
+    if (m_terminal->isAncestorOf(QApplication::focusWidget()))
+        overlay->setFocus();
+}
+
+QColor TerminalWidget::cellBackground() const
+{
+    if (auto *d = display())
+        return d->colorTable()[1].color;
+    return palette().color(QPalette::Window);
+}
+
+QColor TerminalWidget::cellForeground() const
+{
+    if (auto *d = display())
+        return d->colorTable()[0].color;
+    return palette().color(QPalette::WindowText);
 }
 
 void TerminalWidget::setFollowing(const QString &note)

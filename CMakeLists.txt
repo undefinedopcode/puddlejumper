@@ -174,6 +174,7 @@ if(TARGET Qt6::WebSockets)
     message(STATUS "Rex tabs: on")
     target_sources(puddlejumper PRIVATE
         src-widgets/rexsession.cpp src-widgets/rexsession.h
+        src-widgets/via.cpp src-widgets/via.h
         src-widgets/rexoffline.cpp src-widgets/rexoffline.h
         src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
         src-widgets/rexclient.cpp src-widgets/rexclient.h
@@ -359,6 +360,16 @@ set_target_properties(probe-tabbars PROPERTIES AUTOMOC ON)
 target_include_directories(probe-tabbars PRIVATE src-widgets)
 
 # ---------------------------------------------------------------------------
+# test-via — OSC 6522's terminal side (via.h) against the spec's rules.
+# Dev tool only; never installed. Run: ./build/test-via
+qt_add_executable(test-via
+    src-widgets/dev/test_via.cpp
+    src-widgets/via.cpp src-widgets/via.h
+)
+target_link_libraries(test-via PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+set_target_properties(test-via PROPERTIES AUTOMOC ON)
+target_include_directories(test-via PRIVATE src-widgets)
+
 # test-programstatus — the OSC 7501 parser and records against the spec's
 # rules. Dev tool only; never installed. Run: ./build/test-programstatus
 # ---------------------------------------------------------------------------
@@ -577,6 +588,7 @@ if(TARGET Qt6::WebSockets)
     qt_add_executable(test-rexsession
         src-widgets/dev/test_rexsession.cpp
         src-widgets/rexsession.cpp src-widgets/rexsession.h
+        src-widgets/via.cpp src-widgets/via.h
         src-widgets/rexoffline.cpp src-widgets/rexoffline.h
         src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
         src-widgets/rexclient.cpp src-widgets/rexclient.h
@@ -616,6 +628,7 @@ if(TARGET Qt6::WebSockets)
         src-widgets/tmuxcontrol.cpp src-widgets/tmuxcontrol.h
         src-widgets/disclaim.cpp src-widgets/disclaim.h
         src-widgets/rexsession.cpp src-widgets/rexsession.h
+        src-widgets/via.cpp src-widgets/via.h
         src-widgets/rexoffline.cpp src-widgets/rexoffline.h
         src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
         src-widgets/rexclient.cpp src-widgets/rexclient.h
@@ -654,6 +667,7 @@ if(TARGET Qt6::WebSockets)
         src-widgets/tmuxcontrol.cpp src-widgets/tmuxcontrol.h
         src-widgets/disclaim.cpp src-widgets/disclaim.h
         src-widgets/rexsession.cpp src-widgets/rexsession.h
+        src-widgets/via.cpp src-widgets/via.h
         src-widgets/rexoffline.cpp src-widgets/rexoffline.h
         src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
         src-widgets/rexclient.cpp src-widgets/rexclient.h
@@ -690,6 +704,7 @@ if(TARGET Qt6::WebSockets)
     qt_add_executable(test-rexreconnect
         src-widgets/dev/test_rexreconnect.cpp
         src-widgets/rexsession.cpp src-widgets/rexsession.h
+        src-widgets/via.cpp src-widgets/via.h
         src-widgets/rexoffline.cpp src-widgets/rexoffline.h
         src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
         src-widgets/rexclient.cpp src-widgets/rexclient.h
@@ -727,6 +742,7 @@ if(TARGET Qt6::WebSockets)
     qt_add_executable(test-rexidempotency
         src-widgets/dev/test_rexidempotency.cpp
         src-widgets/rexsession.cpp src-widgets/rexsession.h
+        src-widgets/via.cpp src-widgets/via.h
         src-widgets/rexoffline.cpp src-widgets/rexoffline.h
         src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
         src-widgets/rexclient.cpp src-widgets/rexclient.h

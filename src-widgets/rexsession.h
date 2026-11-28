@@ -10,6 +10,7 @@
 #include "rexkeymap.h"
 #include "terminaltab.h"
 #include "terminalwidget.h"
+#include "via.h"
 
 #include <QHash>
 #include <QJsonArray>
@@ -259,6 +260,7 @@ private:
         QString label;  // the server's name for it, if any
         QString owner;  // the client whose size it follows (empty: none)
         bool taking = false;  // session.own_block (take) on its way
+        ViaClient *via = nullptr;  // OSC 6522 (via.h)
     };
     struct Window
     {
@@ -332,6 +334,10 @@ private:
     Window *windowOf(const TerminalTab *tab);
     const Window *windowOf(const TerminalTab *tab) const;
     QJsonObject target(const Block *b) const;
+    // OSC 6522: the block's program drawn natively (via.h).
+    void setUpVia(Block *b);
+    void showVia(Block *b);
+    void writeRaw(Block *b, const QByteArray &bytes);
     QSize cellSize();
     QSize paneChrome() const;
 
