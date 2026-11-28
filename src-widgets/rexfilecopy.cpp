@@ -681,7 +681,7 @@ void RexFileCopy::openBlock(const QString &workingDir)
     if (!workingDir.isEmpty())
         options.insert(QStringLiteral("working_dir"), workingDir);
     QPointer<RexFileCopy> self(this);
-    m_control->request(QStringLiteral("session.new_block"),
+    m_control->requestOnce(QStringLiteral("session.new_block"),
                        QJsonObject{{QStringLiteral("session_id"), m_sessionId},
                                    {QStringLiteral("flavor"), kFsFlavor},
                                    {QStringLiteral("options"), options},

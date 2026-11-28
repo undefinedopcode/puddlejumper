@@ -12,6 +12,7 @@
 #include <QJsonDocument>
 #include <QSysInfo>
 #include <QTimer>
+#include <QUuid>
 #include <QtEndian>
 
 namespace {
@@ -52,7 +53,12 @@ RexSocket *RexControl::newSocket(const QString &path, const QString &subprotocol
 
 void RexControl::open(const QUrl &server)
 {
+    // Calls waiting to be sent again survive a reconnect to the same server.
+    QList<Pending> retry;
+    if (server == m_server)
+        retry = std::exchange(m_retry, {});
     close();
+    m_retry = std::move(retry);
     m_server = server;
     m_error.clear();
     // The timer before the socket: a Unix socket can connect at once.
@@ -70,7 +76,7 @@ void RexControl::open(const QUrl &server)
                            {QStringLiteral("version"), QCoreApplication::applicationVersion()},
                            {QStringLiteral("platform"), QSysInfo::productType()}};
         QJsonObject hello{{QStringLiteral("type"), QStringLiteral("hello")},
-                          {QStringLiteral("api_revision"), kApiRevision},
+                          {QStringLiteral("api_revision"), m_asked},
                           {QStringLiteral("api_min_revision"), kApiMinRevision},
                           {QStringLiteral("client"), client}};
         if (!m_reconnectToken.isEmpty())
@@ -88,6 +94,16 @@ void RexControl::open(const QUrl &server)
 
 void RexControl::close()
 {
+    m_closing = true;
+    dropSocket();
+    m_closing = false;
+    for (const Pending &p : std::exchange(m_retry, {}))
+        if (p.reply)
+            p.reply({}, errorObject(QStringLiteral("disconnected"), QStringLiteral("closed")));
+}
+
+void RexControl::dropSocket()
+{
     if (!m_socket)
         return;
     RexSocket *s = m_socket;
@@ -101,6 +117,7 @@ void RexControl::close()
     }
     const bool wasReady = m_ready;
     m_ready = false;
+    m_keyed.clear();
     const auto replies = std::exchange(m_replies, {});
     const auto waiting = std::exchange(m_waiting, {});
     for (const Reply &r : replies)
@@ -117,7 +134,14 @@ void RexControl::fail(const QString &reason)
     if (!m_socket)
         return;
     m_error = reason;
-    close();
+    // A call sent with a key and not answered may have been done or not:
+    // sent again with the key after the next welcome, it is done once.
+    for (auto it = m_keyed.begin(); it != m_keyed.end(); ++it) {
+        m_replies.remove(it.key());
+        m_retry.append(it.value());
+    }
+    m_keyed.clear();
+    dropSocket();
     emit closed(reason);
 }
 
@@ -129,21 +153,51 @@ void RexControl::send(const QJsonObject &message)
 
 void RexControl::request(const QString &method, const QJsonObject &payload, Reply reply)
 {
+    dispatch({method, payload, std::move(reply)});
+}
+
+void RexControl::requestOnce(const QString &method, const QJsonObject &payload, Reply reply)
+{
+    Pending p{method, payload, std::move(reply)};
+    p.once = true;
+    dispatch(std::move(p));
+}
+
+void RexControl::dispatch(Pending p)
+{
     if (!m_socket) {
-        if (reply)
-            reply({}, errorObject(QStringLiteral("disconnected"), QStringLiteral("not connected")));
+        if (p.reply)
+            p.reply({}, errorObject(QStringLiteral("disconnected"), QStringLiteral("not connected")));
         return;
     }
     if (!m_ready) {
-        m_waiting.append({method, payload, std::move(reply)});
+        m_waiting.append(std::move(p));
         return;
     }
+    // Which server instance a key goes to (a restart forgets keys): the
+    // welcome says, for atlantis; Rex's server.status does, asked first.
+    if (p.once && m_revision >= kIdempotencyRevision && m_instance.isEmpty() && !std::exchange(m_askedInstance, true))
+        askInstance([this](const QString &instance) { m_instance = instance; });
     const QString id = QString::number(++m_nextId);
-    if (reply)
-        m_replies.insert(id, std::move(reply));
+    QJsonObject payload = p.payload;
+    if (p.once && m_revision >= kIdempotencyRevision) {
+        if (p.key.isEmpty()) {
+            p.key = QUuid::createUuid().toString(QUuid::WithoutBraces);
+            p.since = QDateTime::currentMSecsSinceEpoch();
+        }
+        payload.insert(QStringLiteral("idempotency_key"), p.key);
+        m_keyed.insert(id, p);   // until answered, to send again
+        p.reply = [this, id, reply = std::move(p.reply)](const QJsonObject &result, const QJsonObject &error) {
+            m_keyed.remove(id);
+            if (reply)
+                reply(result, error);
+        };
+    }
+    if (p.reply)
+        m_replies.insert(id, std::move(p.reply));
     send(QJsonObject{{QStringLiteral("type"), QStringLiteral("request")},
                      {QStringLiteral("id"), id},
-                     {QStringLiteral("method"), method},
+                     {QStringLiteral("method"), p.method},
                      {QStringLiteral("payload"), payload}});
 }
 
@@ -161,11 +215,40 @@ void RexControl::onText(const QString &text)
             const QJsonObject client = m.value(QLatin1String("client")).toObject();
             m_clientId = client.value(QLatin1String("id")).toString();
             m_reconnectToken = client.value(QLatin1String("reconnect_token")).toString();
+            m_revision = m.value(QLatin1String("api_revision")).toInt();
+            const QString instance =
+                m.value(QLatin1String("server")).toObject().value(QLatin1String("instance_id")).toString();
+            const QString sentTo = std::exchange(m_instance, instance);
+            m_askedInstance = false;
             m_ready = true;
             m_helloTimer->stop();
+            // Before ready(): its handlers may close or reopen.
+            auto retry = std::exchange(m_retry, {});
             emit ready();
             for (Pending &p : std::exchange(m_waiting, {}))
-                request(p.method, p.payload, std::move(p.reply));
+                dispatch(std::move(p));
+            if (!m_ready && m_socket)
+                m_retry = std::move(retry) + m_retry;   // reopened: for the next welcome
+            else if (!m_ready)
+                resend(std::move(retry), false);        // closed
+            else if (retry.isEmpty())
+                return;
+            else if (m_revision < kIdempotencyRevision || sentTo.isEmpty())
+                resend(std::move(retry), false);
+            else if (!instance.isEmpty())
+                resend(std::move(retry), instance == sentTo);
+            else {
+                m_askedInstance = true;
+                askInstance([this, sentTo, retry = std::move(retry)](const QString &now) mutable {
+                    if (!m_ready && !m_closing) {
+                        m_retry = std::move(retry) + m_retry;   // dropped again first: next time
+                        m_instance = sentTo;
+                        return;
+                    }
+                    m_instance = now;
+                    resend(std::move(retry), !now.isEmpty() && now == sentTo);
+                });
+            }
         } else if (type == QLatin1String("error") || type == QLatin1String("response")) {
             const QJsonObject e = m.value(QLatin1String("error")).toObject();
             QString why = e.value(QLatin1String("message")).toString();
@@ -187,6 +270,27 @@ void RexControl::onText(const QString &text)
             reply(m.value(QLatin1String("payload")).toObject(), {});
     } else if (type == QLatin1String("event")) {
         emit event(m);
+    }
+}
+
+void RexControl::askInstance(std::function<void(const QString &)> done)
+{
+    request(QStringLiteral("server.status"), {}, [done](const QJsonObject &payload, const QJsonObject &) {
+        done(payload.value(QLatin1String("instance_id")).toString());
+    });
+}
+
+// Calls cut off by a dropped connection: sent again with their keys if
+// `same` (the instance they went to) and not too old, else answered
+// "disconnected".
+void RexControl::resend(QList<Pending> calls, bool same)
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    for (Pending &p : calls) {
+        if (same && m_ready && now - p.since < kRetryForMs)
+            dispatch(std::move(p));
+        else if (p.reply)
+            p.reply({}, errorObject(QStringLiteral("disconnected"), QStringLiteral("closed")));
     }
 }
 

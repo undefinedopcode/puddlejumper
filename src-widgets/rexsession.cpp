@@ -242,8 +242,18 @@ RexSession::RexSession(const QUrl &server, const QString &sessionId, const Setti
         if (m_finished)
             return;
         const QString why = reason.isEmpty() ? tr("the connection to the server closed") : reason;
-        // Never attached, and nothing to keep: opening it failed.
+        // Never attached, and nothing to keep: opening it failed. Unless
+        // the session.create was under way: sent again (with its key) on a
+        // new connection, once, it makes the session or answers with it.
         if (!m_attached && !m_offline && !m_restoring && m_windows.isEmpty()) {
+            if (m_sessionId.isEmpty() && m_control->hasRetries() && !std::exchange(m_createRetried, true)) {
+                qCInfo(lcRex) << "connection lost while creating the session; trying again:" << why;
+                QTimer::singleShot(500, this, [this]() {
+                    if (!m_finished)
+                        m_control->open(m_server);
+                });
+                return;
+            }
             finish(why);
             return;
         }
@@ -377,7 +387,7 @@ void RexSession::start()
         attach();
         return;
     }
-    m_control->request(
+    m_control->requestOnce(
         QStringLiteral("session.create"),
         QJsonObject{{QStringLiteral("initial_windows"),
                      QJsonArray{QJsonObject{{QStringLiteral("layout"), shellLayout()}}}}},
@@ -1708,7 +1718,7 @@ void RexSession::dockPane(TerminalWidget *pane)
 
 void RexSession::newWindow()
 {
-    m_control->request(QStringLiteral("session.new_window"),
+    m_control->requestOnce(QStringLiteral("session.new_window"),
                        QJsonObject{{QStringLiteral("session_id"), m_sessionId},
                                    {QStringLiteral("layout"), shellLayout()},
                                    {QStringLiteral("focus"), true}});
@@ -1722,7 +1732,7 @@ void RexSession::splitPane(TerminalWidget *pane, Qt::Orientation orientation)
     // Rex's schema: anchor_id (not the older anchor_block_id), side
     // required, and no window_id beside an anchor. Its server refuses
     // anything else; atlantis was lenient.
-    m_control->request(QStringLiteral("session.new_split"),
+    m_control->requestOnce(QStringLiteral("session.new_split"),
                        QJsonObject{{QStringLiteral("session_id"), m_sessionId},
                                    {QStringLiteral("anchor_id"), id},
                                    {QStringLiteral("direction"), orientation == Qt::Horizontal

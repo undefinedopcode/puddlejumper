@@ -686,6 +686,43 @@ if(TARGET Qt6::WebSockets)
     )
     target_include_directories(test-rexreconnect PRIVATE src-widgets)
 
+    # test-rexidempotency — creating tabs, splits and sessions over a connection
+    # that drops before the response (Rex API revision 26 idempotency keys),
+    # through a proxy of its own. Run against a test server only:
+    # ./build/test-rexidempotency http://127.0.0.1:51499 | unix:///path/rex.sock
+    qt_add_executable(test-rexidempotency
+        src-widgets/dev/test_rexidempotency.cpp
+        src-widgets/rexsession.cpp src-widgets/rexsession.h
+        src-widgets/rexoffline.cpp src-widgets/rexoffline.h
+        src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
+        src-widgets/rexclient.cpp src-widgets/rexclient.h
+        src-widgets/rexfilecopy.cpp src-widgets/rexfilecopy.h
+        src-widgets/rexsocket.cpp src-widgets/rexsocket.h
+        src-widgets/rexterminalstream.cpp src-widgets/rexterminalstream.h
+        src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
+        src-widgets/ghosttyreplay.cpp src-widgets/ghosttyreplay.h
+        src-widgets/terminalwidget.cpp src-widgets/terminalwidget.h
+        src-widgets/terminaltab.cpp src-widgets/terminaltab.h
+        src-widgets/appicon.cpp src-widgets/appicon.h
+        src-widgets/tab.h
+        src-widgets/settings.cpp src-widgets/settings.h
+        src-widgets/profiles.cpp src-widgets/profiles.h
+        src-widgets/colorscheme.cpp src-widgets/colorscheme.h
+        src-widgets/formername.cpp src-widgets/formername.h
+        src-widgets/procinfo.cpp src-widgets/procinfo.h
+        src-widgets/programstatus.cpp src-widgets/programstatus.h
+        src-widgets/programresume.cpp src-widgets/programresume.h
+        src-widgets/resumerules.cpp src-widgets/resumerules.h
+        src-widgets/screenshotoverlay.cpp src-widgets/screenshotoverlay.h
+    )
+    target_link_libraries(test-rexidempotency PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::WebSockets qtermwidget)
+    qt_add_resources(test-rexidempotency "lucide_icons"
+        PREFIX "/lucide"
+        BASE icons/lucide
+        FILES ${LUCIDE_ICONS}
+    )
+    target_include_directories(test-rexidempotency PRIVATE src-widgets)
+
     # test-localresume — program resume (OSC 7577) in real local panes: a
     # report, the rules, and a restore through the helper. Run:
     # ./build/test-localresume

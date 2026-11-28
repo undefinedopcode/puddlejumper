@@ -62,11 +62,32 @@ public:
     // Requests sent before ready() wait for it.
     void request(const QString &method, const QJsonObject &payload = {}, Reply reply = {});
 
+    // A call that creates something (session.create, session.new_window,
+    // new_split, new_layer, new_block): safe to send again. With a server
+    // that speaks API revision 26 it carries an idempotency key, and if the
+    // connection drops before the response, it is sent again with the same
+    // key once open() has connected again to the same server instance
+    // (within kRetryFor): the server creates nothing the second time and
+    // answers with the first call's response. With an older server, or
+    // another instance (a restart forgets keys), it is answered
+    // "disconnected" as any call: what it did shows in the session's view.
+    void requestOnce(const QString &method, const QJsonObject &payload = {}, Reply reply = {});
+    // Calls waiting to be sent again after a dropped connection.
+    bool hasRetries() const { return !m_retry.isEmpty(); }
+
+    // The revision the server answered with (0 before the first welcome).
+    int apiRevision() const { return m_revision; }
+
     // A WebSocket to `path` on the server (TCP or its Unix socket).
     RexSocket *newSocket(const QString &path, const QString &subprotocol, qint64 maxMessage, QObject *parent) const;
 
-    static constexpr int kApiRevision = 24;
+    static constexpr int kApiRevision = 27;
     static constexpr int kApiMinRevision = 8;
+    static constexpr int kIdempotencyRevision = 26;
+    static constexpr qint64 kRetryForMs = 5 * 60 * 1000;   // Rex keeps a key 10 minutes
+
+    // For tests: the revision asked for in the hello.
+    void setAskedRevision(int revision) { m_asked = revision; }
 
 signals:
     void ready();
@@ -86,7 +107,14 @@ private:
         QString method;
         QJsonObject payload;
         Reply reply;
+        bool once = false;       // requestOnce
+        QString key;             // its idempotency key, once sent with one
+        qint64 since = 0;        // when it was first sent (ms since epoch)
     };
+    void dispatch(Pending p);
+    void dropSocket();
+    void askInstance(std::function<void(const QString &)> done);
+    void resend(QList<Pending> calls, bool same);
 
     RexSocket *m_socket = nullptr;
     QTimer *m_helloTimer = nullptr;
@@ -98,6 +126,13 @@ private:
     quint64 m_nextId = 0;
     QHash<QString, Reply> m_replies;
     QList<Pending> m_waiting;  // before ready
+    QHash<QString, Pending> m_keyed;   // sent with a key, not yet answered
+    QList<Pending> m_retry;            // to send again at the next welcome
+    QString m_instance;                // the server's instance_id, if known
+    bool m_askedInstance = false;      // server.status asked, on this connection
+    bool m_closing = false;            // close(): nothing is sent again
+    int m_revision = 0;
+    int m_asked = kApiRevision;
 };
 
 /*

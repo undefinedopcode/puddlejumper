@@ -352,6 +352,7 @@ private:
     QPointer<TerminalWidget> m_metrics;  // hidden; measures cells
     QSize m_area;  // the last tab area seen, for windows not yet shown
     bool m_attached = false;
+    bool m_createRetried = false;   // session.create sent again once after a drop
     bool m_finished = false;
     bool m_followingFocus = false;  // taking the server's focus: not sent back
     std::function<QJsonObject()> m_keymapRequest;
