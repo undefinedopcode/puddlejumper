@@ -9,6 +9,8 @@
 #include "cardstyle.h"
 
 #include <QColor>
+#include <QHash>
+#include <QSet>
 #include <QWidget>
 
 class QIcon;
@@ -59,6 +61,18 @@ public:
     void moveCard(int from, int to);
 
     /*
+     * Groups: with grouping on, the cards are shown under a header per
+     * group, groups in the order of their first tab and cards in tab order
+     * within one. The tab order itself doesn't change. `key` says which
+     * group a card is in; `label` and `icon` (an appIcon() name) are its
+     * header's. A header collapses its group when clicked. Headers are
+     * left out while every card is in one group.
+     */
+    void setGrouped(bool grouped);
+    bool isGrouped() const { return m_grouped; }
+    void setGroup(int index, const QString &key, const QString &label, const QString &icon);
+
+    /*
      * The preview's shape, height over width: that of the terminal area, so a
      * card looks like the tab it stands for. Changes previewSize().
      */
@@ -107,6 +121,14 @@ private:
     void updateItemSizes();
     QListWidgetItem *card(int index) const;
     void updateToolTip(QListWidgetItem *item);
+    int tabOf(const QListWidgetItem *item) const;
+    void renumber();
+    // Put the rows in order: the cards, under their headers when grouped.
+    void placeItems();
+    void schedulePlace();
+    void toggleGroup(const QString &key);
+    // A header's marks for its cards: how many need the user, unseen output.
+    void updateHeader(const QString &key);
 
     QListWidget *m_list = nullptr;
     QToolButton *m_newTab = nullptr;
@@ -117,4 +139,9 @@ private:
     QColor m_background;
     QColor m_foreground;
     bool m_syncing = false;   // the list is being changed by us, not the user
+    QList<QListWidgetItem *> m_cards;   // by tab index
+    QHash<QString, QListWidgetItem *> m_headers;
+    QSet<QString> m_collapsed;
+    bool m_grouped = false;
+    bool m_placePending = false;
 };

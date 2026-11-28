@@ -288,6 +288,8 @@ private:
      */
     void refreshPreviews(bool all);
     void updateCardDetails(int index);
+    // Which sidebar group a tab's card is in, for the grouping chosen.
+    void updateCardGroup(int index);
     /* What the programs in a tab say they are doing (OSC 7501), on its card,
      * its tab and, for the tab on screen, the status bar. */
     void updateProgramStatus(QWidget *page);
@@ -371,6 +373,7 @@ private:
     SettingsDialog *m_settingsDialog = nullptr;
 
     QSplitter *m_splitter = nullptr;
+    QMenu *m_groupMenu = nullptr;   // View → Group Sidebar By
     ThumbnailSidebar *m_sidebar = nullptr;
     TabStrip *m_tabStrip = nullptr;     // the tabs along the top (QTabBar is hidden)
     QTabWidget *m_tabs = nullptr;

@@ -45,6 +45,9 @@ public:
         /* The sidebar's cards turned sideways: a small thumbnail with the
          * title and details beside it (docs/compact-sidebar.md). */
         bool    sidebarCompact = false;
+        /* The sidebar's cards under a header per group: "" (none),
+         * "session", "host" or "kind". */
+        QString sidebarGroupBy;
 
         /*
          * Terminal background opacity, 0.3..1.0. Revives the QML build's
@@ -183,6 +186,7 @@ public:
     void setLineSpacing(int v);
     void setTabLayout(const QString &v);
     void setSidebarCompact(bool v);
+    void setSidebarGroupBy(const QString &v);
     void setOpacity(double v);
     void setCursorShape(int v);
     void setTerminalMargin(int v);

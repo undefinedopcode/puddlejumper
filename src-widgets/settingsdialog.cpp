@@ -602,10 +602,24 @@ QWidget *SettingsDialog::buildWindowPage()
     m_sidebarCompactBox = new QCheckBox(tr("Compact cards: a small thumbnail, details beside it"), page);
     connect(m_sidebarCompactBox, &QCheckBox::toggled, this, [this](bool on) { m_settings.setSidebarCompact(on); });
     // Only the sidebar has cards.
-    connect(m_tabLayoutBox, &QComboBox::currentIndexChanged, this, [this](int i) {
-        m_sidebarCompactBox->setEnabled(m_tabLayoutBox->itemData(i).toString() == QLatin1String("thumbnails"));
-    });
     tabs->addRow(QString(), m_sidebarCompactBox);
+    m_sidebarGroupBox = new QComboBox(page);
+    m_sidebarGroupBox->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    m_sidebarGroupBox->addItem(tr("Nothing"), QString());
+    m_sidebarGroupBox->addItem(tr("Session"), QStringLiteral("session"));
+    m_sidebarGroupBox->addItem(tr("Host"), QStringLiteral("host"));
+    m_sidebarGroupBox->addItem(tr("Kind of tab"), QStringLiteral("kind"));
+    m_sidebarGroupBox->setToolTip(tr("Show the sidebar's cards under a header per tmux or Rex session, "
+                                     "per host, or per kind of tab. The tab order doesn't change."));
+    connect(m_sidebarGroupBox, &QComboBox::currentIndexChanged, this, [this](int i) {
+        m_settings.setSidebarGroupBy(m_sidebarGroupBox->itemData(i).toString());
+    });
+    tabs->addRow(tr("Group cards by"), m_sidebarGroupBox);
+    connect(m_tabLayoutBox, &QComboBox::currentIndexChanged, this, [this](int i) {
+        const bool sidebar = m_tabLayoutBox->itemData(i).toString() == QLatin1String("thumbnails");
+        m_sidebarCompactBox->setEnabled(sidebar);
+        m_sidebarGroupBox->setEnabled(sidebar);
+    });
 
     // ---- watching ------------------------------------------------------------
     QFormLayout *watch = addGroup(layout, tr("Watch a Terminal"));
@@ -1221,6 +1235,11 @@ void SettingsDialog::syncFromSettings()
         m_tabLayoutBox->setCurrentIndex(layoutIndex);
     m_sidebarCompactBox->setChecked(a.sidebarCompact);
     m_sidebarCompactBox->setEnabled(a.tabLayout == QLatin1String("thumbnails"));
+    {
+        const QSignalBlocker block(m_sidebarGroupBox);
+        m_sidebarGroupBox->setCurrentIndex(std::max(0, m_sidebarGroupBox->findData(a.sidebarGroupBy)));
+    }
+    m_sidebarGroupBox->setEnabled(a.tabLayout == QLatin1String("thumbnails"));
     m_monitorActivityBox->setChecked(s.monitorActivity);
     m_notifyProgramStatusBox->setChecked(s.notifyProgramStatus);
     m_tintBlockedTabsBox->setChecked(s.tintBlockedTabs);

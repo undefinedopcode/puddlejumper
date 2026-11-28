@@ -76,6 +76,7 @@
 #include <QSettings>
 #include <QSplitterHandle>
 #include <QStyleHints>
+#include <QSysInfo>
 #include <QTimer>
 #include <QStandardPaths>
 #include <QStatusBar>
@@ -972,6 +973,27 @@ void MainWindow::buildMenus()
     };
     syncCompactCheck();
     connect(&m_settings, &Settings::appearanceChanged, this, syncCompactCheck);
+
+    // The sidebar's cards under headers: by session, host or kind of tab.
+    QMenu *groupMenu = view->addMenu(tr("&Group Sidebar By"));
+    m_groupMenu = groupMenu;
+    auto *groupBy = new QActionGroup(groupMenu);
+    for (const auto &[key, text] : {std::pair{QString(), tr("&Nothing")},
+                                    std::pair{QStringLiteral("session"), tr("&Session")},
+                                    std::pair{QStringLiteral("host"), tr("&Host")},
+                                    std::pair{QStringLiteral("kind"), tr("&Kind of Tab")}}) {
+        QAction *act = groupMenu->addAction(text);
+        act->setCheckable(true);
+        act->setData(key);
+        groupBy->addAction(act);
+        connect(act, &QAction::triggered, this, [this, key]() { m_settings.setSidebarGroupBy(key); });
+    }
+    const auto syncGroupCheck = [this, groupBy]() {
+        for (QAction *act : groupBy->actions())
+            act->setChecked(act->data().toString() == m_settings.appearance().sidebarGroupBy);
+    };
+    syncGroupCheck();
+    connect(&m_settings, &Settings::appearanceChanged, this, syncGroupCheck);
 
     /*
      * Toolbar.
@@ -2409,6 +2431,7 @@ void MainWindow::updateTabLayout()
         m_settings.appearance().tabLayout == QStringLiteral("thumbnails");
 
     m_sidebar->setCompact(m_settings.appearance().sidebarCompact);
+    m_sidebar->setGrouped(!m_settings.appearance().sidebarGroupBy.isEmpty());
     m_sidebar->setVisible(thumbs);
     // In thumbnail mode the cards carry the titles, so the strip is noise.
     m_tabStrip->setVisible(!thumbs);
@@ -2461,8 +2484,90 @@ void MainWindow::refreshPreviews(bool all)
     }
 }
 
+void MainWindow::updateCardGroup(int index)
+{
+    const QString by = m_settings.appearance().sidebarGroupBy;
+    Tab *page = pageAt(index);
+    if (by.isEmpty() || !page) {
+        m_sidebar->setGroup(index, QString(), QString(), QString());
+        return;
+    }
+    const QString thisComputer = tr("This computer");
+    const QString localIcon = QStringLiteral("connections/terminal-tab-icon");
+    // A host's group, for an address: this computer's for its own names.
+    const auto hostGroup = [&](const QString &host, const QString &icon) {
+        const QString h = host.trimmed().toLower();
+        if (h.isEmpty() || h == QLatin1String("localhost") || h == QLatin1String("127.0.0.1") || h == QLatin1String("::1")
+            || h == QSysInfo::machineHostName().toLower())
+            m_sidebar->setGroup(index, QStringLiteral("host:"), thisComputer, localIcon);
+        else
+            m_sidebar->setGroup(index, QStringLiteral("host:") + h, host.trimmed(), icon);
+    };
+    const QString icon = tabIconName(page);
+
+    if (auto *vnc = qobject_cast<VncTab *>(page)) {
+        const bool rdp = vnc->view()->client()->scheme() == QLatin1String("rdp");
+        if (by == QLatin1String("kind"))
+            m_sidebar->setGroup(index, QStringLiteral("kind:") + (rdp ? QStringLiteral("rdp") : QStringLiteral("vnc")),
+                                rdp ? tr("Remote desktops (RDP)") : tr("Remote desktops (VNC)"), icon);
+        else if (by == QLatin1String("session"))
+            m_sidebar->setGroup(index, QStringLiteral("session:remote:") + vnc->address(), vnc->address(), icon);
+        else
+            hostGroup(vnc->address().section(QLatin1Char(':'), 0, 0), icon);
+        return;
+    }
+#ifdef PUDDLEJUMPER_WEB
+    if (auto *web = qobject_cast<WebTab *>(page)) {
+        const QString host = web->url().host();
+        if (by == QLatin1String("kind"))
+            m_sidebar->setGroup(index, QStringLiteral("kind:web"), tr("Web"), icon);
+        else if (by == QLatin1String("session"))
+            m_sidebar->setGroup(index, QStringLiteral("session:web:") + host, host.isEmpty() ? tr("Web") : host, icon);
+        else
+            hostGroup(host, icon);
+        return;
+    }
+#endif
+    auto *tab = qobject_cast<TerminalTab *>(page);
+    if (!tab)
+        return;
+#ifdef PUDDLEJUMPER_REX
+    if (auto *rex = rexSessionFor(tab)) {
+        const QUrl server = rex->server();
+        if (by == QLatin1String("kind"))
+            m_sidebar->setGroup(index, QStringLiteral("kind:rex"), tr("Rex"), icon);
+        else if (by == QLatin1String("session"))
+            m_sidebar->setGroup(index, QStringLiteral("session:rex:") + server.toString() + QLatin1Char('|') + rex->label(),
+                                rex->label(), icon);
+        else
+            hostGroup(rexaddress::isUnix(server) ? QString() : server.host(), QStringLiteral("server"));
+        return;
+    }
+#endif
+    if (auto *session = tmuxSessionFor(tab)) {
+        // A session over ssh is labelled "host: name".
+        const QString label = session->label();
+        const QString host = label.contains(QStringLiteral(": ")) ? label.section(QStringLiteral(": "), 0, 0) : QString();
+        if (by == QLatin1String("kind"))
+            m_sidebar->setGroup(index, QStringLiteral("kind:tmux"), tr("tmux"), icon);
+        else if (by == QLatin1String("session"))
+            m_sidebar->setGroup(index, QStringLiteral("session:tmux:") + label, label, icon);
+        else
+            hostGroup(host, QStringLiteral("server"));
+        return;
+    }
+    // A local tab.
+    if (by == QLatin1String("kind"))
+        m_sidebar->setGroup(index, QStringLiteral("kind:local"), tr("Local"), icon);
+    else if (by == QLatin1String("session"))
+        m_sidebar->setGroup(index, QStringLiteral("session:local"), tr("Local"), icon);
+    else
+        hostGroup(QString(), icon);
+}
+
 void MainWindow::updateCardDetails(int index)
 {
+    updateCardGroup(index);
     // The pill says where a tab is (the icon says what it is): the host,
     // or the tmux or Rex session. Local tabs have none.
     if (auto *vnc = qobject_cast<VncTab *>(pageAt(index))) {
@@ -2612,6 +2717,10 @@ void MainWindow::showTabMenu(int index, const QPoint &globalPos)
         menu.addSeparator();
     }
     menu.addAction(appIcon("plus"), tr("&New Tab"), this, &MainWindow::newTab);
+    if (m_groupMenu && m_settings.appearance().tabLayout == QStringLiteral("thumbnails")) {
+        menu.addSeparator();
+        menu.addMenu(m_groupMenu);
+    }
     menu.exec(globalPos);
 }
 

@@ -25,6 +25,7 @@ constexpr auto kDrawLineChars = "appearance/drawLineChars";
 constexpr auto kLineSpacing = "appearance/lineSpacing";
 constexpr auto kTabLayout   = "appearance/tabLayout";
 constexpr auto kSidebarCompact = "appearance/sidebarCompact";
+constexpr auto kSidebarGroupBy = "appearance/sidebarGroupBy";
 constexpr auto kOpacity        = "appearance/opacity";
 constexpr auto kCursorShape    = "appearance/cursorShape";
 constexpr auto kTerminalMargin = "appearance/terminalMargin";
@@ -112,6 +113,10 @@ void Settings::load()
         m_settings.value(kTabLayout, m_appearance.tabLayout).toString();
     m_appearance.sidebarCompact =
         m_settings.value(kSidebarCompact, m_appearance.sidebarCompact).toBool();
+    m_appearance.sidebarGroupBy = m_settings.value(kSidebarGroupBy).toString();
+    if (!QStringList{QString(), QStringLiteral("session"), QStringLiteral("host"), QStringLiteral("kind")}
+             .contains(m_appearance.sidebarGroupBy))
+        m_appearance.sidebarGroupBy.clear();
     m_appearance.cursorShape =
         m_settings.value(kCursorShape, m_appearance.cursorShape).toInt();
     m_appearance.terminalMargin =
@@ -322,6 +327,15 @@ void Settings::setSidebarCompact(bool v)
     if (m_appearance.sidebarCompact == v) return;
     m_appearance.sidebarCompact = v;
     m_settings.setValue(kSidebarCompact, v);
+    m_settings.sync();
+    emit appearanceChanged();
+}
+
+void Settings::setSidebarGroupBy(const QString &v)
+{
+    if (m_appearance.sidebarGroupBy == v) return;
+    m_appearance.sidebarGroupBy = v;
+    m_settings.setValue(kSidebarGroupBy, v);
     m_settings.sync();
     emit appearanceChanged();
 }

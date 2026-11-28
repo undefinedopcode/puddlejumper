@@ -294,6 +294,14 @@ haven't seen.
   appears on hover, closes it. Right-click for **Rename…**, **Close Tab**,
   **Close Other Tabs** and **New Tab**. **New Tab** is also at the foot of the
   list.
+- **View > Group Sidebar By** (also on the sidebar's right-click menu, and
+  in settings as *Group cards by*) puts the cards under a header per **session**
+  (each tmux or Rex session, local tabs together, a remote desktop or web host
+  each), per **host** (this computer, or the machine a tmux, Rex, VNC, RDP or
+  web tab is on), or per **kind of tab**. Groups come in the order of their
+  first tab and the tab order itself doesn't change; a card dragged within its
+  group moves its tab. Click a header to collapse its group. The headers are
+  left out while every tab is in one group.
 - **File > Rename Tab…** names a tab in either layout. Leave it empty to follow
   the terminal's title again; on a tmux tab it renames the tmux window.
 - **The sidebar's width** is set by dragging its edge and is remembered; cards
