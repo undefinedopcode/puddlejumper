@@ -700,6 +700,19 @@ int main(int argc, char *argv[])
     // server is told (it was left at the old size).
     {
         TerminalWidget *pane = c.panes().value(0);
+        // The grid settled first: a resize the server dropped is asked for
+        // again shortly after (RexSession::checkSize), and a size read
+        // before that isn't the one the pane comes back to.
+        QSize last = screenSize(pane);
+        QElapsedTimer still;
+        still.start();
+        waitFor([&] {
+            if (screenSize(pane) != last) {
+                last = screenSize(pane);
+                still.restart();
+            }
+            return still.elapsed() > 800;
+        });
         const QSize before = screenSize(pane);
         const qreal size = settings.appearance().fontSize;
         settings.setFontSize(size + 4);
