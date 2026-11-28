@@ -521,6 +521,40 @@ if(TARGET Qt6::WebSockets)
     target_link_libraries(test-rexclient PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets qtermwidget)
     target_include_directories(test-rexclient PRIVATE src-widgets)
 
+    # probe-osc6522 — how large an OSC 6522 sequence gets through a running
+    # Rex-compatible server unchanged, out of a block and into it (route A of
+    # puddle as Rex blocks). A report, not a test. Dev tool only.
+    # Run: ./build/probe-osc6522 unix:///run/user/1000/rex/server.sock
+    qt_add_executable(probe-osc6522
+        src-widgets/dev/probe_osc6522.cpp
+        src-widgets/rexclient.cpp src-widgets/rexclient.h
+        src-widgets/rexsocket.cpp src-widgets/rexsocket.h
+        src-widgets/rexterminalstream.cpp src-widgets/rexterminalstream.h
+        src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
+        src-widgets/ghosttyreplay.cpp src-widgets/ghosttyreplay.h
+    )
+    target_link_libraries(probe-osc6522 PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets qtermwidget)
+    target_include_directories(probe-osc6522 PRIVATE src-widgets)
+    target_compile_definitions(probe-osc6522 PRIVATE
+        PJ_OSC6522_HELPER="${CMAKE_CURRENT_SOURCE_DIR}/src-widgets/dev/osc6522-helper.py")
+
+    # probe-kitty — kitty's graphics protocol through a running Rex-compatible
+    # server: the query, live pictures, and pictures in the snapshot a client
+    # attaches to, on both screens. A report, not a test. Dev tool only.
+    # Run: ./build/probe-kitty unix:///run/user/1000/rex/server.sock
+    qt_add_executable(probe-kitty
+        src-widgets/dev/probe_kitty.cpp
+        src-widgets/rexclient.cpp src-widgets/rexclient.h
+        src-widgets/rexsocket.cpp src-widgets/rexsocket.h
+        src-widgets/rexterminalstream.cpp src-widgets/rexterminalstream.h
+        src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
+        src-widgets/ghosttyreplay.cpp src-widgets/ghosttyreplay.h
+    )
+    target_link_libraries(probe-kitty PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::WebSockets qtermwidget)
+    target_include_directories(probe-kitty PRIVATE src-widgets)
+    target_compile_definitions(probe-kitty PRIVATE
+        PJ_KITTY_HELPER="${CMAKE_CURRENT_SOURCE_DIR}/src-widgets/dev/kitty-helper.py")
+
     # test-rexfilecopy — copying files with a Rex server's fs block: the tar
     # offline, then up and down against a server on this machine.
     # Run: ./build/test-rexfilecopy [http://127.0.0.1:PORT | unix:///path]
