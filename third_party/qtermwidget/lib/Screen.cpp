@@ -1139,6 +1139,12 @@ void Screen::clearEntireScreen()
     _graphics.screenCleared(lines);
 }
 
+void Screen::eraseEntireScreen()
+{
+    clearImage(loc(0,0),loc(columns-1,lines-1),' ');
+    _graphics.screenCleared(lines);
+}
+
 /*! fill screen with 'E'
   This is to aid screen alignment
   */

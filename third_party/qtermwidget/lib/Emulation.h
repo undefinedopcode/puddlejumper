@@ -296,6 +296,14 @@ public:
   void setClipboardWrites(bool on) { _clipboardWrites = on; }
   bool clipboardWrites() const { return _clipboardWrites; }
   /**
+   * puddlejumper: whether erasing the whole screen (CSI 2 J) first moves its
+   * lines into the history, as Konsole does (and tmux, scroll-on-clear). Off
+   * for a terminal that mirrors one that doesn't, Ghostty's (a Rex server):
+   * there CSI 2 J only erases, and the history must stay the server's.
+   */
+  void setClearToHistory(bool on) { _clearToHistory = on; }
+  bool clearToHistory() const { return _clearToHistory; }
+  /**
    * puddlejumper: a cell's size in device pixels, the unit images are
    * measured in (kitty's graphics protocol, and the CSI 14 t and 16 t size
    * reports). Set by the session from its view.
@@ -556,6 +564,7 @@ private:
   bool _answerQueries = true;   // puddlejumper
   bool _answerProgramStatusQuery = true;   // puddlejumper
   bool _clipboardWrites = true;   // puddlejumper
+  bool _clearToHistory = true;   // puddlejumper
   QSize _cellPixelSize;   // puddlejumper
   QTimer _bulkTimer1{this};
   QTimer _bulkTimer2{this};

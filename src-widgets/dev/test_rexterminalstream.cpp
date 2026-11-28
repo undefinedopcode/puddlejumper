@@ -249,6 +249,56 @@ void testEndToEnd(quint64 nonce, const QByteArray &stream, const QByteArray &ser
     check(same, QStringLiteral("the client's terminal matches the server's"));
 }
 
+// Rex's terminal.clear, as it sends it (Rex 0.1.0-snapshot.2705): the
+// lines above the cursor's deleted, so its line (the prompt) moves to the
+// top and the cursor with it, then the history erased.
+void testRexClear()
+{
+    QtermProbe term(50, 12);
+    QByteArray fill;
+    for (int i = 1; i <= 30; ++i)
+        fill += QByteArray::number(i) + "\r\n";
+    fill += "sh$ ";
+    term.feed(fill);
+    Konsole::Screen *s = term.showing();
+    const int row = s->getCursorY();  // 11: the last
+    term.feed("\x1b" "7\x1b[H\x1b[" + QByteArray::number(row) + "M\x1b" "8\x1b[" + QByteArray::number(row) + "A\x1b[3J");
+    auto shown = [s] {
+        QStringList l = QtermProbeLines::screenLines(s);
+        while (!l.isEmpty() && l.last().isEmpty())
+            l.removeLast();
+        return l;
+    };
+    const QStringList lines = shown();
+    check(lines == QStringList{QStringLiteral("sh$")} && s->getCursorY() == 0 && s->getCursorX() == 4
+              && s->getHistLines() == 0,
+          QStringLiteral("Rex's clear: the prompt at the top, the cursor after it, no history (%1; cursor %2,%3; history %4)")
+              .arg(lines.join(QLatin1Char('|'))).arg(s->getCursorX()).arg(s->getCursorY()).arg(s->getHistLines()));
+    term.feed("x");
+    check(shown() == QStringList{QStringLiteral("sh$ x")}, QStringLiteral("and typing goes on there"));
+
+    // At a shell prompt Rex erases the screen and history, and types ^L:
+    // the shell erases the screen again and draws its prompt. Ghostty's CSI
+    // 2 J leaves the history be; Konsole's moves the screen into it first.
+    QtermProbe rex(50, 12), konsole(50, 12);
+    rex.setClearToHistory(false);
+    for (QtermProbe *t : {&rex, &konsole}) {
+        t->feed(fill);
+        t->feed("\x1b[2J\x1b[3J");
+        t->feed("\x1b[H\x1b[2J\x1b]133;A\x07$ \x1b]133;B\x07");
+    }
+    check(rex.showing()->getHistLines() == 0 && QtermProbeLines::screenLines(rex.showing()).value(0) == QLatin1String("$"),
+          QStringLiteral("a Rex pane: the prompt at the top, no history (%1)").arg(rex.showing()->getHistLines()));
+    check(konsole.showing()->getHistLines() == 11, QStringLiteral("elsewhere, CSI 2 J still moves the screen into the history (%1)")
+                                                    .arg(konsole.showing()->getHistLines()));
+    // Some lines, then CSI 2 J: erased, not kept, as Rex's text shows.
+    QtermProbe few(40, 10);
+    few.setClearToHistory(false);
+    few.feed("1\r\n2\r\n3\r\n\x1b[H\x1b[2J$ ");
+    check(few.showing()->getHistLines() == 0 && QtermProbeLines::screenLines(few.showing()).value(0) == QLatin1String("$"),
+          QStringLiteral("a Rex pane: CSI 2 J erases, keeping nothing"));
+}
+
 } // namespace
 
 int main(int argc, char *argv[])
@@ -264,6 +314,7 @@ int main(int argc, char *argv[])
     testWelcome(welcome, &nonce);
     testPieces(nonce, stream);
     testSynthetic();
+    testRexClear();
     testEndToEnd(nonce, stream, text);
 
     QTextStream(stdout) << checks << " checks, " << failures << " failed\n";

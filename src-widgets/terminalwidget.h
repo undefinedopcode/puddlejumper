@@ -267,6 +267,10 @@ public:
     /* The source decodes programs' clipboard writes itself (a Rex server, with
      * clipboard_written events): the emulator leaves them, and doesn't answer. */
     void setSourceHandlesClipboard(bool handles);
+    /* The source's terminal is Ghostty's (a Rex server), where erasing the
+     * whole screen leaves the history alone; Konsole's (and tmux's) move the
+     * screen into it first. The pane's history must stay the source's. */
+    void setSourceClearsWithoutHistory(bool on);
     /* A program here wrote the clipboard by the source's say-so: as if the
      * emulator had (clipboardWritten). */
     void reportClipboardWrite(bool primary, qint64 characters, const QStringList &types)

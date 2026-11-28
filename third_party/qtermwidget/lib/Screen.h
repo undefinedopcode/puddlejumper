@@ -255,6 +255,9 @@ public:
 
     /** Clear the whole screen, moving the current screen contents into the history first. */
     void clearEntireScreen();
+    /** puddlejumper: erase the whole screen, its lines not moved into the
+     * history first (xterm's and Ghostty's CSI 2 J). */
+    void eraseEntireScreen();
     /**
      * Clear the area of the screen from the current cursor position to the end of
      * the screen.

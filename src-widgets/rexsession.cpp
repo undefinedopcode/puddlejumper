@@ -796,6 +796,7 @@ TerminalWidget *RexSession::makePane(Block *b)
     // The server decodes programs' clipboard writes (clipboard_written) and
     // answers them.
     pane->setSourceHandlesClipboard(true);
+    pane->setSourceClearsWithoutHistory(true);
     pane->applyAppearance();
     pane->applyScrolling();
     const QString id = b->id;

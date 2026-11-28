@@ -353,10 +353,13 @@ void keymapTests(Server &server, Client &c, Settings &settings)
     check(km.action(QStringLiteral("com.superlogical.terminal.clear")) != nullptr, QStringLiteral("block actions listed"));
     check(!km.action(QStringLiteral("client.tab.new")), QStringLiteral("the client's own actions aren't"));
 
-    // A block action, and one there is none of.
+    // A block action, and one there is none of. Rex's clear keeps the
+    // cursor's line, moved to the top; the pane follows it.
+    agrees(server, c, QStringLiteral("before the clear"));
     s->runAction(QStringLiteral("com.superlogical.terminal.clear"), {}, c.tabs.value(0)->activePane(), QStringLiteral("api"));
     check(waitFor([&] { return finished.contains(QStringLiteral("com.superlogical.terminal.clear")); }),
           QStringLiteral("a block action ran"));
+    agrees(server, c, QStringLiteral("cleared"));
     s->runAction(QStringLiteral("no.such.action"), {}, nullptr, QStringLiteral("api"));
     check(waitFor([&] { return failed.contains(QStringLiteral("no.such.action")); }), QStringLiteral("an unknown action fails"));
 

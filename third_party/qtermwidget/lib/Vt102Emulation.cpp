@@ -835,7 +835,9 @@ void Vt102Emulation::processToken(int token, char32_t p, int q)
     case TY_CSI_PS('K',   2) : _currentScreen->clearEntireLine      (          ); break;
     case TY_CSI_PS('J',   0) : _currentScreen->clearToEndOfScreen   (          ); break;
     case TY_CSI_PS('J',   1) : _currentScreen->clearToBeginOfScreen (          ); break;
-    case TY_CSI_PS('J',   2) : _currentScreen->clearEntireScreen    (          ); break;
+    case TY_CSI_PS('J',   2) : if (clearToHistory()) _currentScreen->clearEntireScreen(); // puddlejumper
+                               else _currentScreen->eraseEntireScreen();
+                               break;
     case TY_CSI_PS('J',      3) : clearHistory();                            break;
     case TY_CSI_PS('g',   0) : _currentScreen->changeTabStop        (false     ); break; //VT100
     case TY_CSI_PS('g',   3) : _currentScreen->clearTabStops        (          ); break; //VT100

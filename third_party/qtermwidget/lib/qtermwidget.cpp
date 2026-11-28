@@ -298,6 +298,11 @@ void QTermWidget::setClipboardWrites(bool on)
     m_impl->m_session->emulation()->setClipboardWrites(on);
 }
 
+void QTermWidget::setClearToHistory(bool on)
+{
+    m_impl->m_session->emulation()->setClearToHistory(on);
+}
+
 void QTermWidget::setAnswerProgramStatusQuery(bool answer)
 {
     m_impl->m_session->emulation()->setAnswerProgramStatusQuery(answer);

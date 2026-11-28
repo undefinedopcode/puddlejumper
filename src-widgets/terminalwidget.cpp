@@ -871,6 +871,12 @@ void TerminalWidget::setSourceHandlesClipboard(bool handles)
         m_terminal->setClipboardWrites(!handles);
 }
 
+void TerminalWidget::setSourceClearsWithoutHistory(bool on)
+{
+    if (m_terminal)
+        m_terminal->setClearToHistory(!on);
+}
+
 void TerminalWidget::setSourceAnswersProgramStatus(bool answers)
 {
     if (isExternal())

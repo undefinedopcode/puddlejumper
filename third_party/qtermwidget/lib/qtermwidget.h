@@ -84,6 +84,9 @@ public:
     void setAnswerProgramStatusQuery(bool answer);
     // puddlejumper: whether programs' clipboard writes (OSC 52, 5522) land here.
     void setClipboardWrites(bool on);
+    // puddlejumper: whether CSI 2 J moves the screen into the history first
+    // (see Emulation::setClearToHistory()).
+    void setClearToHistory(bool on);
 
     /**
      * puddlejumper: a picture of the screen (its visible lines, not scrollback),
