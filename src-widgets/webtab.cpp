@@ -5,6 +5,7 @@
  */
 
 #include "webtab.h"
+#include "uiprompt.h"
 
 #include "appicon.h"
 
@@ -13,7 +14,6 @@
 #include <QHBoxLayout>
 #include <QHostAddress>
 #include <QLineEdit>
-#include <QMessageBox>
 #include <QPainter>
 #include <QSplitter>
 #include <QTimer>
@@ -144,20 +144,15 @@ WebTab::WebTab(const QUrl &url, QWidget *parent)
     connect(m_view->page(), &QWebEnginePage::certificateError, this,
             [this](QWebEngineCertificateError error) {
         error.defer();
-        auto *box = new QMessageBox(QMessageBox::Warning, tr("Certificate"),
-                                    tr("The certificate of %1 can't be trusted:\n%2\n\n"
-                                       "Open the page anyway?")
-                                        .arg(error.url().host(), error.description()),
-                                    QMessageBox::Yes | QMessageBox::No, this);
-        box->setDefaultButton(QMessageBox::No);
-        box->setAttribute(Qt::WA_DeleteOnClose);
-        connect(box, &QMessageBox::finished, this, [box, error]() mutable {
-            if (box->clickedButton() == box->button(QMessageBox::Yes))
-                error.acceptCertificate();
-            else
-                error.rejectCertificate();
-        });
-        box->open();
+        uiprompt::chooseLater(this, tr("Open the page anyway?"),
+                              tr("The certificate of %1 can't be trusted: %2")
+                                  .arg(error.url().host(), error.description()),
+                              {{tr("Open Anyway"), true}}, -1, QString(), [error](int choice) mutable {
+                                  if (choice == 0)
+                                      error.acceptCertificate();
+                                  else
+                                      error.rejectCertificate();
+                              });
     });
 
     // Pages change without loading (a hot reload, a single-page app): the

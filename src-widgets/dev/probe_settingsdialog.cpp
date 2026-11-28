@@ -10,6 +10,14 @@
 #include "../settingsdialog.h"
 #include "../settings.h"
 #include "../serverstore.h"
+#include "../uiprompt.h"
+#include "../rexprompt.h"
+
+#include <QDialog>
+#include <QDialogButtonBox>
+#include <QFormLayout>
+#include <QLineEdit>
+#include <QJsonObject>
 
 #include <QStandardPaths>
 
@@ -28,7 +36,8 @@ int main(int argc, char *argv[])
     // entries, to look at (test-mode settings, the real ones left alone).
     // probe-settingsdialog terminal OUT.png: the Terminal page (its Rex
     // group among them).
-    if (argc > 2 && (QByteArray(argv[1]) == "servers" || QByteArray(argv[1]) == "terminal"))
+    if (argc > 2 && (QByteArray(argv[1]) == "servers" || QByteArray(argv[1]) == "terminal"
+                     || QByteArray(argv[1]) == "page"))
         QStandardPaths::setTestModeEnabled(true);
     QApplication app(argc, argv);
 
@@ -43,6 +52,78 @@ int main(int argc, char *argv[])
             app.processEvents();
         dlg.grab().save(QString::fromLocal8Bit(argv[2]));
         settings.setRexScriptsFile(QString());
+        return 0;
+    }
+
+    // probe-settingsdialog prompts PREFIX: the app's own small dialogs
+    // (uiprompt.h), PREFIX-choose.png and PREFIX-text.png.
+    if (argc > 2 && QByteArray(argv[1]) == "prompts") {
+        QWidget window;
+        window.resize(900, 600);
+        window.show();
+        QDialog *choose = uiprompt::chooseLater(
+            &window, QStringLiteral("Close Workspace?"),
+            QStringLiteral("Programs are still running in workspace “dev”. Closing it will terminate them."),
+            {{QStringLiteral("Close Workspace"), true}}, -1, QStringLiteral("micro (notes.md)\nssh buildbox"),
+            [](int) {});
+        for (int i = 0; i < 5; ++i)
+            app.processEvents();
+        choose->grab().save(QString::fromLocal8Bit(argv[2]) + QStringLiteral("-choose.png"));
+        choose->reject();
+        RexPrompt text(QJsonObject{{QStringLiteral("kind"), QStringLiteral("input")},
+                                   {QStringLiteral("title"), QStringLiteral("New tmux Session")},
+                                   {QStringLiteral("placeholder"), QStringLiteral("Session name")},
+                                   {QStringLiteral("value"), QStringLiteral("work")},
+                                   {QStringLiteral("confirm"), QStringLiteral("OK")}},
+                       &window);
+        text.open();
+        for (int i = 0; i < 5; ++i)
+            app.processEvents();
+        text.grab().save(QString::fromLocal8Bit(argv[2]) + QStringLiteral("-text.png"));
+        text.reject();
+        // A small form, framed (as Connect to tmux on a Host is).
+        QDialog form(&window);
+        form.setWindowTitle(QStringLiteral("Connect to tmux on a Host"));
+        auto *rows = new QFormLayout(&form);
+        auto *host = new QLineEdit(&form);
+        host->setPlaceholderText(QStringLiteral("user@host"));
+        rows->addRow(QStringLiteral("Host"), host);
+        rows->addRow(QStringLiteral("Session"), new QLineEdit(QStringLiteral("main"), &form));
+        auto *hint = new QLabel(QStringLiteral("Connects with ssh, which must log in without a password prompt "
+                                               "(a key or an agent). The session is created if it doesn't exist."),
+                                &form);
+        hint->setWordWrap(true);
+        rows->addRow(hint);
+        rows->addRow(new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &form));
+        uiprompt::frame(&form);
+        form.open();
+        for (int i = 0; i < 5; ++i)
+            app.processEvents();
+        form.grab().save(QString::fromLocal8Bit(argv[2]) + QStringLiteral("-form.png"));
+        return 0;
+    }
+
+    // probe-settingsdialog page N OUT.png [WIDTH HEIGHT]: page N (0 Appearance,
+    // 1 Colours, 2 Terminal, 3 Tabs & Window, 4 Profiles, 5 Servers) at the dialog's
+    // own size, or the size given (test-mode settings).
+    if (argc > 3 && QByteArray(argv[1]) == "page") {
+        Settings settings;
+        ProfileStore profiles;
+        ServerStore servers;
+        SettingsDialog dlg(settings, profiles, nullptr, &servers);
+        if (qEnvironmentVariableIsSet("PROBE_HINTS"))
+            std::fprintf(stderr, "constructed at %dx%d\n", dlg.width(), dlg.height());
+        if (argc > 5)
+            dlg.resize(QByteArray(argv[4]).toInt(), QByteArray(argv[5]).toInt());
+        dlg.showSection(SettingsDialog::Section(QByteArray(argv[2]).toInt()));
+        for (int i = 0; i < 5; ++i)
+            app.processEvents();
+        dlg.grab().save(QString::fromLocal8Bit(argv[3]));
+        if (qEnvironmentVariableIsSet("PROBE_HINTS"))
+            for (QLabel *l : dlg.findChildren<QLabel *>())
+                if (l->wordWrap() && l->isVisible())
+                    std::fprintf(stderr, "%3dx%3d hfw=%d sh=%d %s\n", l->width(), l->height(),
+                                 l->heightForWidth(l->width()), l->sizeHint().height(), qPrintable(l->text().left(30)));
         return 0;
     }
 

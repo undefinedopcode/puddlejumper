@@ -57,6 +57,7 @@ qt_add_executable(puddlejumper
     src-widgets/mainwindow.cpp
     src-widgets/rexactions.cpp
     src-widgets/rexprompt.cpp src-widgets/rexprompt.h
+    src-widgets/uiprompt.cpp src-widgets/uiprompt.h
     src-widgets/commandpalette.cpp src-widgets/commandpalette.h
     src-widgets/palette.cpp src-widgets/palette.h
     src-widgets/mainwindow.h
@@ -67,6 +68,7 @@ qt_add_executable(puddlejumper
     src-widgets/programresume.cpp src-widgets/programresume.h
     src-widgets/resumerules.cpp src-widgets/resumerules.h
     src-widgets/settingsdialog.cpp
+    src-widgets/schemegallery.cpp
     src-widgets/settingsdialog.h
     src-widgets/tab.h
     src-widgets/terminaltab.cpp
@@ -257,11 +259,16 @@ qt_add_executable(probe-vnc
     src-widgets/vncclient.cpp src-widgets/vncclient.h
     src-widgets/vncview.cpp src-widgets/vncview.h
     src-widgets/remoteclient.h
+    src-widgets/uiprompt.cpp src-widgets/uiprompt.h
+    src-widgets/rexprompt.cpp src-widgets/rexprompt.h
+    src-widgets/palette.cpp src-widgets/palette.h
+    src-widgets/appicon.cpp src-widgets/appicon.h
 )
 target_link_libraries(probe-vnc PRIVATE
     Qt6::Core
     Qt6::Gui
     Qt6::Widgets
+    Qt6::Svg
     Qt6::Network
     ZLIB::ZLIB
 )
@@ -301,11 +308,15 @@ qt_add_executable(probe-settingsdialog
     src-widgets/dev/probe_settingsdialog.cpp
     src-widgets/appicon.cpp src-widgets/appicon.h
     src-widgets/settingsdialog.cpp src-widgets/settingsdialog.h
+    src-widgets/schemegallery.cpp src-widgets/schemegallery.h
     src-widgets/settings.cpp src-widgets/settings.h
     src-widgets/serverstore.cpp src-widgets/serverstore.h
     src-widgets/profiles.cpp src-widgets/profiles.h
     src-widgets/colorscheme.cpp src-widgets/colorscheme.h
     src-widgets/colorschemeeditor.cpp src-widgets/colorschemeeditor.h
+    src-widgets/uiprompt.cpp src-widgets/uiprompt.h
+    src-widgets/rexprompt.cpp src-widgets/rexprompt.h
+    src-widgets/palette.cpp src-widgets/palette.h
 )
 target_link_libraries(probe-settingsdialog PRIVATE
     Qt6::Core

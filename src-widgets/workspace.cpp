@@ -5,6 +5,7 @@
  */
 
 #include "workspace.h"
+#include "uiprompt.h"
 
 #include "appicon.h"
 
@@ -150,4 +151,5 @@ WorkspaceDialog::WorkspaceDialog(const QString &title, const Workspace &ws, QWid
     connect(m_name, &QLineEdit::textChanged, this, update);
     update();
     m_name->setFocus();
+    uiprompt::frame(this);
 }

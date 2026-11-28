@@ -5,6 +5,10 @@
  */
 
 #include "settingsdialog.h"
+#include "uiprompt.h"
+#include "schemegallery.h"
+#include "rowdelegate.h"
+#include "cardstyle.h"
 
 #include "appicon.h"
 #include "colorscheme.h"
@@ -25,9 +29,9 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QResizeEvent>
 #include <QLineEdit>
 #include <QListWidget>
-#include <QMessageBox>
 #include <QPixmap>
 #include <QSlider>
 #include <QSpinBox>
@@ -69,9 +73,43 @@ QStringList monoFamilies()
  * label in a QFormLayout reserves height for wrapping it doesn't need,
  * leaving a gap above and below.
  */
+/* A wrapped label as tall as its lines at the width it has. QLabel asks
+ * for the height it would wrap to at a narrower width of its own choosing,
+ * and the form layouts take that: a short hint got blank lines round it. */
+class HintLabel : public QLabel
+{
+public:
+    using QLabel::QLabel;
+
+    QSize sizeHint() const override { return fitted(QLabel::sizeHint()); }
+    QSize minimumSizeHint() const override { return fitted(QLabel::minimumSizeHint()); }
+
+protected:
+    void resizeEvent(QResizeEvent *event) override
+    {
+        QLabel::resizeEvent(event);
+        if (heightForWidth(width()) != m_height)
+            updateGeometry();
+    }
+
+private:
+    QSize fitted(QSize size) const
+    {
+        // Its own width once it's laid out on screen. Before that its width
+        // is Qt's 100px stand-in, and the lines at that width made the
+        // dialog as tall as the screen: guess at the field column's width.
+        const int w = isVisible() && width() > 0 ? width() : 440;
+        m_height = heightForWidth(w);
+        size.setHeight(m_height);
+        return size;
+    }
+
+    mutable int m_height = -1;
+};
+
 QLabel *makeHint(const QString &text, QWidget *parent)
 {
-    auto *hint = new QLabel(text, parent);
+    auto *hint = new HintLabel(text, parent);
     QPalette pal = hint->palette();
     const QColor fg = pal.color(QPalette::WindowText);
     const QColor bg = pal.color(QPalette::Window);
@@ -80,6 +118,8 @@ QLabel *makeHint(const QString &text, QWidget *parent)
                                               mix(fg.green(), bg.green()),
                                               mix(fg.blue(), bg.blue())));
     hint->setPalette(pal);
+    // Wrapped, so a long hint takes lines rather than widening the dialog.
+    hint->setWordWrap(true);
     return hint;
 }
 
@@ -90,6 +130,9 @@ Box *makeSpinBox(QWidget *parent)
 {
     auto *box = new Box(parent);
     box->setKeyboardTracking(false);
+    // A number needs little room: not the whole row.
+    box->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+    box->setMinimumWidth(120);
     return box;
 }
 
@@ -128,13 +171,15 @@ SettingsDialog::SettingsDialog(Settings &settings, ProfileStore &profiles,
     m_sections->setFixedWidth(180);
     m_sections->setFrameShape(QFrame::NoFrame);
     m_sections->setIconSize(QSize(22, 22));
-    m_sections->setSpacing(2);
+    m_sections->setSpacing(1);
+    RowDelegate::install(m_sections);
     const auto addSection = [this](const QString &text, const QIcon &icon) {
         auto *item = new QListWidgetItem(icon, text, m_sections);
         item->setSizeHint(QSize(0, 34));
     };
-    addSection(tr("Appearance"), appIcon("palette"));
-    addSection(tr("Terminal"), appIcon("square-terminal"));
+    addSection(tr("Appearance"), appIcon("square-terminal"));
+    addSection(tr("Colours"), appIcon("palette"));
+    addSection(tr("Terminal"), appIcon("settings"));
     addSection(tr("Tabs & Window"), appIcon("app-window"));
     addSection(tr("Profiles"), appIcon("users"));
     if (m_servers)
@@ -154,6 +199,7 @@ SettingsDialog::SettingsDialog(Settings &settings, ProfileStore &profiles,
 
     m_pages = new QStackedWidget(this);
     m_pages->addWidget(buildAppearancePage());
+    m_pages->addWidget(buildColoursPage());
     m_pages->addWidget(buildTerminalPage());
     m_pages->addWidget(buildWindowPage());
     m_pages->addWidget(buildProfilesPage());
@@ -190,7 +236,9 @@ SettingsDialog::SettingsDialog(Settings &settings, ProfileStore &profiles,
                               + (height() - m_pages->height());  // + title, footer
     if (height() < contentHeight)
         resize(width(), contentHeight);
-    resize(qMax(width(), 640), height());
+    // Wide enough for the colour cards four across, and no wider than a
+    // laptop's screen wants.
+    resize(qBound(820, width(), 980), height());
 }
 
 void SettingsDialog::showSection(Section section)
@@ -247,54 +295,6 @@ QWidget *SettingsDialog::buildAppearancePage()
     layout->setContentsMargins(0, 0, 0, 0);
     layout->setSpacing(12);
 
-    // ---- colours -----------------------------------------------------------
-    QFormLayout *colours = addGroup(layout, tr("Colours"));
-
-    m_schemeBox = new QComboBox(page);
-    // allSchemeNames() rather than the raw list: it includes the user's saved
-    // schemes, which qtermwidget's cached list does not.
-    m_schemeBox->addItems(ColorSchemeFile::allSchemeNames());
-    connect(m_schemeBox, &QComboBox::currentTextChanged, this, [this](const QString &v) {
-        m_settings.setColorScheme(v);
-    });
-
-    auto *schemeRow = new QWidget(page);
-    auto *schemeLayout = new QHBoxLayout(schemeRow);
-    schemeLayout->setContentsMargins(0, 0, 0, 0);
-    schemeLayout->setSpacing(6);
-    schemeLayout->addWidget(m_schemeBox, 1);
-    m_editSchemeBtn = new QToolButton(schemeRow);
-    m_editSchemeBtn->setText(tr("&Edit…"));
-    m_editSchemeBtn->setIcon(appIcon("pencil"));
-    m_editSchemeBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
-    m_editSchemeBtn->setToolTip(tr("Edit this scheme's colours"));
-    schemeLayout->addWidget(m_editSchemeBtn);
-    colours->addRow(tr("Colour scheme"), schemeRow);
-    colours->addRow(QString(), makeHint(tr("Your own schemes are edited in place; "
-                                           "built-in ones are copied first."), page));
-    connect(m_editSchemeBtn, &QToolButton::clicked, this,
-            &SettingsDialog::editColorScheme);
-
-    // Background opacity, 30-100% so the text can never vanish entirely.
-    auto *opRow = new QWidget(page);
-    auto *opLayout = new QHBoxLayout(opRow);
-    opLayout->setContentsMargins(0, 0, 0, 0);
-    m_opacitySlider = new QSlider(Qt::Horizontal, opRow);
-    m_opacitySlider->setRange(30, 100);
-    m_opacitySlider->setSingleStep(5);
-    m_opacitySlider->setPageStep(10);
-    m_opacityLabel = new QLabel(opRow);
-    m_opacityLabel->setMinimumWidth(m_opacityLabel->fontMetrics().horizontalAdvance(
-        QStringLiteral("100%")) + 4);
-    m_opacityLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    opLayout->addWidget(m_opacitySlider, 1);
-    opLayout->addWidget(m_opacityLabel);
-    connect(m_opacitySlider, &QSlider::valueChanged, this, [this](int pct) {
-        m_opacityLabel->setText(tr("%1%").arg(pct));
-        m_settings.setOpacity(pct / 100.0);
-    });
-    colours->addRow(tr("Background opacity"), opRow);
-
     // ---- font --------------------------------------------------------------
     QFormLayout *font = addGroup(layout, tr("Font"));
 
@@ -333,7 +333,6 @@ QWidget *SettingsDialog::buildAppearancePage()
     connect(m_marginBox, &QSpinBox::valueChanged, this, [this](int v) {
         m_settings.setTerminalMargin(v);
     });
-    font->addRow(tr("Margin"), m_marginBox);
 
     // ---- rendering -----------------------------------------------------------
     QFormLayout *rendering = addGroup(layout, tr("Rendering"));
@@ -368,13 +367,16 @@ QWidget *SettingsDialog::buildAppearancePage()
     });
     rendering->addRow(tr("Direction"), m_bidiBox);
 
+    // ---- panes -------------------------------------------------------------
+    QFormLayout *panes = addGroup(layout, tr("Panes"));
+    panes->addRow(tr("Margin"), m_marginBox);
+
     m_paneCardsBox = new QCheckBox(tr("Pane cards (experimental)"), page);
     m_paneCardsBox->setToolTip(tr("Draw split panes as floating panes are: a rounded, faint frame "
                                   "with a small title strip"));
     connect(m_paneCardsBox, &QCheckBox::toggled, this, [this](bool v) {
         m_settings.setPaneCards(v);
     });
-    rendering->addRow(tr("Panes"), m_paneCardsBox);
 
     m_quietFocusBox = new QCheckBox(tr("Focused pane: a brighter frame, not the accent"), page);
     m_quietFocusBox->setToolTip(tr("Mark the focused pane (tiled or floating) with a brighter "
@@ -382,7 +384,6 @@ QWidget *SettingsDialog::buildAppearancePage()
     connect(m_quietFocusBox, &QCheckBox::toggled, this, [this](bool v) {
         m_settings.setQuietFocus(v);
     });
-    rendering->addRow(QString(), m_quietFocusBox);
 
     m_paddingFollowsAppBox = new QCheckBox(tr("Margin follows a full-screen program's background"), page);
     m_paddingFollowsAppBox->setToolTip(tr("While a full-screen program (an editor, say) paints the "
@@ -391,18 +392,77 @@ QWidget *SettingsDialog::buildAppearancePage()
     connect(m_paddingFollowsAppBox, &QCheckBox::toggled, this, [this](bool v) {
         m_settings.setPaddingFollowsApp(v);
     });
-    rendering->addRow(QString(), m_paddingFollowsAppBox);
 
-    m_paneGapBox = new QSpinBox(page);
+    m_paneGapBox = makeSpinBox<QSpinBox>(page);
     m_paneGapBox->setRange(0, 32);
     m_paneGapBox->setSuffix(tr(" px"));
     m_paneGapBox->setToolTip(tr("The space between split panes, and round the outside of them"));
     connect(m_paneGapBox, &QSpinBox::valueChanged, this, [this](int v) {
         m_settings.setPaneGap(v);
     });
-    rendering->addRow(tr("Gap between panes"), m_paneGapBox);
+
+    panes->addRow(QString(), m_paddingFollowsAppBox);
+    panes->addRow(tr("Gap"), m_paneGapBox);
+    panes->addRow(tr("Cards"), m_paneCardsBox);
+    panes->addRow(QString(), m_quietFocusBox);
 
     layout->addStretch(1);
+    return page;
+}
+
+QWidget *SettingsDialog::buildColoursPage()
+{
+    auto *page = new QWidget(this);
+    auto *layout = new QVBoxLayout(page);
+    layout->setContentsMargins(0, 0, 0, 0);
+    layout->setSpacing(10);
+
+    // Every scheme as a card in its own colours: click one to use it.
+    m_schemeBox = new SchemeGallery(page);
+    // allSchemeNames() rather than the raw list: it includes the user's saved
+    // schemes, which qtermwidget's cached list does not.
+    m_schemeBox->setSchemes(ColorSchemeFile::allSchemeNames());
+    connect(m_schemeBox, &SchemeGallery::chosen, this, [this](const QString &v) {
+        m_settings.setColorScheme(v);
+    });
+    connect(m_schemeBox, &QAbstractItemView::doubleClicked, this, &SettingsDialog::editColorScheme);
+    layout->addWidget(m_schemeBox, 1);
+
+    auto *editRow = new QHBoxLayout;
+    editRow->setSpacing(8);
+    editRow->addWidget(makeHint(tr("System follows the desktop's colours. Your own schemes are edited in "
+                                   "place; built-in ones are copied first."), page), 1);
+    m_editSchemeBtn = new QToolButton(page);
+    m_editSchemeBtn->setText(tr("&Edit…"));
+    m_editSchemeBtn->setIcon(appIcon("pencil"));
+    m_editSchemeBtn->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
+    m_editSchemeBtn->setToolTip(tr("Edit this scheme's colours"));
+    editRow->addWidget(m_editSchemeBtn, 0, Qt::AlignTop);
+    connect(m_editSchemeBtn, &QToolButton::clicked, this, &SettingsDialog::editColorScheme);
+    layout->addLayout(editRow);
+
+    QFormLayout *background = addGroup(layout, tr("Background"));
+    // Background opacity, 30-100% so the text can never vanish entirely.
+    auto *opRow = new QWidget(page);
+    auto *opLayout = new QHBoxLayout(opRow);
+    opLayout->setContentsMargins(0, 0, 0, 0);
+    m_opacitySlider = new QSlider(Qt::Horizontal, opRow);
+    m_opacitySlider->setRange(30, 100);
+    m_opacitySlider->setSingleStep(5);
+    m_opacitySlider->setPageStep(10);
+    m_opacityLabel = new QLabel(opRow);
+    m_opacityLabel->setMinimumWidth(m_opacityLabel->fontMetrics().horizontalAdvance(
+        QStringLiteral("100%")) + 4);
+    m_opacityLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+    opLayout->addWidget(m_opacitySlider, 1);
+    opLayout->addWidget(m_opacityLabel);
+    connect(m_opacitySlider, &QSlider::valueChanged, this, [this](int pct) {
+        m_opacityLabel->setText(tr("%1%").arg(pct));
+        m_settings.setOpacity(pct / 100.0);
+    });
+    background->addRow(tr("Background opacity"), opRow);
+
+
     return page;
 }
 
@@ -417,6 +477,7 @@ QWidget *SettingsDialog::buildTerminalPage()
     QFormLayout *cursor = addGroup(layout, tr("Cursor"));
 
     m_cursorShapeBox = new QComboBox(page);
+    m_cursorShapeBox->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     m_cursorShapeBox->addItem(tr("Block"),     QStringLiteral("0"));
     m_cursorShapeBox->addItem(tr("Underline"), QStringLiteral("1"));
     m_cursorShapeBox->addItem(tr("I-beam"),    QStringLiteral("2"));
@@ -446,6 +507,7 @@ QWidget *SettingsDialog::buildTerminalPage()
     scroll->addRow(tr("Keep"), m_scrollbackBox);
 
     m_scrollbarPosBox = new QComboBox(page);
+    m_scrollbarPosBox->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     m_scrollbarPosBox->addItem(tr("Hidden"), QStringLiteral("none"));
     m_scrollbarPosBox->addItem(tr("Left"),   QStringLiteral("left"));
     m_scrollbarPosBox->addItem(tr("Right"),  QStringLiteral("right"));
@@ -530,6 +592,7 @@ QWidget *SettingsDialog::buildWindowPage()
     QFormLayout *tabs = addGroup(layout, tr("Tabs"));
 
     m_tabLayoutBox = new QComboBox(page);
+    m_tabLayoutBox->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     m_tabLayoutBox->addItem(tr("Tabs along the top"), QStringLiteral("standard"));
     m_tabLayoutBox->addItem(tr("Thumbnail sidebar"), QStringLiteral("thumbnails"));
     connect(m_tabLayoutBox, &QComboBox::currentIndexChanged, this, [this](int i) {
@@ -638,6 +701,7 @@ QWidget *SettingsDialog::buildProfilesPage()
     left->setSpacing(4);
 
     m_profileList = new QListWidget(page);
+    RowDelegate::install(m_profileList);
     m_profileList->setFixedWidth(190);
     m_profileList->setIconSize(QSize(16, 16));
     m_profileList->setFrameShape(QFrame::StyledPanel);
@@ -821,12 +885,8 @@ QWidget *SettingsDialog::buildProfilesPage()
         // refuses it too.
         if (id.isEmpty() || id == m_profiles.defaultProfile().id)
             return;
-        const auto answer = QMessageBox::question(
-            this, tr("Delete Profile"),
-            tr("Delete “%1”?\n\nTabs already open with it keep their settings.")
-                .arg(m_profiles.profileById(id).name),
-            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
-        if (answer != QMessageBox::Yes)
+        if (!uiprompt::confirm(this, tr("Delete “%1”?").arg(m_profiles.profileById(id).name),
+                               tr("Tabs already open with it keep their settings."), tr("Delete"), true))
             return;
         m_profiles.remove(id);
         rebuildProfileList();
@@ -992,7 +1052,7 @@ void SettingsDialog::commitProfileForm()
 
 void SettingsDialog::editColorScheme()
 {
-    const QString seed = m_schemeBox->currentText();
+    const QString seed = m_schemeBox->current();
     ColorSchemeEditor editor(seed, this);
     if (editor.exec() != QDialog::Accepted)
         return;
@@ -1059,9 +1119,7 @@ void SettingsDialog::reloadSchemeBox(const QString &selectName)
     // Rebuild rather than append: the order should be stable, and a
     // deleted/renamed scheme must not linger. allSchemeNames() merges the
     // user's saved schemes, which the cached library list omits.
-    const QSignalBlocker block(m_schemeBox);
-    m_schemeBox->clear();
-    m_schemeBox->addItems(ColorSchemeFile::allSchemeNames());
+    m_schemeBox->setSchemes(ColorSchemeFile::allSchemeNames());
 
     // Prefer the requested scheme; fall back to whatever is currently active.
     QString target = selectName;
@@ -1076,9 +1134,7 @@ void SettingsDialog::reloadSchemeBox(const QString &selectName)
     if (target.contains(QLatin1Char('/')))
         target = QFileInfo(target).baseName();
 
-    const int index = m_schemeBox->findText(target, Qt::MatchFixedString);
-    if (index >= 0)
-        m_schemeBox->setCurrentIndex(index);
+    m_schemeBox->setCurrent(target);
 
     // The profile form lists the same schemes, so it needs the new one too.
     reloadProfileSchemeBox();
@@ -1119,7 +1175,12 @@ void SettingsDialog::syncFromSettings()
     // These setters fire the change handlers, which write back to Settings.
     // Writing back the value Settings already holds is a no-op, so the round
     // trip is harmless.
-    m_schemeBox->setCurrentText(a.colorScheme);
+    {
+        QString scheme = a.colorScheme;
+        if (m_settings.isLiveScheme(scheme))
+            scheme = m_settings.liveSchemeRealName();
+        m_schemeBox->setCurrent(scheme);
+    }
     const int pct = qRound(a.opacity * 100);
     m_opacitySlider->setValue(pct);
     m_opacityLabel->setText(tr("%1%").arg(pct));
@@ -1202,6 +1263,7 @@ QWidget *SettingsDialog::buildServersPage()
     m_serverList = new QListWidget(page);
     m_serverList->setFixedWidth(190);
     m_serverList->setIconSize(QSize(16, 16));
+    RowDelegate::install(m_serverList);
     m_serverList->setFrameShape(QFrame::StyledPanel);
     left->addWidget(m_serverList, 1);
 
@@ -1237,6 +1299,7 @@ QWidget *SettingsDialog::buildServersPage()
     m_serverForm->setVerticalSpacing(8);
 
     m_serverKind = new QComboBox(m_serverFormBox);
+    m_serverKind->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
     for (SavedServer::Kind k : {SavedServer::Rex, SavedServer::Tmux, SavedServer::Vnc, SavedServer::Rdp,
                                 SavedServer::Web})
         m_serverKind->addItem(serverIcon(k), SavedServer::kindName(k), int(k));
@@ -1265,6 +1328,18 @@ QWidget *SettingsDialog::buildServersPage()
     m_serverForm->addRow(tr("Quality"), m_serverAdaptive);
 
     right->addWidget(m_serverFormBox);
+    // In the form's place while no server is chosen (or there are none).
+    m_serverEmpty = new QLabel(page);
+    m_serverEmpty->setAlignment(Qt::AlignCenter);
+    m_serverEmpty->setWordWrap(true);
+    m_serverEmpty->setMinimumHeight(140);
+    {
+        QPalette quiet = m_serverEmpty->palette();
+        quiet.setColor(QPalette::WindowText, cardstyle::mix(quiet.color(QPalette::Window),
+                                                            quiet.color(QPalette::WindowText), 0.6));
+        m_serverEmpty->setPalette(quiet);
+    }
+    right->addWidget(m_serverEmpty);
     right->addWidget(makeHint(tr("Saved servers are in the Servers menu. Passwords are never "
                                  "saved: remote desktops ask when they connect."), page));
     right->addStretch(1);
@@ -1335,6 +1410,8 @@ void SettingsDialog::rebuildServerList(const QString &selectId)
     if (select >= 0) {
         m_serverList->setCurrentRow(select);
         loadServerIntoForm(selectId);
+    } else {
+        loadServerIntoForm(QString());
     }
 }
 
@@ -1344,6 +1421,11 @@ void SettingsDialog::loadServerIntoForm(const QString &id)
     const SavedServer s = m_servers->server(id);
     const bool have = !id.isEmpty() && s.id == id;
     m_serverFormBox->setEnabled(have);
+    m_serverFormBox->setVisible(have);
+    m_serverEmpty->setVisible(!have);
+    m_serverEmpty->setText(m_serverList->count() == 0
+                               ? tr("No saved servers yet.\nAdd one with + to open it from the Servers menu.")
+                               : tr("Choose a server to change it."));
     m_serverRemove->setEnabled(have);
     m_serverUp->setEnabled(have && m_serverList->currentRow() > 0);
     m_serverDown->setEnabled(have && m_serverList->currentRow() < m_serverList->count() - 1);

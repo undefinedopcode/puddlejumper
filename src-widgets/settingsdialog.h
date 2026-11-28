@@ -14,6 +14,7 @@ class ProfileStore;
 class QListWidget;
 class QStackedWidget;
 class QComboBox;
+class SchemeGallery;
 class QFormLayout;
 class QSlider;
 class QSpinBox;
@@ -49,13 +50,14 @@ public:
     SettingsDialog(Settings &settings, ProfileStore &profiles,
                    QWidget *parent = nullptr, ServerStore *servers = nullptr);
 
-    enum Section { Appearance = 0, Terminal, Window, Profiles, Servers };
+    enum Section { Appearance = 0, Colours, Terminal, Window, Profiles, Servers };
 
     /* Open on a specific page. */
     void showSection(Section section);
 
 private:
     QWidget *buildAppearancePage();
+    QWidget *buildColoursPage();
     QWidget *buildTerminalPage();
     QWidget *buildWindowPage();
     QWidget *buildProfilesPage();
@@ -114,6 +116,7 @@ private:
 
     // Servers page.
     QListWidget *m_serverList = nullptr;
+    QLabel *m_serverEmpty = nullptr;
     QGroupBox *m_serverFormBox = nullptr;
     QFormLayout *m_serverForm = nullptr;
     QComboBox *m_serverKind = nullptr;
@@ -134,7 +137,7 @@ private:
     QList<QFormLayout *> m_forms;
 
     // Appearance.
-    QComboBox *m_schemeBox = nullptr;
+    SchemeGallery *m_schemeBox = nullptr;
     QToolButton *m_editSchemeBtn = nullptr;
     QSlider *m_opacitySlider = nullptr;
     QLabel *m_opacityLabel = nullptr;

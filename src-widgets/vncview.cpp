@@ -5,6 +5,10 @@
  */
 
 #include "vncview.h"
+#include "uiprompt.h"
+
+#include <QDialog>
+#include <QPointer>
 
 #include "formername.h"
 #include "vncclient.h"
@@ -16,7 +20,6 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
-#include <QMessageBox>
 #include <QPainter>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -313,23 +316,18 @@ VncView::VncView(QWidget *parent, RemoteClient *client)
                  "been renewed, or something may be intercepting the connection.").arg(m_address)
             : tr("%1 identifies itself with a certificate that can't be verified, as is usual "
                  "for a Windows machine's own.").arg(m_address);
-        auto *box = new QMessageBox(QMessageBox::Warning, tr("Remote Desktop"),
-                                    what + QStringLiteral("<br><br>")
-                                        + tr("Name: %1<br>SHA-256 fingerprint:<br><tt>%2</tt>")
-                                              .arg(name.toHtmlEscaped(), fingerprint)
-                                        + QStringLiteral("<br><br>")
-                                        + tr("Trust it, and remember it for this address?"),
-                                    QMessageBox::NoButton, this);
-        box->setAttribute(Qt::WA_DeleteOnClose);
-        QPushButton *trust = box->addButton(tr("Trust"), QMessageBox::AcceptRole);
-        trust->setObjectName(QStringLiteral("trust"));
-        box->setDefaultButton(box->addButton(QMessageBox::Cancel));
-        connect(box, &QMessageBox::finished, this, [this, box, trust]() {
-            m_client->answerCertificate(box->clickedButton() == trust);
-        });
+        QDialog *box = uiprompt::chooseLater(
+            this, tr("Trust this certificate?"),
+            what + QStringLiteral("<br><br>")
+                + tr("Name: %1<br>SHA-256 fingerprint:<br><tt>%2</tt>").arg(name.toHtmlEscaped(), fingerprint)
+                + QStringLiteral("<br><br>") + tr("Trust it, and remember it for this address?"),
+            {{tr("Trust"), false, QStringLiteral("trust")}}, -1, QString(),
+            [client = QPointer<RemoteClient>(m_client)](int choice) {
+                if (client)
+                    client->answerCertificate(choice == 0);
+            });
         // Gone with the connection, if that ends first.
         connect(m_client, &RemoteClient::disconnected, box, &QDialog::reject);
-        box->open();
     });
     connect(m_client, &RemoteClient::connected, this, [this]() {
         m_loginError.clear();

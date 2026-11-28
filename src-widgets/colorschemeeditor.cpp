@@ -5,6 +5,7 @@
  */
 
 #include "colorschemeeditor.h"
+#include "uiprompt.h"
 
 #include <QColorDialog>
 #include <QDialogButtonBox>
@@ -15,7 +16,6 @@
 #include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
-#include <QMessageBox>
 #include <QPainter>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -319,14 +319,14 @@ void ColorSchemeEditor::save()
 {
     const QString name = m_nameEdit->text().trimmed();
     if (name.isEmpty()) {
-        QMessageBox::warning(this, tr("Name required"),
+        uiprompt::message(this, tr("Name required"),
                              tr("Give the scheme a name before saving."));
         return;
     }
     // A name is also a filename, so keep it to characters that travel well.
     static const QRegularExpression invalid(QStringLiteral(R"([/\\:*?"<>|])"));
     if (invalid.match(name).hasMatch()) {
-        QMessageBox::warning(this, tr("Invalid name"),
+        uiprompt::message(this, tr("Invalid name"),
                              tr("A scheme name cannot contain / \\ : * ? \" < > |"));
         return;
     }
@@ -345,18 +345,15 @@ void ColorSchemeEditor::save()
     const bool wasAlreadyThisScheme = m_editingOwnScheme
                                       && name == m_originalName;
     if (QFile::exists(path) && !wasAlreadyThisScheme) {
-        const auto answer = QMessageBox::question(
-            this, tr("Replace existing scheme?"),
-            tr("A scheme called “%1” already exists. Replace it?").arg(name),
-            QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel);
-        if (answer != QMessageBox::Yes)
+        if (!uiprompt::confirm(this, tr("Replace existing scheme?"),
+                               tr("A scheme called “%1” already exists. Replace it?").arg(name), tr("Replace"), true))
             return;
     }
 
     const bool existed = QFile::exists(path);
 
     if (!m_scheme.save(path)) {
-        QMessageBox::critical(this, tr("Could not save"),
+        uiprompt::message(this, tr("Could not save"),
                               tr("Could not write %1.").arg(path));
         return;
     }

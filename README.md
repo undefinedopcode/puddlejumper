@@ -368,7 +368,9 @@ you can change.
 
 ## Colour scheme editor
 
-**Settings → Appearance → Colour scheme → Edit…** opens an editor with a live
+**Settings → Colours** shows every scheme as a card in its own colours (its
+background, a line of text, and its sixteen colours); click one to use it.
+**Edit…** (or a double-click on a card) opens an editor with a live
 preview and all 20 colours a Konsole-format scheme defines:
 
 | Group | Roles |
@@ -481,7 +483,7 @@ Every field is independent, and an unset field **inherits the global setting**:
 
 | Field left at *Inherit* | Follows |
 | --- | --- |
-| Colour scheme | the Appearance page |
+| Colour scheme | the Colours page |
 | Font / font size | the Appearance page |
 | Shell program | the login shell (`$SHELL`) |
 | Shell arguments | none |

@@ -29,7 +29,7 @@
 #include <QAbstractButton>
 #include <QClipboard>
 #include <QFocusEvent>
-#include <QMessageBox>
+#include <QDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QHash>
@@ -207,7 +207,7 @@ int main(int argc, char *argv[])
         std::printf("certificate: name=\"%s\" sha256=%s changed=%d\n", qPrintable(name),
                     qPrintable(fingerprint), changed);
         QTimer::singleShot(100, &view, [&]() {
-            auto *box = view.findChild<QMessageBox *>();
+            auto *box = view.findChild<QDialog *>();
             if (!box)
                 return;
             box->grab().save(prefix + QStringLiteral("-certificate.png"));

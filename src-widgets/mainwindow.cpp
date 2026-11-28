@@ -6,6 +6,7 @@
 
 #include "mainwindow.h"
 #include "colorscheme.h"
+#include "uiprompt.h"
 
 #include "aboutdialog.h"
 #include "appicon.h"
@@ -52,7 +53,6 @@
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QFormLayout>
-#include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -70,7 +70,6 @@
 #include <QListWidget>
 #include <QMenu>
 #include <QMenuBar>
-#include <QMessageBox>
 #include <QPushButton>
 #include <QPainter>
 #include <QSplitter>
@@ -573,9 +572,9 @@ void MainWindow::buildMenus()
         const QString last = settings.value(QStringLiteral("vnc/lastAddress"),
                                             QStringLiteral("localhost:5900")).toString();
         bool ok = false;
-        const QString text = QInputDialog::getText(this, tr("New VNC Tab"),
-                                                   tr("Address (host, host:port or host:display):"),
-                                                   QLineEdit::Normal, last, &ok);
+        const QString text = uiprompt::text(this, tr("New VNC Tab"),
+                                                   tr("host, host:port or host:display"),
+                                                   last, &ok);
         if (!ok)
             return;
         settings.setValue(QStringLiteral("vnc/lastAddress"), text.trimmed());
@@ -592,9 +591,9 @@ void MainWindow::buildMenus()
         QSettings settings;
         const QString last = settings.value(QStringLiteral("rdp/lastAddress")).toString();
         bool ok = false;
-        const QString text = QInputDialog::getText(this, tr("New RDP Tab"),
-                                                   tr("Address (host or host:port):"),
-                                                   QLineEdit::Normal, last, &ok);
+        const QString text = uiprompt::text(this, tr("New RDP Tab"),
+                                                   tr("host or host:port"),
+                                                   last, &ok);
         if (!ok || text.trimmed().isEmpty())
             return;
         settings.setValue(QStringLiteral("rdp/lastAddress"), text.trimmed());
@@ -608,13 +607,13 @@ void MainWindow::buildMenus()
         const QString last = settings.value(QStringLiteral("web/lastAddress"),
                                             QStringLiteral("localhost:3000")).toString();
         bool ok = false;
-        const QString text = QInputDialog::getText(this, tr("New Web Tab"), tr("Address:"),
-                                                   QLineEdit::Normal, last, &ok);
+        const QString text = uiprompt::text(this, tr("New Web Tab"), tr("Address"),
+                                                   last, &ok);
         if (!ok || text.trimmed().isEmpty())
             return;
         const QUrl url = WebTab::urlFromInput(text);
         if (!url.isValid()) {
-            QMessageBox::warning(this, tr("New Web Tab"), tr("“%1” isn't an address.").arg(text));
+            uiprompt::message(this, tr("New Web Tab"), tr("“%1” isn't an address.").arg(text));
             return;
         }
         settings.setValue(QStringLiteral("web/lastAddress"), text.trimmed());
@@ -1157,7 +1156,7 @@ void MainWindow::saveScreenshot()
     if (QFileInfo(path).suffix().isEmpty())
         path += QStringLiteral(".png");
     if (!m_lastScreenshot.save(path)) {
-        QMessageBox::warning(this, tr("Save Screenshot"),
+        uiprompt::message(this, tr("Save Screenshot"),
                              tr("Could not save the screenshot to %1.").arg(path));
         m_screenshotNoticeTimer->start();
         return;
@@ -1301,7 +1300,7 @@ void MainWindow::openVnc(const QString &address, const QString &user, bool reduc
     QString host;
     quint16 port;
     if (!VncView::parseAddress(address, &host, &port)) {
-        QMessageBox::warning(this, tr("New VNC Tab"), tr("“%1” isn't an address.").arg(address));
+        uiprompt::message(this, tr("New VNC Tab"), tr("“%1” isn't an address.").arg(address));
         return;
     }
     auto *tab = new VncTab(host, port, reducedColour);
@@ -1320,7 +1319,7 @@ void MainWindow::openRdp(const QString &address, const QString &user)
     QString host;
     quint16 port;
     if (!RdpClient::parseAddress(address, &host, &port)) {
-        QMessageBox::warning(this, tr("New RDP Tab"), tr("“%1” isn't an address.").arg(address));
+        uiprompt::message(this, tr("New RDP Tab"), tr("“%1” isn't an address.").arg(address));
         return;
     }
     auto *tab = new VncTab(host, port, false, nullptr, new RdpClient);
@@ -1331,7 +1330,7 @@ void MainWindow::openRdp(const QString &address, const QString &user)
     syncTabText(tab);
     tab->focusContent();
 #else
-    QMessageBox::warning(this, tr("New RDP Tab"),
+    uiprompt::message(this, tr("New RDP Tab"),
                          tr("This build has no RDP support (%1).").arg(address));
 #endif
 }
@@ -1345,7 +1344,7 @@ void MainWindow::openWeb(const QUrl &url)
     syncTabText(tab);
     tab->focusContent();
 #else
-    QMessageBox::warning(this, tr("New Web Tab"),
+    uiprompt::message(this, tr("New Web Tab"),
                          tr("This build has no web tabs (%1).").arg(url.toDisplayString()));
 #endif
 }
@@ -1872,8 +1871,8 @@ void MainWindow::newTmuxSession()
         suggestion = QStringLiteral("main%1").arg(n);
 
     bool ok = false;
-    const QString name = QInputDialog::getText(this, tr("New tmux Session"), tr("Session name:"),
-                                               QLineEdit::Normal, suggestion, &ok).trimmed();
+    const QString name = uiprompt::text(this, tr("New tmux Session"), tr("Session name"),
+                                               suggestion, &ok).trimmed();
     if (!ok || name.isEmpty())
         return;
     // -A: if it exists after all, attach to it.
@@ -1902,6 +1901,7 @@ void MainWindow::connectTmuxHost()
     form->addRow(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    uiprompt::frame(&dialog);
     if (dialog.exec() != QDialog::Accepted)
         return;
 
@@ -1992,18 +1992,18 @@ void MainWindow::rebuildServersMenu()
             if (!session)
                 return;
             bool ok = false;
-            const QString name = QInputDialog::getText(this, tr("Rename Rex Session"), tr("Session name:"),
-                                                       QLineEdit::Normal, session->label(), &ok).trimmed();
+            const QString name = uiprompt::text(this, tr("Rename Rex Session"), tr("Session name"),
+                                                       session->label(), &ok).trimmed();
             if (ok && !name.isEmpty() && session)
                 session->renameSession(name);
         });
         m_serversMenu->addAction(tr("&End Rex Session “%1”…").arg(rex->label()), this, [this, session]() {
             if (!session)
                 return;
-            if (QMessageBox::question(this, tr("End Rex Session?"),
-                                      tr("End Rex session “%1”? Its programs are stopped on %2.")
-                                          .arg(session->label(), rexaddress::displayName(session->server())))
-                    == QMessageBox::Yes
+            if (uiprompt::confirm(this, tr("End Rex Session?"),
+                                  tr("End Rex session “%1”? Its programs are stopped on %2.")
+                                      .arg(session->label(), rexaddress::displayName(session->server())),
+                                  tr("End Session"), true)
                 && session)
                 session->destroySession();
         });
@@ -2116,7 +2116,7 @@ void MainWindow::attachTmux(const QString &label, const QStringList &command,
         rebuildTmuxMenu();
         if (!*shownAny) {
             ensureTab();   // its workspace may have been waiting for it
-            QMessageBox::warning(this, tr("tmux"),
+            uiprompt::message(this, tr("tmux"),
                                  tr("Could not attach to tmux session “%1”.").arg(session->label())
                                      + (reason.isEmpty() ? QString() : QStringLiteral("\n\n") + reason));
             return;
@@ -2229,14 +2229,14 @@ void MainWindow::newRexTab()
     const QString last = settings.value(QStringLiteral("rex/lastServer"),
                                         QStringLiteral("http://127.0.0.1:51433")).toString();
     bool ok = false;
-    QString text = QInputDialog::getText(this, tr("New Rex Tab"),
-                                         tr("Rex server (http://host:port, or unix: for this computer's):"),
-                                         QLineEdit::Normal, last, &ok).trimmed();
+    QString text = uiprompt::text(this, tr("New Rex Tab"),
+                                         tr("http://host:port, or unix: for this computer's"),
+                                         last, &ok).trimmed();
     if (!ok || text.isEmpty())
         return;
     const QUrl server = rexaddress::parse(text);
     if (!server.isValid()) {
-        QMessageBox::warning(this, tr("Rex"), tr("“%1” is not a server address.").arg(text));
+        uiprompt::message(this, tr("Rex"), tr("“%1” is not a server address.").arg(text));
         return;
     }
     settings.setValue(QStringLiteral("rex/lastServer"), text);
@@ -2253,7 +2253,7 @@ void MainWindow::chooseRexSession(const QUrl &server)
             return;
         self->statusBar()->clearMessage();
         if (!error.isEmpty()) {
-            QMessageBox::warning(self, tr("Rex"),
+            uiprompt::message(self, tr("Rex"),
                                  tr("Could not connect to %1.").arg(rexaddress::displayName(server))
                                      + QStringLiteral("\n\n") + error);
             return;
@@ -2263,10 +2263,9 @@ void MainWindow::chooseRexSession(const QUrl &server)
             items << tr("%1 (%2)").arg(s.second, s.first.section(QLatin1Char(':'), -1).left(8));
         bool chosen = false;
         const QString named = self->m_servers.rexServer(server.toString()).name;
-        const QString item = QInputDialog::getItem(self, tr("New Rex Tab"),
-                                                   tr("Session on %1:").arg(named.isEmpty() ? rexaddress::displayName(server)
-                                                                                            : named),
-                                                   items, sessions.isEmpty() ? 0 : 1, false, &chosen);
+        const QString item = uiprompt::pick(self, tr("New Rex Tab: a session on %1").arg(named.isEmpty() ? rexaddress::displayName(server)
+                                                                                                         : named),
+                                            items, &chosen);
         if (!chosen)
             return;
         const int i = int(items.indexOf(item));
@@ -2332,7 +2331,7 @@ void MainWindow::openRex(const QUrl &server, const QString &sessionId, const QSt
                 qCInfo(lcTmux) << "Rex session" << session->sessionId() << "not restored:" << reason;
                 return;
             }
-            QMessageBox::warning(this, tr("Rex"),
+            uiprompt::message(this, tr("Rex"),
                                  tr("Could not open a Rex session on %1.").arg(rexaddress::displayName(session->server()))
                                      + (reason.isEmpty() ? QString() : QStringLiteral("\n\n") + reason));
             return;
@@ -2353,21 +2352,15 @@ bool MainWindow::confirmRexClose(RexSession *session, TerminalTab *tab, bool pan
         return true;
     if (pane && session->hasExited(tab->activePane()))
         return true;
-    QMessageBox box(QMessageBox::Question, tr("Close Rex Session?"),
-                    tr("“%1” is the last window of Rex session “%2”. Closing it ends the session.")
-                        .arg(session->windowName(tab), session->label()),
-                    QMessageBox::NoButton, this);
-    box.setInformativeText(tr("Detach to keep the session running on %1, so you can attach to it "
-                              "again from here or any Rex client.")
-                               .arg(rexaddress::displayName(session->server())));
-    QPushButton *detach = box.addButton(tr("&Detach"), QMessageBox::AcceptRole);
-    QPushButton *end = box.addButton(tr("&End Session"), QMessageBox::DestructiveRole);
-    box.addButton(QMessageBox::Cancel);
-    box.setDefaultButton(detach);
-    box.exec();
-    if (box.clickedButton() == detach)
+    const int choice = uiprompt::choose(
+        this, tr("Close Rex Session?"),
+        tr("“%1” is the last window of Rex session “%2”. Closing it ends the session. Detach to keep it "
+           "running on %3, so you can attach to it again from here or any Rex client.")
+            .arg(session->windowName(tab), session->label(), rexaddress::displayName(session->server())),
+        {{tr("End Session"), true}, {tr("Detach")}}, 1);
+    if (choice == 1)
         session->detach();
-    return box.clickedButton() == end;
+    return choice == 0;
 }
 #endif
 
@@ -2379,24 +2372,18 @@ bool MainWindow::confirmTmuxClose(TmuxSession *session, TerminalTab *tab)
     if (session->tabs().size() != 1 || !tab || tab->panes().size() != 1)
         return true;
 
-    QMessageBox box(QMessageBox::Question, tr("Close tmux Session?"),
-                    tr("“%1” is the last window of tmux session “%2”. Closing it "
-                       "ends the session.")
-                        .arg(session->windowName(tab), session->label()),
-                    QMessageBox::NoButton, this);
-    box.setInformativeText(tr("Detach to keep the session running, so you can attach "
-                              "to it again from the tmux menu."));
-    QPushButton *detach = box.addButton(tr("&Detach"), QMessageBox::AcceptRole);
-    QPushButton *end = box.addButton(tr("&End Session"), QMessageBox::DestructiveRole);
-    box.addButton(QMessageBox::Cancel);
-    box.setDefaultButton(detach);
-    box.exec();
+    const int choice = uiprompt::choose(
+        this, tr("Close tmux Session?"),
+        tr("“%1” is the last window of tmux session “%2”. Closing it ends the session. Detach to keep "
+           "it running, so you can attach to it again from the tmux menu.")
+            .arg(session->windowName(tab), session->label()),
+        {{tr("End Session"), true}, {tr("Detach")}}, 1);
     qCInfo(lcTmux) << "closing last window of" << session->label() << "->"
-                   << (box.clickedButton() ? box.clickedButton()->text() : QString());
+                   << (choice == 0 ? "end" : choice == 1 ? "detach" : "cancel");
 
-    if (box.clickedButton() == detach)
+    if (choice == 1)
         session->detach();
-    return box.clickedButton() == end;
+    return choice == 0;
 }
 
 void MainWindow::applyAppearanceToAll()
@@ -2636,15 +2623,14 @@ void MainWindow::renameTab(int index)
     auto *session = tmuxSessionFor(tab);
     auto *terminal = qobject_cast<TerminalTab *>(tab);
     bool ok = false;
-    const QString name = QInputDialog::getText(
+    const QString name = uiprompt::text(
         this, tr("Rename Tab"),
-        session    ? tr("tmux window name:")
+        session    ? tr("tmux window name")
 #ifdef PUDDLEJUMPER_REX
-        : rexSessionFor(tab) ? tr("Rex window name:")
+        : rexSessionFor(tab) ? tr("Rex window name")
 #endif
-        : terminal ? tr("Tab name (leave empty to follow the terminal's title):")
-                   : tr("Tab name (leave empty to follow the remote desktop's name):"),
-        QLineEdit::Normal,
+        : terminal ? tr("Empty: follow the terminal's title")
+                   : tr("Empty: follow the remote desktop's name"),
         session ? session->windowName(terminal)
                 : (tab->customTitle().isEmpty() ? m_tabs->tabText(index) : tab->customTitle()),
         &ok).trimmed();
@@ -3101,10 +3087,6 @@ bool MainWindow::confirmQuitIfBusy()
     if (busy.isEmpty())
         return true;
 
-    QMessageBox box(this);
-    box.setIcon(QMessageBox::Warning);
-    box.setWindowTitle(tr("Quit PuddleJumper?"));
-
     // Name the programs where possible: "Quitting will terminate micro, ssh"
     // is far more useful than a bare count.
     QStringList names;
@@ -3117,27 +3099,14 @@ bool MainWindow::confirmQuitIfBusy()
         names << label;
     }
 
-    if (busy.size() == 1) {
-        box.setText(tr("A program is still running in one terminal."));
-        box.setInformativeText(
-            tr("Quitting will terminate %1. Any unsaved work will be lost.")
-                .arg(names.first()));
-    } else {
-        box.setText(tr("Programs are still running in %1 terminals.")
-                        .arg(busy.size()));
-        box.setInformativeText(
-            tr("Quitting will terminate:\n\n%1\n\nAny unsaved work will be lost.")
-                .arg(names.join(QLatin1Char('\n'))));
-    }
-
-    QPushButton *quitBtn = box.addButton(tr("&Quit Anyway"),
-                                         QMessageBox::DestructiveRole);
-    QPushButton *cancelBtn = box.addButton(tr("&Cancel"), QMessageBox::RejectRole);
-    box.setDefaultButton(cancelBtn);   // safe default: Enter cancels
-    box.setEscapeButton(cancelBtn);
-    box.exec();
-
-    return box.clickedButton() == quitBtn;
+    const QString text = busy.size() == 1
+        ? tr("A program is still running in one terminal: quitting will terminate %1. Any unsaved work "
+             "will be lost.").arg(names.first())
+        : tr("Programs are still running in %1 terminals. Quitting will terminate them, and any unsaved "
+             "work will be lost.").arg(busy.size());
+    // Safe default: Return cancels.
+    return uiprompt::choose(this, tr("Quit PuddleJumper?"), text, {{tr("Quit Anyway"), true}}, -1,
+                            busy.size() == 1 ? QString() : names.join(QLatin1Char('\n'))) == 0;
 }
 
 void MainWindow::refreshProfiles()
@@ -3384,15 +3353,10 @@ void MainWindow::closeWorkspace(int index)
         }
     }
     if (!running.isEmpty() && m_settings.scrolling().confirmCloseWithRunningProcesses) {
-        QMessageBox box(QMessageBox::Warning, tr("Close Workspace?"),
-                        tr("Programs are still running in workspace “%1”.").arg(name),
-                        QMessageBox::NoButton, this);
-        box.setInformativeText(tr("Closing it will terminate:\n\n%1").arg(running.join(QLatin1Char('\n'))));
-        QPushButton *close = box.addButton(tr("&Close Workspace"), QMessageBox::DestructiveRole);
-        QPushButton *cancel = box.addButton(QMessageBox::Cancel);
-        box.setDefaultButton(cancel);
-        box.exec();
-        if (box.clickedButton() != close)
+        if (uiprompt::choose(this, tr("Close Workspace?"),
+                             tr("Programs are still running in workspace “%1”. Closing it will terminate them.")
+                                 .arg(name),
+                             {{tr("Close Workspace"), true}}, -1, running.join(QLatin1Char('\n'))) != 0)
             return;
     }
 
@@ -3401,18 +3365,14 @@ void MainWindow::closeWorkspace(int index)
     const Workspace &closing = m_workspaces.at(index);
     bool stopSessions = false;
     if (!closing.definition.isEmpty() && !sessions.isEmpty()) {
-        QMessageBox box(QMessageBox::Question, tr("Close Workspace"),
-                        tr("Workspace “%1” runs in tmux.").arg(name), QMessageBox::NoButton, this);
-        box.setInformativeText(tr("Detach to keep it running, to open again later; or stop "
-                                  "it, which runs its stop commands and ends the session."));
-        QPushButton *detach = box.addButton(tr("&Detach"), QMessageBox::AcceptRole);
-        QPushButton *stop = box.addButton(tr("&Stop Workspace"), QMessageBox::DestructiveRole);
-        box.addButton(QMessageBox::Cancel);
-        box.setDefaultButton(detach);
-        box.exec();
-        if (box.clickedButton() != detach && box.clickedButton() != stop)
+        const int choice = uiprompt::choose(
+            this, tr("Close Workspace"),
+            tr("Workspace “%1” runs in tmux. Detach to keep it running, to open again later; or stop it, "
+               "which runs its stop commands and ends the session.").arg(name),
+            {{tr("Stop Workspace"), true}, {tr("Detach")}}, 1);
+        if (choice < 0)
             return;
-        stopSessions = box.clickedButton() == stop;
+        stopSessions = choice == 0;
     }
 
     // A workspace file's stop commands, before its programs go (not when
@@ -3424,14 +3384,8 @@ void MainWindow::closeWorkspace(int index)
         if (readWorkspaceFile(closing.definition, variables, spec, false) && !spec.stop.isEmpty()
             && !runSetupCommands(spec.stop, spec.root, spec.environment,
                                  tr("Stopping “%1”").arg(name), &output)) {
-            QMessageBox box(QMessageBox::Warning, tr("Close Workspace"),
-                            tr("A stop command for “%1” failed.").arg(name),
-                            QMessageBox::NoButton, this);
-            box.setDetailedText(output);
-            QPushButton *close = box.addButton(tr("Close &Anyway"), QMessageBox::DestructiveRole);
-            box.addButton(QMessageBox::Cancel);
-            box.exec();
-            if (box.clickedButton() != close)
+            if (uiprompt::choose(this, tr("Close Workspace"), tr("A stop command for “%1” failed.").arg(name),
+                                 {{tr("Close Anyway"), true}}, -1, output) != 0)
                 return;
         }
     }
@@ -3985,7 +3939,7 @@ bool MainWindow::readWorkspaceFile(const QString &path, QHash<QString, QString> 
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly)) {
         if (askForVariables)
-            QMessageBox::warning(this, tr("Open Workspace"),
+            uiprompt::message(this, tr("Open Workspace"),
                                  tr("Couldn't read %1: %2").arg(tildePath(path), file.errorString()));
         return false;
     }
@@ -4016,6 +3970,7 @@ bool MainWindow::readWorkspaceFile(const QString &path, QHash<QString, QString> 
             connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
             connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
             form->addRow(buttons);
+            uiprompt::frame(&dialog);
             if (dialog.exec() != QDialog::Accepted)
                 return false;
             for (int i = 0; i < missing.size(); ++i)
@@ -4026,7 +3981,7 @@ bool MainWindow::readWorkspaceFile(const QString &path, QHash<QString, QString> 
     QString error;
     if (!WorkspaceFile::parse(WorkspaceFile::expand(text, variables), path, spec, &error)) {
         if (askForVariables)
-            QMessageBox::warning(this, tr("Open Workspace"),
+            uiprompt::message(this, tr("Open Workspace"),
                                  tr("%1 isn't a workspace file puddlejumper can read.\n\n%2")
                                      .arg(tildePath(path), error));
         return false;
@@ -4062,18 +4017,10 @@ void MainWindow::openWorkspaceFile(const QString &path)
         QSettings settings;
         const QStringList commands = WorkspaceFile::commands(spec);
         if (!commands.isEmpty() && settings.value(key).toByteArray() != hash) {
-            QMessageBox box(QMessageBox::Warning, tr("Open Workspace"),
-                            tr("Run the commands in “%1”?").arg(tildePath(file)),
-                            QMessageBox::NoButton, this);
-            box.setInformativeText(tr("Opening this workspace runs %n command(s). Only open "
-                                      "files you trust; you'll be asked again if it changes.",
-                                      nullptr, int(commands.size())));
-            box.setDetailedText(commands.join(QLatin1Char('\n')));
-            QPushButton *trust = box.addButton(tr("&Trust and Open"), QMessageBox::AcceptRole);
-            QPushButton *cancel = box.addButton(QMessageBox::Cancel);
-            box.setDefaultButton(cancel);
-            box.exec();
-            if (box.clickedButton() != trust)
+            if (uiprompt::choose(this, tr("Run the commands in “%1”?").arg(tildePath(file)),
+                                 tr("Opening this workspace runs %n command(s). Only open files you trust; "
+                                    "you'll be asked again if it changes.", nullptr, int(commands.size())),
+                                 {{tr("Trust and Open")}}, -1, commands.join(QLatin1Char('\n'))) != 0)
                 return;
             settings.setValue(key, hash);
         }
@@ -4096,11 +4043,8 @@ void MainWindow::openWorkspaceFile(const QString &path)
     if (!tmuxRunning && !spec.beforeStart.isEmpty()
         && !runSetupCommands(spec.beforeStart, spec.root, spec.environment,
                              tr("Starting “%1”").arg(spec.name), &output)) {
-        QMessageBox box(QMessageBox::Warning, tr("Open Workspace"),
-                        tr("“%1” wasn't opened: a before_start command failed.").arg(spec.name),
-                        QMessageBox::Ok, this);
-        box.setDetailedText(output);
-        box.exec();
+        uiprompt::message(this, tr("Open Workspace"),
+                          tr("“%1” wasn't opened: a before_start command failed.").arg(spec.name), output);
         return;
     }
 
@@ -4125,7 +4069,7 @@ void MainWindow::openWorkspaceFile(const QString &path)
                 cells = QSize(qMax(10, area.width() / cell.width()), qMax(3, area.height() / cell.height()));
         }
         if (!tmuxRunning && !TmuxWorkspace::createSession(tmux, spec, cells, &error)) {
-            QMessageBox::warning(this, tr("Open Workspace"),
+            uiprompt::message(this, tr("Open Workspace"),
                                  tr("Couldn't start tmux session “%1”.\n\n%2").arg(spec.name, error));
             return;
         }
@@ -4220,7 +4164,7 @@ void MainWindow::startManualWindow(const QString &name)
                     continue;
                 QString error;
                 if (!TmuxWorkspace::addWindow(tmuxProgram(), spec, win, &error))
-                    QMessageBox::warning(this, tr("Start Window"), error);
+                    uiprompt::message(this, tr("Start Window"), error);
                 return;
             }
         }
@@ -4333,6 +4277,7 @@ void MainWindow::saveWorkspaceAs()
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     layout->addWidget(buttons);
+    uiprompt::frame(&dialog);
     if (dialog.exec() != QDialog::Accepted)
         return;
 
@@ -4343,7 +4288,7 @@ void MainWindow::saveWorkspaceAs()
     QFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)
         || file.write(editor->toPlainText().toUtf8()) < 0) {
-        QMessageBox::warning(this, tr("Save Workspace As"),
+        uiprompt::message(this, tr("Save Workspace As"),
                              tr("Couldn't write %1: %2").arg(tildePath(path), file.errorString()));
         return;
     }
@@ -4470,7 +4415,7 @@ void MainWindow::openWorkspaceTarget(const QString &target)
             return;
         }
     }
-    QMessageBox::warning(this, tr("Open Workspace"),
+    uiprompt::message(this, tr("Open Workspace"),
                          tr("There's no folder, file or workspace called “%1”.\n\n"
                             "Named workspaces are the files in %2.")
                              .arg(target, WorkspaceFile::directories().join(tr(" and "))));
@@ -4535,7 +4480,7 @@ void watchRexCopy(MainWindow *window, RexFileCopy *copy, const QString &what,
             guard->statusBar()->showMessage(MainWindow::tr("Copy cancelled"), 4000);
         } else {
             guard->statusBar()->clearMessage();
-            QMessageBox::warning(guard, MainWindow::tr("Copy Failed"),
+            uiprompt::message(guard, MainWindow::tr("Copy Failed"),
                                  MainWindow::tr("%1\n\nThe copy failed: %2").arg(what, error));
         }
     });
@@ -4561,11 +4506,11 @@ void MainWindow::copyToRex(RexSession *session, TerminalWidget *pane, const QStr
         QString dest = destination;
         if (ask) {
             bool ok = false;
-            dest = QInputDialog::getText(self, tr("Copy to Server"),
-                                         tr("Copy %1 to this folder on %2 (relative paths start at %3):")
+            dest = uiprompt::text(self, tr("Copy to Server"),
+                                         tr("Copy %1 to this folder on %2 (relative paths start at %3)")
                                              .arg(itemsText(paths.size()), host,
                                                   dir.isEmpty() ? tr("the home folder") : dir),
-                                         QLineEdit::Normal, dir.isEmpty() ? QStringLiteral("~/") : dir + QLatin1Char('/'),
+                                         dir.isEmpty() ? QStringLiteral("~/") : dir + QLatin1Char('/'),
                                          &ok)
                        .trimmed();
             if (!ok || !guard)
@@ -4593,11 +4538,11 @@ void MainWindow::copyFromRex(RexSession *session, TerminalWidget *pane, const QS
         const QString host = rexaddress::displayName(guard->server());
         bool ok = !given.isEmpty();
         const QString remote = ok ? given :
-            QInputDialog::getText(self, tr("Copy from Server"),
+            uiprompt::text(self, tr("Copy from Server"),
                                   tr("A file or folder on %1 to copy here; * and ? match names, and relative "
-                                     "paths start at %2:")
+                                     "paths start at %2")
                                       .arg(host, dir.isEmpty() ? tr("the home folder") : dir),
-                                  QLineEdit::Normal, QString(), &ok)
+                                  QString(), &ok)
                 .trimmed();
         if (!ok || remote.isEmpty() || !guard)
             return;
