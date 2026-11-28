@@ -4638,11 +4638,11 @@ void MainWindow::copyToRex(RexSession *session, TerminalWidget *pane, const QStr
 }
 
 void MainWindow::copyFromRex(RexSession *session, TerminalWidget *pane, const QString &given,
-                             const QString &localDir)
+                             const QString &localDir, std::function<void(const QStringList &)> then)
 {
     QPointer<RexSession> guard(session);
     QPointer<MainWindow> self(this);
-    session->paneDirectory(pane, [self, guard, given, localDir](const QString &dir) {
+    session->paneDirectory(pane, [self, guard, given, localDir, then](const QString &dir) {
         if (!self || !guard)
             return;
         const QString host = rexaddress::displayName(guard->server());
@@ -4661,8 +4661,10 @@ void MainWindow::copyFromRex(RexSession *session, TerminalWidget *pane, const QS
         if (local.isEmpty() || !guard)
             return;
         RexFileCopy *copy = guard->newFileCopy();
-        watchRexCopy(self, copy, tr("Copying %1 from %2…").arg(remote, host), [copy, local]() {
+        watchRexCopy(self, copy, tr("Copying %1 from %2…").arg(remote, host), [copy, local, then]() {
             const QStringList placed = copy->placed();
+            if (then)
+                then(placed);
             if (placed.size() == 1)
                 return tr("Copied to %1").arg(QDir::toNativeSeparators(placed.first()));
             return tr("Copied %1 into %2").arg(itemsText(placed.size()), QDir::toNativeSeparators(local));

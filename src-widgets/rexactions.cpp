@@ -58,6 +58,8 @@
 #include <QApplication>
 #include <QClipboard>
 #include <QDateTime>
+#include <QDesktopServices>
+#include <QHostAddress>
 #include <QDialog>
 #include <QDir>
 #include <QSaveFile>
@@ -113,7 +115,8 @@ bool argumentAction(const QString &name)
         || name == QLatin1String("client.rdp.open") || name == QLatin1String("client.file.upload")
         || name == QLatin1String("client.file.download") || name == QLatin1String("client.colorscheme.set")
         || name == QLatin1String("client.profile.apply") || name == QLatin1String("client.screenshot.save")
-        || name == QLatin1String("client.workspace.switch") || name == QLatin1String("client.block.reveal");
+        || name == QLatin1String("client.workspace.switch") || name == QLatin1String("client.block.reveal")
+        || name == QLatin1String("client.url.open");
 }
 
 QJsonObject apiError(const QString &code, const QString &message)
@@ -249,6 +252,17 @@ QJsonObject MainWindow::rexKeymapRequest() const
                            {QStringLiteral("category"), QStringLiteral("Edit")},
                            {QStringLiteral("args"), argsSchema({{QStringLiteral("text"), QStringLiteral("string")}},
                                                                {QStringLiteral("text")})}};
+    // As Rex's (rex open): $BROWSER on the server, opening here.
+    actions << QJsonObject{{QStringLiteral("name"), QStringLiteral("client.url.open")},
+                           {QStringLiteral("kind"), QStringLiteral("client")},
+                           {QStringLiteral("title"), tr("Open a Link Here")},
+                           {QStringLiteral("description"),
+                            tr("Opens url (http, https or mailto) in this computer's browser or mail app. A file:// "
+                               "url is a file on the server: copied to Downloads, unless the server is this "
+                               "computer's, and opened in its app")},
+                           {QStringLiteral("category"), QStringLiteral("Tab")},
+                           {QStringLiteral("args"), argsSchema({{QStringLiteral("url"), QStringLiteral("string")}},
+                                                               {QStringLiteral("url")})}};
 #ifdef PUDDLEJUMPER_WEB
     actions << QJsonObject{{QStringLiteral("name"), QStringLiteral("client.web.open")},
                            {QStringLiteral("kind"), QStringLiteral("client")},
@@ -474,6 +488,83 @@ void MainWindow::wireRexActions(RexSession *session)
     });
 }
 
+// client.url.open: a link from a Rex server opened on this computer, as
+// Rex's rex open (its $BROWSER). Only links a browser or mail app takes: a
+// server can't start programs here through a scheme of theirs.
+bool MainWindow::openUrlHere(const QString &input, TerminalWidget *pane, QString *error, RexSession *from,
+                             const QString &where)
+{
+    const QUrl url(input, QUrl::StrictMode);
+    const QString scheme = url.scheme().toLower();
+    if (input.isEmpty() || !url.isValid() || scheme.isEmpty()) {
+        *error = tr("client.url.open needs a URL, such as https://example.com, not “%1”").arg(input.left(200));
+        return false;
+    }
+#ifdef PUDDLEJUMPER_REX
+    const bool here = !from || from->isLocal();   // the server is this computer
+#else
+    const bool here = true;
+#endif
+    if (scheme == QLatin1String("file")) {
+        const QString path = url.toLocalFile();
+        if (path.isEmpty() || !url.host().isEmpty()) {
+            *error = tr("client.url.open needs a file:// URL with a path, not “%1”").arg(input.left(200));
+            return false;
+        }
+        if (here) {
+            if (!QFileInfo(path).isFile()) {
+                *error = tr("%1 isn't a file").arg(path);
+                return false;
+            }
+            if (!QDesktopServices::openUrl(QUrl::fromLocalFile(path))) {
+                *error = tr("This computer has no app to open %1").arg(path);
+                return false;
+            }
+            statusBar()->showMessage(tr("Opened %1 for %2").arg(QDir::toNativeSeparators(path), where), 8000);
+            return true;
+        }
+#ifdef PUDDLEJUMPER_REX
+        // A file on the server: here first, into Downloads (as
+        // client.file.download), then opened.
+        QString local = QStandardPaths::writableLocation(QStandardPaths::DownloadLocation);
+        if (local.isEmpty() || !QDir().mkpath(local))
+            local = QDir::homePath();
+        QPointer<RexSession> session(from);
+        QPointer<TerminalWidget> target(pane);
+        QTimer::singleShot(0, this, [this, session, target, path, local]() {
+            if (session)
+                copyFromRex(session, target, path, local, [this](const QStringList &placed) {
+                    if (placed.size() == 1 && !QDesktopServices::openUrl(QUrl::fromLocalFile(placed.first())))
+                        statusBar()->showMessage(tr("Copied to %1, but this computer has no app to open it")
+                                                     .arg(QDir::toNativeSeparators(placed.first())),
+                                                 8000);
+                });
+        });
+        return true;
+#endif
+    }
+    if (scheme != QLatin1String("http") && scheme != QLatin1String("https") && scheme != QLatin1String("mailto")) {
+        *error = tr("client.url.open opens http, https, mailto and file links, not %1:").arg(scheme);
+        return false;
+    }
+    // localhost on the server isn't localhost here. Rex forwards a port for
+    // it; PuddleJumper can't, and opening it would reach this computer.
+    const QString host = url.host().toLower();
+    if (!here && scheme != QLatin1String("mailto")
+        && (host == QLatin1String("localhost") || host.endsWith(QLatin1String(".localhost"))
+            || QHostAddress(host).isLoopback())) {
+        *error = tr("%1 is on the server's own localhost, which PuddleJumper can't reach from here")
+                     .arg(url.toDisplayString().left(200));
+        return false;
+    }
+    if (!QDesktopServices::openUrl(url)) {
+        *error = tr("This computer has no app to open %1").arg(url.toDisplayString().left(200));
+        return false;
+    }
+    statusBar()->showMessage(tr("Opened %1 for %2").arg(url.toDisplayString().left(200), where), 8000);
+    return true;
+}
+
 bool MainWindow::performClientAction(const QString &name, const QJsonObject &args, TerminalWidget *pane,
                                      QString *error, RexSession *from)
 {
@@ -536,6 +627,8 @@ bool MainWindow::performClientAction(const QString &name, const QJsonObject &arg
                                  8000);
         return true;
     }
+    if (name == QLatin1String("client.url.open"))
+        return openUrlHere(args.value(QLatin1String("url")).toString().trimmed(), pane, error, from, source());
     if (name == QLatin1String("client.web.open")) {
 #ifdef PUDDLEJUMPER_WEB
         const QString input = args.value(QLatin1String("url")).toString();

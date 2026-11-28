@@ -253,6 +253,8 @@ private:
      * or it can't run now. */
     // One of the app's actions, as a Rex keymap or client.perform asks
     // (from: the session asking, if known).
+    bool openUrlHere(const QString &url, TerminalWidget *pane, QString *error, RexSession *from,
+                     const QString &where);
     bool performClientAction(const QString &name, const QJsonObject &args, TerminalWidget *pane, QString *error,
                              RexSession *from = nullptr);
     void showRexPrompt(RexSession *session, const QString &callId, const QJsonObject &prompt);
@@ -264,7 +266,8 @@ private:
     /* A path (or pattern) on the server, asked for unless `remote` is given,
      * into a local folder (asked for unless `localDir` is given). */
     void copyFromRex(RexSession *session, TerminalWidget *pane, const QString &remote = QString(),
-                     const QString &localDir = QString());
+                     const QString &localDir = QString(),
+                     std::function<void(const QStringList &placed)> then = {});
 #endif
     /* Every action by name; a Rex pane's server actions too. */
     void showCommandPalette();
