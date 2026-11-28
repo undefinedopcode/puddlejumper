@@ -74,6 +74,7 @@ public:
 protected:
     void closeEvent(QCloseEvent *event) override;
     bool eventFilter(QObject *watched, QEvent *event) override;
+    void changeEvent(QEvent *event) override;
 
 private slots:
     /* Open a tab using the default profile. */
@@ -383,6 +384,8 @@ private:
     QTimer *m_screenshotNoticeTimer = nullptr;
     QPixmap m_lastScreenshot;
     QTimer *m_previewTimer = nullptr;
+    QTimer *m_systemColours = nullptr;   // the desktop's colours changed (the System scheme)
+    QString m_systemSchemeFile;          // the System scheme last put on the panes
     QMenu *m_newTabWithProfileMenu = nullptr;
     QMenu *m_tmuxMenu = nullptr;
     Notifier *m_notifier = nullptr;

@@ -425,6 +425,14 @@ target_include_directories(test-clipboard PRIVATE src-widgets)
 qt_add_executable(test-appbackground src-widgets/dev/test_appbackground.cpp)
 target_link_libraries(test-appbackground PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets qtermwidget)
 
+# test-systemscheme — the System colour scheme, made from the desktop's
+# palette, readable on light and dark. Dev tool only.
+# Run: ./build/test-systemscheme
+qt_add_executable(test-systemscheme src-widgets/dev/test_systemscheme.cpp
+    src-widgets/colorscheme.cpp src-widgets/colorscheme.h)
+target_link_libraries(test-systemscheme PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets qtermwidget)
+target_include_directories(test-systemscheme PRIVATE src-widgets)
+
 # test-graphics — kitty's graphics protocol (TerminalGraphics): chunks as the
 # spec and as kitten icat send them, files and shared memory. Dev tool only.
 # Run: ./build/test-graphics

@@ -7,6 +7,7 @@
 #pragma once
 
 #include <QColor>
+#include <QPalette>
 #include <QString>
 #include <QVector>
 
@@ -129,4 +130,23 @@ struct ColorSchemeFile
      * /usr/share/qtermwidget6/color-schemes. Empty if not found.
      */
     static QString systemSchemeDir();
+
+    /*
+     * "System": not a file but a scheme made from the desktop's palette (its
+     * base, text and accent colours), made again when the desktop's colours
+     * change. Its eight colours and their bright variants keep their hues
+     * but are made light or dark enough to read on its background: at least
+     * 4.5:1 for the colours, 3:1 for the bright ones and the grey (bright
+     * black on a dark background, white on a light one).
+     */
+    static QString systemName();
+    static ColorSchemeFile systemScheme(const QPalette &palette);
+    /* The System scheme for the application's palette now, as a file a
+     * terminal can load (named by its colours, so a change is a new name:
+     * qtermwidget never reloads one it has seen). findSchemeFile("System")
+     * returns this. */
+    static QString systemSchemeFile();
+
+    /* WCAG's contrast ratio of two colours, 1 to 21. */
+    static double contrast(const QColor &a, const QColor &b);
 };

@@ -354,6 +354,18 @@ Both live on top of QTermWidget's `setMonitorActivity()` / `setMonitorSilence()`
 where you're typing, "no output for N seconds" is the normal case rather than
 a signal.
 
+## The System colour scheme
+
+**System**, first in every colour scheme list, isn't a file: it's made from
+the desktop's palette (its base, text and accent colours) and made again when
+the desktop's colours change, light to dark or a new accent. The eight ANSI
+colours keep their hues (the nearest one leans a little towards the accent)
+but are made light or dark enough to read on the background: at least 4.5:1
+for the colours, 3:1 for their bright variants and for the grey of comments,
+and 7:1 for the text. Black on a dark desktop (white on a light one) stays a
+shade off the background, as TUIs use it for bars. **Edit…** on it makes a copy
+you can change.
+
 ## Colour scheme editor
 
 **Settings → Appearance → Colour scheme → Edit…** opens an editor with a live

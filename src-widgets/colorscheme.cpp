@@ -12,8 +12,11 @@
 #include <QDateTime>
 #include <QStandardPaths>
 #include <QTextStream>
+#include <QCryptographicHash>
+#include <QGuiApplication>
 
 #include <algorithm>
+#include <cmath>
 
 #include <qtermwidget.h>
 
@@ -277,7 +280,8 @@ QStringList ColorSchemeFile::allSchemeNames()
      */
     names.erase(std::remove_if(names.begin(), names.end(),
                                [](const QString &n) {
-                                   return n.startsWith(QLatin1String("_live_"));
+                                   return n.startsWith(QLatin1String("_live_"))
+                                          || n.startsWith(QLatin1String("_system_"));
                                }),
                 names.end());
 
@@ -293,6 +297,8 @@ QStringList ColorSchemeFile::allSchemeNames()
             names << extra;
     }
     names.sort(Qt::CaseInsensitive);
+    names.removeAll(systemName());
+    names.prepend(systemName());   // first: the one that follows the desktop
     return names;
 }
 
@@ -307,6 +313,8 @@ QString ColorSchemeFile::findSchemeFile(const QString &name)
 {
     if (name.isEmpty())
         return QString();
+    if (name == systemName())
+        return systemSchemeFile();
 
     const QString fileName = name + QStringLiteral(".colorscheme");
 
@@ -347,4 +355,182 @@ bool ColorSchemeFile::isUserScheme(const QString &name)
     }
     return QFile::exists(dir + QLatin1Char('/') + name
                          + QStringLiteral(".colorscheme"));
+}
+
+// ---- System ------------------------------------------------------------------
+
+namespace {
+
+// OKLab (Björn Ottosson's), for hues and lightness as they look.
+struct Lab { double L, a, b; };
+
+double toLinear(double c) { return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4); }
+double fromLinear(double c) { return c <= 0.0031308 ? 12.92 * c : 1.055 * std::pow(c, 1 / 2.4) - 0.055; }
+
+Lab toLab(const QColor &c)
+{
+    const double r = toLinear(c.redF()), g = toLinear(c.greenF()), b = toLinear(c.blueF());
+    const double l = std::cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    const double m = std::cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    const double s = std::cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    return {0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
+            1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s,
+            0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s};
+}
+
+// Linear sRGB, which may be out of gamut.
+void labToLinear(const Lab &c, double rgb[3])
+{
+    const double l = std::pow(c.L + 0.3963377774 * c.a + 0.2158037573 * c.b, 3);
+    const double m = std::pow(c.L - 0.1055613458 * c.a - 0.0638541728 * c.b, 3);
+    const double s = std::pow(c.L - 0.0894841775 * c.a - 1.2914855480 * c.b, 3);
+    rgb[0] = 4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s;
+    rgb[1] = -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s;
+    rgb[2] = -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s;
+}
+
+// Lightness, chroma and hue (degrees) as a colour, the chroma reduced until
+// it's one sRGB can show.
+QColor lch(double L, double C, double h)
+{
+    L = std::clamp(L, 0.0, 1.0);
+    const double rad = h * M_PI / 180;
+    double rgb[3];
+    for (int i = 0; i < 40; ++i, C *= 0.92) {
+        labToLinear({L, C * std::cos(rad), C * std::sin(rad)}, rgb);
+        if (std::all_of(rgb, rgb + 3, [](double v) { return v >= -1e-4 && v <= 1 + 1e-4; }))
+            break;
+    }
+    return QColor::fromRgbF(float(std::clamp(fromLinear(std::clamp(rgb[0], 0.0, 1.0)), 0.0, 1.0)),
+                            float(std::clamp(fromLinear(std::clamp(rgb[1], 0.0, 1.0)), 0.0, 1.0)),
+                            float(std::clamp(fromLinear(std::clamp(rgb[2], 0.0, 1.0)), 0.0, 1.0)));
+}
+
+double luminance(const QColor &c)
+{
+    return 0.2126 * toLinear(c.redF()) + 0.7152 * toLinear(c.greenF()) + 0.0722 * toLinear(c.blueF());
+}
+
+double hueOf(const Lab &c) { return std::fmod(std::atan2(c.b, c.a) * 180 / M_PI + 360, 360); }
+double chromaOf(const Lab &c) { return std::hypot(c.a, c.b); }
+double hueDistance(double a, double b) { const double d = std::fabs(a - b); return std::min(d, 360 - d); }
+
+// Starting at lightness L, moved away from the background until it reads at
+// `ratio` (or as far as lightness goes).
+QColor readable(double L, double C, double h, const QColor &bg, bool dark, double ratio)
+{
+    QColor c = lch(L, C, h);
+    for (int i = 0; i < 100 && ColorSchemeFile::contrast(c, bg) < ratio; ++i) {
+        L += dark ? 0.01 : -0.01;
+        if (L < 0 || L > 1)
+            break;
+        c = lch(L, C, h);
+    }
+    return c;
+}
+
+} // namespace
+
+double ColorSchemeFile::contrast(const QColor &a, const QColor &b)
+{
+    const double la = luminance(a), lb = luminance(b);
+    return (std::max(la, lb) + 0.05) / (std::min(la, lb) + 0.05);
+}
+
+QString ColorSchemeFile::systemName()
+{
+    return QStringLiteral("System");
+}
+
+ColorSchemeFile ColorSchemeFile::systemScheme(const QPalette &palette)
+{
+    const QColor bg = palette.color(QPalette::Active, QPalette::Base);
+    QColor fg = palette.color(QPalette::Active, QPalette::Text);
+#if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
+    const QColor accent = palette.color(QPalette::Active, QPalette::Accent);
+#else
+    const QColor accent = palette.color(QPalette::Active, QPalette::Highlight);
+#endif
+    const Lab back = toLab(bg), front = toLab(fg), acc = toLab(accent);
+    const bool dark = back.L < front.L;
+    // The text as the desktop has it, unless it's hard to read.
+    if (contrast(fg, bg) < 7.0)
+        fg = readable(front.L, chromaOf(front), hueOf(front), bg, dark, 7.0);
+
+    ColorSchemeFile s;
+    s.name = systemName();
+    s.description = QObject::tr("System (follows the desktop's colours)");
+    s.colors[Background] = bg;
+    s.colors[BackgroundIntense] = bg;
+    s.colors[Foreground] = fg;
+    s.colors[ForegroundIntense] = readable(toLab(fg).L + (dark ? 0.06 : -0.06), chromaOf(front), hueOf(front),
+                                           bg, dark, contrast(fg, bg));
+
+    // The six colours by their hue (OKLCH degrees). The nearest one leans
+    // towards the accent's hue (a little, so the six stay apart).
+    struct Hue { int normal, bright; double h; };
+    Hue hues[] = {
+        {Color1, Color1Intense, 29},   // red
+        {Color2, Color2Intense, 142},  // green
+        {Color3, Color3Intense, 95},   // yellow
+        {Color4, Color4Intense, 260},  // blue
+        {Color5, Color5Intense, 328},  // magenta
+        {Color6, Color6Intense, 195},  // cyan
+    };
+    if (chromaOf(acc) > 0.06) {
+        Hue *nearest = std::min_element(std::begin(hues), std::end(hues), [&](const Hue &x, const Hue &y) {
+            return hueDistance(x.h, hueOf(acc)) < hueDistance(y.h, hueOf(acc));
+        });
+        double lean = std::fmod(hueOf(acc) - nearest->h + 540, 360) - 180;   // -180..180
+        if (std::fabs(lean) < 30)
+            nearest->h += std::clamp(lean, -15.0, 15.0);
+    }
+    for (const Hue &hue : hues) {
+        s.colors[hue.normal] = readable(dark ? 0.72 : 0.52, 0.14, hue.h, bg, dark, 4.5);
+        s.colors[hue.bright] = readable(dark ? 0.82 : 0.60, 0.16, hue.h, bg, dark, 3.0);
+    }
+
+    // Black and white, a little of the background's hue in them. On a dark
+    // background black is a shade above it (TUIs fill bars with it) and
+    // bright black the grey of comments; white is the text. On a light one,
+    // the other way round.
+    const double tint = std::min(0.02, chromaOf(back)), th = hueOf(back);
+    if (dark) {
+        s.colors[Color0] = readable(back.L + 0.10, tint, th, bg, true, 1.4);
+        s.colors[Color0Intense] = readable(back.L + 0.30, tint, th, bg, true, 3.0);
+        s.colors[Color7] = readable(0.82, tint, th, bg, true, 7.0);
+        s.colors[Color7Intense] = readable(0.95, tint, th, bg, true, 7.0);
+    } else {
+        s.colors[Color0] = readable(0.25, tint, th, bg, false, 7.0);
+        s.colors[Color0Intense] = readable(back.L - 0.35, tint, th, bg, false, 3.0);
+        s.colors[Color7] = readable(back.L - 0.22, tint, th, bg, false, 3.0);
+        s.colors[Color7Intense] = readable(back.L - 0.10, tint, th, bg, false, 1.4);
+    }
+    return s;
+}
+
+QString ColorSchemeFile::systemSchemeFile()
+{
+    const ColorSchemeFile s = systemScheme(QGuiApplication::palette());
+    QByteArray key;
+    for (const QColor &c : s.colors)
+        key += c.name().toLatin1();
+    const QString base = QStringLiteral("_system_") + QString::fromLatin1(
+        QCryptographicHash::hash(key, QCryptographicHash::Sha1).toHex().left(12));
+    const QString dir = QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                        + QStringLiteral("/color-schemes");
+    if (!QDir().mkpath(dir))
+        return QString();
+    const QString path = dir + QLatin1Char('/') + base + QStringLiteral(".colorscheme");
+    if (!QFile::exists(path)) {
+        // Only the one for the colours now: earlier ones are loaded already
+        // (or never will be again).
+        for (const QFileInfo &old : QDir(dir).entryInfoList({QStringLiteral("_system_*.colorscheme")}, QDir::Files))
+            QFile::remove(old.absoluteFilePath());
+        ColorSchemeFile named = s;
+        named.name = base;
+        if (!named.save(path))
+            return QString();
+    }
+    return path;
 }

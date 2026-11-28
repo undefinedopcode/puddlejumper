@@ -5,6 +5,7 @@
  */
 
 #include "mainwindow.h"
+#include "colorscheme.h"
 
 #include "aboutdialog.h"
 #include "appicon.h"
@@ -75,6 +76,8 @@
 #include <QSplitter>
 #include <QSettings>
 #include <QSplitterHandle>
+#include <QStyleHints>
+#include <QTimer>
 #include <QStandardPaths>
 #include <QStatusBar>
 #include <QTabBar>
@@ -322,6 +325,24 @@ MainWindow::MainWindow(QWidget *parent)
 
     connect(&m_settings, &Settings::appearanceChanged,
             this, &MainWindow::applyAppearanceToAll);
+    // The System scheme is made from the desktop's colours: made again, and
+    // put on the panes that use it, when they change (a burst of palette
+    // events as the desktop restyles, so once it settles).
+    m_systemColours = new QTimer(this);
+    m_systemColours->setSingleShot(true);
+    m_systemColours->setInterval(200);
+    connect(m_systemColours, &QTimer::timeout, this, [this]() {
+        // Only when the scheme they make is a new one: the panes' own
+        // restyling mustn't start this again.
+        const QString file = ColorSchemeFile::systemSchemeFile();
+        if (file == m_systemSchemeFile)
+            return;
+        m_systemSchemeFile = file;
+        applyAppearanceToAll();
+    });
+    m_systemSchemeFile = ColorSchemeFile::systemSchemeFile();
+    connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged,
+            m_systemColours, qOverload<>(&QTimer::start));
     connect(&m_settings, &Settings::scrollingChanged, this, [this]() {
         for (TerminalWidget *t : allPanes())
             t->applyScrolling();
@@ -482,6 +503,17 @@ void MainWindow::setSidebarWidth(int width)
     const int total = qMax(m_splitter->width(), width + 200);
     m_splitter->setSizes({width, total - width});
     m_settings.setSidebarWidth(width);
+}
+
+void MainWindow::changeEvent(QEvent *event)
+{
+    // The window has the application's palette, so a new one (the desktop's
+    // colours changed) arrives as its own PaletteChange; ApplicationPalette-
+    // Change goes only to the application object.
+    if ((event->type() == QEvent::PaletteChange || event->type() == QEvent::ApplicationPaletteChange)
+        && m_systemColours)
+        m_systemColours->start();
+    QMainWindow::changeEvent(event);
 }
 
 bool MainWindow::eventFilter(QObject *watched, QEvent *event)
