@@ -620,6 +620,10 @@ Verdict Rules::check(const QStringList &argv, const QString &cwd, const Process 
         v.reason = Wrapped;
         return v;
     }
+    // The command is built, as Rex builds it since API revision 25: the
+    // part of the report the rule names, then the flags the rule keeps from
+    // the process's own command line. What the report has after that part
+    // doesn't count (a hook may report another copy's flags).
     QStringList command = argv.mid(0, n);
     if (r->hasFlags) {
         bool other = false;
@@ -627,11 +631,6 @@ Verdict Rules::check(const QStringList &argv, const QString &cwd, const Process 
         const QStringList kept = readFlags(*r, *args, &other, &reason);
         if (!reason.isEmpty()) {
             v.reason = reason;
-            return v;
-        }
-        readFlags(*r, argv.mid(n), &other, &reason);
-        if (!reason.isEmpty() || other) {
-            v.reason = FlagsDiffer;
             return v;
         }
         command << kept;

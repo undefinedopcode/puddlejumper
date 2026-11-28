@@ -175,8 +175,18 @@ void testRules()
     sandbox.procs.insert(15, {{"sandbox-exec"}, 10});
     sandbox.procs.insert(20, {{"claude"}, 15});
     CHECK(reason(report, sandbox.process(20, 10)) == Wrapped);
-    CHECK(reason({"claude", "--resume", kSid, "do this"}, tree({"claude"}).process(20, 10)) == FlagsDiffer);
-    CHECK(reason({"claude", "--resume", kSid, "--evil"}, tree({"claude"}).process(20, 10)) == FlagsDiffer);
+    // What the report has after the command part doesn't count (Rex, API
+    // revision 25): the command is built from the process's flags.
+    for (const QStringList &extra : {QStringList{"do this"}, QStringList{"--evil"},
+                                     QStringList{"--dangerously-skip-permissions", "--model", "opus"}}) {
+        v = rs.check(QStringList{"claude", "--resume", kSid} + extra, "/x", tree({"claude", "--model", "sonnet"}).process(20, 10));
+        CHECK(v.trusted && v.command == QStringList({"claude", "--resume", kSid, "--model", "sonnet"}));
+    }
+    // Rex's example: a rule that drops a flag the hook reports.
+    v = Rules::build({{"resume.trust.claude.flags.--dangerously-skip-permissions", "drop", "f:#1"}}, "/h")
+            .check({"claude", "--resume", kSid, "--dangerously-skip-permissions", "--model", "opus"}, "/x",
+                   tree({"claude", "--dangerously-skip-permissions", "--model", "opus"}).process(20, 10));
+    CHECK(v.trusted && v.command == QStringList({"claude", "--resume", kSid, "--model", "opus"}));
     CHECK(reason(report, Fake().process(20, 10)) == LaunchUnreadable);
     Fake nested;
     nested.procs.insert(10, {{"zsh"}, 1});
