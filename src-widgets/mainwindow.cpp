@@ -2412,8 +2412,9 @@ void MainWindow::applyAppearanceToAll()
 {
     for (TerminalWidget *t : allPanes())
         t->applyAppearance();
+    // Pane cards on or off frame a lone pane or not; the gap with them.
     for (TerminalTab *tab : allTabs())
-        tab->applyPaneGap();
+        tab->updateFrames();
     updateTabLayout();
     // Pane cards change what's behind the panes, and the sidebar's handle.
     if (m_splitter && m_splitter->count() > 1)

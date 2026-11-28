@@ -115,6 +115,10 @@ public:
     QString floatingLayerOf(const TerminalWidget *pane) const;
     /* The layout area within the tab (floating frames are kept inside it). */
     QRect layoutRect() const;
+    /* Frame the panes as they are now (a split, a card, or none) and set
+     * the gap round them; again when pane cards are turned on or off. */
+    void updateFrames();
+    bool framesPanes() const;
 
     /* The size a layout has to fit in. */
     QSize layoutArea() const;
@@ -226,7 +230,6 @@ private:
     TerminalWidget *colourPane() const;
     TerminalWidget *firstPaneIn(QWidget *node) const;
     TerminalWidget *paneContaining(QWidget *widget) const;
-    void updateFrames();
     void paintPreview(QPainter &painter, QWidget *node, const QRect &box,
                       qreal devicePixelRatio) const;
     void watchPane(TerminalWidget *pane);

@@ -575,12 +575,18 @@ void TerminalTab::splitPane(TerminalWidget *at, Qt::Orientation orientation,
         parentSplitter->setSizes(sizes);
     } else {
         // A new splitter in `at`'s place, holding `at` and the new pane.
+        // It starts at `at`'s size, halved in pixels: sizes given while it
+        // had no size of its own were stretched when it got one, and in a
+        // split inside another split `at` kept most of the room.
+        const QRect place = at->geometry();
         QSplitter *splitter = makeSplitter(orientation);
         replaceInTree(at, splitter);
+        splitter->setGeometry(place);
         splitter->addWidget(at);
         splitter->addWidget(pane);
         at->show();
-        splitter->setSizes({1, 1});   // proportions: equal halves
+        const int total = (orientation == Qt::Horizontal ? place.width() : place.height()) - splitter->handleWidth();
+        splitter->setSizes(total > 0 ? QList<int>{total / 2, total - total / 2} : QList<int>{1, 1});
     }
     pane->show();
     watchPane(pane);
@@ -755,7 +761,7 @@ void TerminalTab::updateFrames()
     const QList<TerminalWidget *> all = panes();
     for (TerminalWidget *pane : all) {
         pane->setFloating(!floatingLayerOf(pane).isEmpty());
-        if (all.size() == 1 && !m_alwaysFramed)
+        if (!framesPanes())
             pane->setPaneFrame(TerminalWidget::PaneFrame::None);
         else if (all.size() > 1 && pane == m_active)
             pane->setPaneFrame(TerminalWidget::PaneFrame::Active);
@@ -783,12 +789,19 @@ void TerminalTab::updateFrames()
     }
 }
 
+bool TerminalTab::framesPanes() const
+{
+    // A split, a server's tab, or any pane at all when panes are cards: a
+    // lone local pane is a card too, with the card's buttons.
+    return m_alwaysFramed || panes().size() > 1 || TerminalWidget::paneCards();
+}
+
 void TerminalTab::applyPaneGap()
 {
     // Framed panes (a split, or a tmux or Rex tab) have the gap between
     // them round the outside too, so the edge matches the gaps.
     const int gap = TerminalWidget::paneGap();
-    const bool framed = m_alwaysFramed || panes().size() > 1;
+    const bool framed = framesPanes();
     const QMargins margins = framed ? QMargins(gap, gap, gap, gap) : QMargins();
     // A local split's handles; a server's layout sets its own (sizeLayout()).
     if (!m_alwaysFramed) {

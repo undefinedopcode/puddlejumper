@@ -612,6 +612,44 @@ if(TARGET Qt6::WebSockets)
     )
     target_include_directories(test-tmuxsession PRIVATE src-widgets)
 
+    # test-localpanes — a local tab's panes: a lone pane as a card, and
+    # splits that halve the pane split. Run: ./build/test-localpanes
+    qt_add_executable(test-localpanes
+        src-widgets/dev/test_localpanes.cpp
+        src-widgets/tmuxsession.cpp src-widgets/tmuxsession.h
+        src-widgets/tmuxcontrol.cpp src-widgets/tmuxcontrol.h
+        src-widgets/disclaim.cpp src-widgets/disclaim.h
+        src-widgets/rexsession.cpp src-widgets/rexsession.h
+        src-widgets/rexoffline.cpp src-widgets/rexoffline.h
+        src-widgets/rexkeymap.cpp src-widgets/rexkeymap.h
+        src-widgets/rexclient.cpp src-widgets/rexclient.h
+        src-widgets/rexfilecopy.cpp src-widgets/rexfilecopy.h
+        src-widgets/rexsocket.cpp src-widgets/rexsocket.h
+        src-widgets/rexterminalstream.cpp src-widgets/rexterminalstream.h
+        src-widgets/ghosttysnapshot.cpp src-widgets/ghosttysnapshot.h
+        src-widgets/ghosttyreplay.cpp src-widgets/ghosttyreplay.h
+        src-widgets/terminalwidget.cpp src-widgets/terminalwidget.h
+        src-widgets/terminaltab.cpp src-widgets/terminaltab.h
+        src-widgets/appicon.cpp src-widgets/appicon.h
+        src-widgets/tab.h
+        src-widgets/settings.cpp src-widgets/settings.h
+        src-widgets/profiles.cpp src-widgets/profiles.h
+        src-widgets/colorscheme.cpp src-widgets/colorscheme.h
+        src-widgets/formername.cpp src-widgets/formername.h
+        src-widgets/procinfo.cpp src-widgets/procinfo.h
+        src-widgets/programstatus.cpp src-widgets/programstatus.h
+        src-widgets/programresume.cpp src-widgets/programresume.h
+        src-widgets/resumerules.cpp src-widgets/resumerules.h
+        src-widgets/screenshotoverlay.cpp src-widgets/screenshotoverlay.h
+    )
+    target_link_libraries(test-localpanes PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Svg Qt6::WebSockets qtermwidget)
+    qt_add_resources(test-localpanes "lucide_icons"
+        PREFIX "/lucide"
+        BASE icons/lucide
+        FILES ${LUCIDE_ICONS}
+    )
+    target_include_directories(test-localpanes PRIVATE src-widgets)
+
     # test-rexreconnect — a Rex tab whose server stops and starts again (it
     # runs an atlantis of its own on 127.0.0.1:51499). Run:
     # ./build/test-rexreconnect /path/to/atlantis
