@@ -717,6 +717,43 @@ int main(int argc, char *argv[])
             check(waitFor([&] { return !first->overlay(); }), QStringLiteral("OSC 6522: the cells again when the app ends"));
             check(waitFor([&] { return shows(first, QStringLiteral("VIA_DONE_0")); }),
                   QStringLiteral("OSC 6522: the app exits 0"));
+
+            // Another process takes the foreground without a bye: the app
+            // is stopped (SIGSTOP: a puddle TUI keeps the terminal raw, so
+            // a typed ^Z wouldn't), the shell takes the terminal back, and
+            // terminal.process_changed drops the view. Needs the server on
+            // this machine, as puddle-server does.
+            type(first, parts.value(0) + QStringLiteral(" --solo python3 ") + parts.value(1) + QLatin1Char('\r'));
+            view = nullptr;
+            if (check(waitFor([&] {
+                          view = qobject_cast<ViaView *>(first->overlay());
+                          return view && button(QStringLiteral("Wave"));
+                      }),
+                      QStringLiteral("OSC 6522: the native view again"))) {
+                // Used for a moment first: Rex looks at the foreground
+                // only after output or input, so a program stopped within
+                // ~100 ms of its hello may never be seen as it.
+                button(QStringLiteral("Wave"))->click();
+                check(waitFor([&] { return button(QStringLiteral("Wave (1)")); }),
+                      QStringLiteral("OSC 6522: a click, the second time"));
+                waitFor([] { return false; }, 300); // the server's look, events running
+                const QJsonObject proc = server.blockCall(sid, c.session->blockId(first),
+                                                          QStringLiteral("com.superlogical.terminal.process"));
+                const int app = proc.value(QLatin1String("foreground")).toObject().value(QLatin1String("pid")).toInt();
+                const int shell = proc.value(QLatin1String("child")).toObject().value(QLatin1String("pid")).toInt();
+                if (check(app > 0 && app != shell && ::kill(-app, SIGSTOP) == 0,
+                          QStringLiteral("OSC 6522: the app stopped (foreground %1, shell %2)").arg(app).arg(shell))) {
+                    check(waitFor([&] { return !first->overlay(); }),
+                          QStringLiteral("OSC 6522: the cells again when the shell takes the foreground"));
+                    // Killed while stopped, it can't put the terminal back:
+                    // the main screen and sane modes again, then the shell.
+                    ::kill(-app, SIGKILL);
+                    type(first, QStringLiteral("stty sane; printf '\\033[?1049l\\033[?1000l\\033[?1006l'; echo VIA_STOPPED_DONE\r"));
+                    if (!check(waitFor([&] { return shows(first, QStringLiteral("VIA_STOPPED_DONE")); }),
+                               QStringLiteral("OSC 6522: the shell after the stopped app")))
+                        QTextStream(stderr) << "  the pane shows:\n    " << paneLines(first).join(QStringLiteral("\n    ")) << "\n";
+                }
+            }
         }
     }
 

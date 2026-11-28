@@ -1025,7 +1025,8 @@ void RexSession::onEvent(const QJsonObject &message)
         takeClipboardWrite(str(payload, "block_id"), payload.value(QLatin1String("payload")).toObject());
     } else if (type == QLatin1String("block_event")
                && str(payload, "name") == QLatin1String("process_changed")) {
-        // Rex's; atlantis doesn't send it, and the hello's check covers that.
+        // Rex sends it, and atlantis since its process_changed; an older
+        // atlantis doesn't, and only the hello's check applies there.
         auto it = m_blocks.find(str(payload, "block_id"));
         if (it != m_blocks.end() && it->second->via) {
             const QJsonObject fg = payload.value(QLatin1String("payload")).toObject()
